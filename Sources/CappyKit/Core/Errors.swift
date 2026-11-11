@@ -1,6 +1,6 @@
 import Foundation
 
-/// 仕様書の終了コード表に対応するエラー分類
+/// 終了コード（README の「終了コード」の表）に対応するエラー分類
 public enum ExitStatus: Int32, Sendable {
     case ok = 0
     case usage = 1          // 引数・設定の誤り
