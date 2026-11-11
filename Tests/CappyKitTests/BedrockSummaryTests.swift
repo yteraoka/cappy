@@ -21,7 +21,7 @@ import Testing
         #expect(!BedrockClaudeClient.isAWSRegion("global"))
         #expect(SummaryModelFamily.of("jp.anthropic.claude-opus-5-5") == .claude)
         #expect(SummaryModelFamily.of("anthropic.claude-haiku-5-5") == .claude)
-        #expect(SummaryModelFamily.of("amazon.nova-pro") == nil)
+        #expect(SummaryModelFamily.of("amazon.nova-pro") == .bedrockChat)
     }
 
     @Test func streamsThroughRuntimeMessagesAPI() async throws {

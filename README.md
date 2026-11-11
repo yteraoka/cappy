@@ -223,7 +223,7 @@ region = "ap-northeast-1"     # 呼び出すリージョン（省略時は AWS_R
 [profiles.default.summary]
 provider = "bedrock"
 region = "jp"                 # 推論プロファイルの範囲: global / jp / us / eu / au / apac、またはリージョン名
-model = "claude-opus-5-5"     # 省略時は claude-opus-5-5（Bedrock では Claude だけ）
+model = "claude-opus-5-5"     # 省略時は claude-opus-5-5。Kimi K3.1 なら "global.moonshotai.kimi-k3.1"
 ```
 
 - 認証は上の「AWS の認証」と同じです（`AWS_PROFILE`・SSO・アクセスキーなど）。
@@ -233,9 +233,14 @@ model = "claude-opus-5-5"     # 省略時は claude-opus-5-5（Bedrock では Cl
   - `global`（既定）: 処理する地域を限定しません。
   - リージョン名（例: `eu-west-2`）: そのリージョンだけで処理します（モデル ID に範囲を付けず、そのリージョンを呼びます）。使えるリージョンはモデルごとに異なります（Claude Opus 5.5 は現在 London のみ）。
 - 初回は Amazon Bedrock コンソールの「モデルアクセス」で Claude を有効にしてください（Anthropic のモデルは利用目的の申請が必要です）。
+- Claude 以外に、Bedrock の OpenAI 互換 Chat Completions（`https://bedrock-runtime.<region>.amazonaws.com/openai/v1/chat/completions`）で呼べるモデルも使えます。`summary.model`（または `--model`）に `moonshotai.kimi-k3.1`（Kimi K3.1）や `zai.glm-5.3`（GLM-5.3）のような Bedrock のモデル ID を書きます。
+  - `summary.region` の範囲を前に付けます（`global` なら `global.moonshotai.kimi-k3.1`）。範囲付きの ID（`global.zai.glm-5.3`）を書けば、その ID をそのまま使います。Kimi K3.1 と GLM-5.3 は東京では `global` だけなので、Claude を `jp` で使いつつこれらを再試行先にする場合などは、範囲付きの ID で指定してください。
+  - `effort` は `reasoning_effort` としてそのまま送ります（Kimi K3.1 は none〜max、GLM-5.3 は low〜max）。思考の内容（`reasoning_content`）は要約に含めません。
+  - `finish_reason` が `length` なら出力上限、`content_filter` か `refusal` があれば拒否として扱います。Claude 以外のモデルでは、既定では拒否時に再試行しません（`fallback_model` で指定できます）。
+  - GLM-5.3 は利用できる顧客が限られています（AWS のアカウントチームへの問い合わせが必要です）。
 - IAM では、推論プロファイルと、振り分け先の各リージョンの基盤モデルに対する `bedrock:InvokeModel` / `bedrock:InvokeModelWithResponseStream` が必要です。
 - 拒否されたときの再試行（`summary.fallback_model`、既定は `claude-opus-4-8`）は Vertex AI と同じく cappy 側で行います（Bedrock ではサーバー側の自動フォールバックが使えません）。
-- `cappy doctor` は、課金されないリクエスト（`max_tokens = 0` の不正なリクエスト。モデルの利用権限は本文の検証より先に確かめられる）で、要約のモデルと再試行先のモデルを使えるか確認します。新しい Claude は bedrock-runtime のトークン数の確認に対応していないためです。
+- `cappy doctor` は、課金されないリクエスト（`max_tokens = 0` の不正なリクエスト。モデルの利用権限は本文の検証より先に確かめられる）で、要約のモデルと再試行先のモデルを使えるか確認します。新しい Claude は bedrock-runtime のトークン数の確認に対応しておらず、Chat Completions にはトークン数の確認がないためです。
 - 課金は AWS から請求されます。使ったトークン数は `session.json` の `summary.input_tokens` / `output_tokens` で確認できます。
 
 ### AWS の認証

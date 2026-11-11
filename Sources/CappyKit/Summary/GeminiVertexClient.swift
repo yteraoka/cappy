@@ -201,7 +201,8 @@ public enum VertexAI {
 
 /// モデル名から呼び出し先（Claude / Gemini）を決める
 public enum SummaryModelFamily: String, Sendable {
-    case claude, gemini
+    /// bedrockChat: Bedrock の Chat Completions で呼ぶ Anthropic 以外のモデル（moonshotai.kimi-k3.1 など）
+    case claude, gemini, bedrockChat
 
     public static func of(_ model: String) -> SummaryModelFamily? {
         var m = model.lowercased()
@@ -211,6 +212,7 @@ public enum SummaryModelFamily: String, Sendable {
         }
         if m.hasPrefix("claude-") { return .claude }
         if m.hasPrefix("gemini-") { return .gemini }
+        if BedrockModels.isChatModel(model) { return .bedrockChat }
         return nil
     }
 
@@ -218,7 +220,7 @@ public enum SummaryModelFamily: String, Sendable {
     public var defaultFallback: String? {
         switch self {
         case .claude: return "claude-opus-4-8"
-        case .gemini: return nil
+        case .gemini, .bedrockChat: return nil
         }
     }
 }
@@ -243,7 +245,7 @@ public struct VertexSummaryClient: SummaryModelClient {
         switch SummaryModelFamily.of(model) {
         case .claude: return claude
         case .gemini: return gemini
-        case nil:
+        case .bedrockChat, nil:
             throw CappyError.usage("要約のモデル名が不正です: \(model)（claude- または gemini- で始まる Vertex AI のモデル ID）")
         }
     }

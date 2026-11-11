@@ -213,12 +213,16 @@ extension Summarizer {
         case 401:
             return "AWS の認証情報を確認してください（SSO なら `aws sso login`）。`cappy doctor` で確認できます"
         case 403:
-            if e.code == "permission_error" {
+            if e.code == "permission_error" || e.code == "permission_denied_error" {
+                if SummaryModelFamily.of(model) == .bedrockChat {
+                    return "このアカウントでは \(model) を使えません。Amazon Bedrock コンソールの「モデルアクセス」を確認してください（GLM-5.3 など、利用できる顧客が限られていて AWS のアカウントチームへの問い合わせが必要なモデルもあります）"
+                }
                 return "Amazon Bedrock コンソールの「モデルアクセス」で \(model) を有効にしてください（Anthropic のモデルは初回に利用目的の申請が必要です）"
             }
             return "IAM で bedrock:InvokeModel と bedrock:InvokeModelWithResponseStream が、推論プロファイルと各リージョンの基盤モデルに許可されているか確認してください"
         case 400 where BedrockClaudeClient.isModelIdentifierError(e):
-            return "\(BedrockClaudeClient.modelID(model, routing: routing ?? "global")) は使えません。summary.model と summary.region（推論プロファイルの範囲）、AWS のリージョンを確認してください"
+            return "\(BedrockModels.modelID(model, routing: routing ?? "global")) は使えません。summary.model と summary.region（推論プロファイルの範囲）、AWS のリージョンを確認してください"
+                + (SummaryModelFamily.of(model) == .bedrockChat ? "（Kimi K3.1・GLM-5.3 は東京では global のみ。`global.moonshotai.kimi-k3.1` のように範囲を付けて指定できます）" : "")
         case 429:
             return "Bedrock のクォータを超えています。時間をおいて `cappy summarize` を再実行してください"
         default:
@@ -248,7 +252,7 @@ public enum SummaryClientFactory {
                     "Bedrock を呼び出す AWS のリージョンが設定されていません",
                     hint: "[profiles.\(profile.name).aws] の region、AWS_REGION、AWS のプロファイルの region のいずれかを設定してください")
             }
-            return BedrockClaudeClient(region: region, routing: routing, credentials: credentials, transport: transport)
+            return BedrockSummaryClient(region: region, routing: routing, credentials: credentials, transport: transport)
         case "none":
             throw CappyError.usage("要約のプロバイダが none のため、要約は行いません")
         default:
