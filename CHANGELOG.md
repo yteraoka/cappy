@@ -1,0 +1,19 @@
+# Changelog
+
+## [v0.2.0](https://github.com/yteraoka/cappy/compare/v0.1.0...v0.2.0) - 2026-11-11
+
+- 表示を英語と日本語に対応し、既定を英語にする（README も英語に） by @yteraoka in https://github.com/yteraoka/cappy/pull/13
+
+## [v0.1.0](https://github.com/yteraoka/cappy/commits/v0.1.0) - 2026-11-11
+
+- 会議の要約（Claude on Vertex AI）を追加 by @yteraoka in https://github.com/yteraoka/cappy/pull/1
+- 要約で Vertex AI の Gemini に対応し、既定を gemini-4-argon にする by @yteraoka in https://github.com/yteraoka/cappy/pull/2
+- 文字起こしの既定を Vertex AI の gemini-3.5-transcribe にし、リアルタイム文字起こしを追加 by @yteraoka in https://github.com/yteraoka/cappy/pull/3
+- AWS の認証（AWS_PROFILE・SSO 対応）と SigV4 署名を追加する by @yteraoka in https://github.com/yteraoka/cappy/pull/4
+- 要約で Amazon Bedrock の Claude に対応する by @yteraoka in https://github.com/yteraoka/cappy/pull/5
+- リアルタイム文字起こし（--live）で Amazon Transcribe Streaming に対応する by @yteraoka in https://github.com/yteraoka/cappy/pull/7
+- Amazon Transcribe（#6）と Transcribe Streaming（#7）を main に取り込む by @yteraoka in https://github.com/yteraoka/cappy/pull/8
+- Bedrock での要約で Kimi K3.1・GLM-5.3 などの Claude 以外のモデルを選べるようにする by @yteraoka in https://github.com/yteraoka/cappy/pull/9
+- bash・zsh の補完スクリプトを出力する cappy completion を追加する by @yteraoka in https://github.com/yteraoka/cappy/pull/10
+- 内容が古くなった仕様書を削除し、README からのリンクを外す by @yteraoka in https://github.com/yteraoka/cappy/pull/11
+- Homebrew の tap で配布するためのリリースの仕組みを追加する by @yteraoka in https://github.com/yteraoka/cappy/pull/12
