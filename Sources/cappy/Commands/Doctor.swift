@@ -106,7 +106,48 @@ struct Doctor: AsyncParsableCommand {
             add(.ok, "文字起こし", "provider = none（録音のみ）")
         }
         await checkSummary(profile, add)
+        await checkAWS(profile, add)
         finish(checks)
+    }
+
+    /// [profiles.<name>.aws] があるとき、認証情報を取得して STS の GetCallerIdentity で確かめる
+    func checkAWS(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        guard let settings = profile.aws else { return }
+        let provider: AWSCredentialsProvider
+        do {
+            provider = try AWSCredentialsProvider.resolve(profile: settings.profile, region: settings.region)
+        } catch let e as CappyError {
+            add(.fail, "AWS 認証", e.message + (e.hint.map { "\n" + $0 } ?? ""), .usage)
+            return
+        } catch {
+            add(.fail, "AWS 認証", "\(error)", .usage)
+            return
+        }
+        let region: String
+        if let r = provider.region {
+            region = r
+            add(.ok, "AWS リージョン", r, .usage)
+        } else {
+            region = "us-east-1"
+            add(.warn, "AWS リージョン",
+                "未設定です（[profiles.\(profile.name).aws] の region、AWS_REGION、AWS のプロファイルの region のいずれかで指定）。確認には us-east-1 を使います",
+                .usage)
+        }
+        do {
+            let creds = try await provider.credentials()
+            let identity = try await STSClient(credentials: provider, region: region).getCallerIdentity()
+            var detail = "\(provider.summary)\n   \(identity.arn)"
+            if let exp = creds.expiration {
+                let f = DateFormatter()
+                f.dateFormat = "yyyy-MM-dd HH:mm"
+                detail += "（認証情報の期限 \(f.string(from: exp))）"
+            }
+            add(.ok, "AWS 認証", detail, .transcription)
+        } catch let e as CappyError {
+            add(.fail, "AWS 認証", "\(provider.summary): \(e.message)" + (e.hint.map { "\n" + $0 } ?? ""), .transcription)
+        } catch {
+            add(.fail, "AWS 認証", "\(provider.summary): \(error)", .transcription)
+        }
     }
 
     func checkSummary(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {

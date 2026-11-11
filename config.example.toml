@@ -45,6 +45,12 @@ effort = "high"              # low / medium / high / xhigh / max（深いほど�
 auto = false                 # true なら transcribe の後に自動で要約する（--no-summarize で抑止）
 # instructions_file = "~/.config/cappy/summary-instructions.md"  # 要約の書き方の追加指示
 
+# AWS の認証（Amazon Transcribe・Bedrock 対応の準備。現在は cappy doctor での確認のみ）
+# 認証情報は書かず、~/.aws/config のプロファイル（SSO・アクセスキー・credential_process など）を使う
+# [profiles.default.aws]
+# profile = "my-sso-profile"   # 省略時は AWS_PROFILE → AWS_DEFAULT_PROFILE → default
+# region = "ap-northeast-1"    # 省略時は AWS_REGION → AWS_DEFAULT_REGION → プロファイルの region
+
 # クライアントごとに送信先や保存先を分ける例
 [profiles.client-a]
 provider = "google"
