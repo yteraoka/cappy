@@ -9,6 +9,7 @@ struct Record: AsyncParsableCommand {
         例:
           cappy record --app us.zoom.xos --name weekly-sync
           cappy record --app com.google.Chrome --duration 90m --transcribe --summarize
+          cappy record --app us.zoom.xos --live
           cappy record --system --no-mic
 
         録音中に Enter を押すとマーカー（目印）を記録します。文字を入力してから Enter でラベル付きになります。
@@ -49,8 +50,11 @@ struct Record: AsyncParsableCommand {
     @Option(help: "--transcribe 時の出力形式（md,json,srt）")
     var format: String = "md,json,srt"
 
-    @Flag(inversion: .prefixedNo, help: "--transcribe 時に続けて会議の要約を作る（既定はプロファイルの summary.auto）")
+    @Flag(inversion: .prefixedNo, help: "--transcribe / --live 時に続けて会議の要約を作る（既定はプロファイルの summary.auto）")
     var summarize: Bool?
+
+    @Flag(help: "録音しながらリアルタイムで文字起こしする（Vertex AI の gemini.live_model。結果は live-transcript.*）")
+    var live = false
 
     @Flag(help: "対象が音声を出し始めるまで待つ")
     var wait = false
@@ -73,8 +77,8 @@ struct Record: AsyncParsableCommand {
         if mix && !transcribe {
             throw ValidationError("--mix は --transcribe と一緒に指定してください（録音後なら `cappy transcribe --mix`）")
         }
-        if summarize == true && !transcribe {
-            throw ValidationError("--summarize は --transcribe と一緒に指定してください（録音後なら `cappy transcribe --summarize`）")
+        if summarize == true && !transcribe && !live {
+            throw ValidationError("--summarize は --transcribe か --live と一緒に指定してください（録音後なら `cappy transcribe --summarize`）")
         }
     }
 
@@ -92,6 +96,7 @@ struct Record: AsyncParsableCommand {
         if !quiet {
             Console.print("⚠️  録音は参加者への告知と同意を得たうえで行ってください。")
         }
+        let liveSetup = live ? try prepareLive(profile) : nil
 
         try await Permissions.ensure(systemAudio: true, microphone: !noMic)
 
@@ -129,6 +134,20 @@ struct Record: AsyncParsableCommand {
         let interrupts = InterruptController { reason in continuation.yield(.stop(reason)) }
         interrupts.sessionPath = dir.path
         recorder.onFatalError = { error in continuation.yield(.fatal(error)) }
+
+        var liveSession: LiveTranscription?
+        if let liveSetup {
+            let l = LiveTranscription(store: store, settings: profile.gemini, projectID: liveSetup.project,
+                                      language: profile.language, connector: liveSetup.connector)
+            l.onSegment = { s in
+                Console.print("[\(TimeFormat.hms(ms: s.startMs))] \(s.track.displayName): \(s.text)")
+            }
+            l.onInterim = { track, text in LiveCaptions.shared.set(track, text) }
+            l.onNotice = { Console.print("リアルタイム文字起こし: \($0)") }
+            try l.begin()
+            recorder.extraSinks = { track in [l.sink(for: track)] }
+            liveSession = l
+        }
 
         do {
             try recorder.start(resolved: resolved)
@@ -175,10 +194,19 @@ struct Record: AsyncParsableCommand {
         Console.print(reason == "sleep" ? "スリープするため録音を停止しています…" : "録音を停止しています…")
 
         var stopError: Error?
+        if liveSession != nil { Console.print("リアルタイム文字起こしの残りの結果を待っています…") }
         do {
             try await recorder.stop(reason: reason)
         } catch {
             stopError = error
+        }
+        var liveURLs: [URL] = []
+        if let liveSession {
+            do {
+                liveURLs = try liveSession.finish(formats: formats)
+            } catch {
+                Console.print("警告: リアルタイム文字起こしの結果を保存できませんでした: \(error)")
+            }
         }
         sleepDone.signal()
         sleepWatcher.invalidate()
@@ -191,6 +219,18 @@ struct Record: AsyncParsableCommand {
         }
         if recorder.silentTracks.contains(.mic) {
             Console.print("警告: 自分（mic）が完全に無音でした。マイクの許可と入力デバイスを確認してください")
+        }
+        if liveSession != nil {
+            if liveURLs.isEmpty {
+                Console.print("リアルタイム文字起こしの結果はありません"
+                    + (store.metadata.live?.error.map { "（\($0)）" } ?? ""))
+            } else {
+                Console.print("リアルタイム文字起こしを保存しました:")
+                for u in liveURLs { Console.print("  \(u.path)") }
+                if let dropped = store.metadata.live?.droppedMs, dropped >= 1000 {
+                    Console.print("注意: 接続できなかった \(TimeFormat.hms(ms: dropped)) 分の音声はリアルタイム文字起こしに含まれていません")
+                }
+            }
         }
         if let fatal { throw fatal }
         if let stopError { throw CappyError.io("録音ファイルの確定に失敗しました: \(stopError)") }
@@ -215,10 +255,35 @@ struct Record: AsyncParsableCommand {
                 try await SummarizeRunner.run(store: store, profile: profile, request: .init(explicit: summarize == true))
             }
         } else {
+            if !liveURLs.isEmpty && (summarize ?? profile.summary.auto) {
+                // リアルタイム文字起こしの結果から要約する
+                interrupts.setPhase(.summarizing)
+                try await SummarizeRunner.run(store: store, profile: profile, request: .init(explicit: summarize == true))
+            }
             Console.print("文字起こし: cappy transcribe \(dir.path)")
         }
         interrupts.setPhase(.done)
         CappyLog.shared.detach()
+    }
+
+    struct LiveSetup {
+        var project: String
+        var connector: LiveConnector
+    }
+
+    /// --live の準備（設定と認証を確認する。録音を始める前に失敗させる）
+    private func prepareLive(_ profile: Profile) throws -> LiveSetup {
+        guard profile.provider != "none" else {
+            throw CappyError.usage("プロファイル \(profile.name) の provider が none のため、--live は使えません")
+        }
+        guard let project = profile.geminiProjectID, !project.isEmpty else {
+            throw CappyError.usage("リアルタイム文字起こしに使う project_id が設定されていません",
+                                   hint: "[profiles.\(profile.name).google] か [profiles.\(profile.name).gemini] に project_id を書いてください")
+        }
+        let auth = try ApplicationDefaultCredentials.load()
+        Console.print("リアルタイム文字起こし: 録音中の音声を Vertex AI（\(profile.gemini.liveModel)、\(profile.gemini.location)）に送信します")
+        return LiveSetup(project: project,
+                         connector: VertexLiveConnector(location: profile.gemini.location, auth: auth, userProject: project))
     }
 
     enum StopEvent: Sendable {
@@ -247,6 +312,7 @@ struct Record: AsyncParsableCommand {
             var line = "● 録音中 \(TimeFormat.elapsed(s.elapsed))  相手 \(LevelMeter.bar(s.peaks[.remote]))"
             if hasMic { line += "  自分 \(LevelMeter.bar(s.peaks[.mic]))" }
             if s.gaps > 0 { line += "  欠落 \(s.gaps)" }
+            if let caption = LiveCaptions.shared.line(maxLength: 36) { line += "  💬 \(caption)" }
             if CappyLog.shared.verbose { line += String(format: "  drop %d  ring %.0f%%", s.droppedRecords, s.ringUsage * 100) }
             Console.status(line)
         }

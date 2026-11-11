@@ -261,6 +261,8 @@ public struct SessionMetadata: Codable, Sendable, Equatable {
     public var recording: RecordingState
     public var transcription: TranscriptionState?
     public var summary: SummaryState?
+    /// リアルタイム文字起こし（record --live）
+    public var live: LiveTranscriptionState?
     public var profile: String?
     public var toolVersion: String
 
@@ -276,7 +278,7 @@ public struct SessionMetadata: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, targets, tracks, gaps, markers, recording, transcription, summary, profile
+        case id, name, targets, tracks, gaps, markers, recording, transcription, summary, live, profile
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case toolVersion = "tool_version"

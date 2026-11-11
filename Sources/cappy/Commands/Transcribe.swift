@@ -10,7 +10,7 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: "セッションディレクトリ")
     var sessionDir: String
 
-    @Option(help: "文字起こしプロバイダ（google / none。既定はプロファイルの provider）")
+    @Option(help: "文字起こしプロバイダ（gemini / google / none。既定はプロファイルの provider）")
     var provider: String?
 
     @Option(help: "言語コード（既定はプロファイルの language。例: ja-JP）")

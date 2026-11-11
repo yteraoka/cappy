@@ -98,7 +98,9 @@ struct Doctor: AsyncParsableCommand {
             add(.ok, "保存先", outDir.path)
         }
 
-        if profile.provider == "google" {
+        if profile.provider == "gemini" {
+            await checkGemini(profile, add)
+        } else if profile.provider == "google" {
             await checkGoogle(profile, add)
         } else {
             add(.ok, "文字起こし", "provider = none（録音のみ）")
@@ -187,9 +189,62 @@ struct Doctor: AsyncParsableCommand {
         } catch {
             add(.fail, "Speech-to-Text API", "\(error)", .transcription)
         }
+        await checkBucket(g.bucket!, storage: provider.storage, add)
+    }
+
+    func loadAuth(_ add: (Level, String, String, ExitStatus) -> Void) async -> ApplicationDefaultCredentials? {
+        let auth: ApplicationDefaultCredentials
+        do {
+            auth = try ApplicationDefaultCredentials.load()
+        } catch let e as CappyError {
+            add(.fail, "Google 認証", e.message + (e.hint.map { "\n" + $0 } ?? ""), .transcription)
+            return nil
+        } catch {
+            add(.fail, "Google 認証", "\(error)", .transcription)
+            return nil
+        }
+        do {
+            _ = try await auth.accessToken()
+            add(.ok, "Google 認証", await auth.summary, .transcription)
+            return auth
+        } catch {
+            add(.fail, "Google 認証", "\(error)", .transcription)
+            return nil
+        }
+    }
+
+    func checkGemini(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let g = profile.gemini
+        guard let project = profile.geminiProjectID, let bucket = profile.google.bucket else {
+            add(.fail, "Gemini 設定", "project_id と bucket を [profiles.\(profile.name).google] に設定してください", .usage)
+            return
+        }
+        add(.ok, "Gemini 設定", "project=\(project) location=\(g.location) model=\(g.model) live_model=\(g.liveModel) "
+            + "bucket=\(bucket) chunk=\(g.chunkMinutes) 分", .usage)
+        guard let auth = await loadAuth(add) else { return }
+        guard let provider = try? GeminiTranscribeProvider(settings: g, projectID: project, bucket: bucket, auth: auth) else { return }
+        for (title, model) in [("文字起こしモデル", g.model), ("リアルタイム用モデル", g.liveModel)] {
+            var s = g
+            s.model = model
+            guard let p = try? GeminiTranscribeProvider(settings: s, projectID: project, bucket: bucket, auth: auth) else { continue }
+            do {
+                try await p.checkModel()
+                add(.ok, title, "\(model)（\(g.location)）", .transcription)
+            } catch let e as GoogleAPIError where e.httpStatus == 404 {
+                add(.fail, title, "\(model) が \(g.location) で見つかりません: \(e.message)", .transcription)
+            } catch let e as GoogleAPIError where e.httpStatus == 403 {
+                add(.fail, title, "権限がありません: \(e.message)\nVertex AI API の有効化と roles/aiplatform.user の付与を確認してください", .transcription)
+            } catch {
+                add(.warn, title, "確認できません: \(error)", .transcription)
+            }
+        }
+        await checkBucket(bucket, storage: provider.storage, add)
+    }
+
+    func checkBucket(_ bucket: String, storage: GCSClient, _ add: (Level, String, String, ExitStatus) -> Void) async {
         let need = ["storage.objects.create", "storage.objects.get", "storage.objects.delete", "storage.objects.list"]
         do {
-            let granted = try await provider.storage.testPermissions(bucket: g.bucket!, permissions: need)
+            let granted = try await storage.testPermissions(bucket: bucket, permissions: need)
             let missing = need.filter { !granted.contains($0) }
             add(missing.isEmpty ? .ok : .fail, "バケットの権限",
                 missing.isEmpty ? "書き込み・読み取り・削除できます" : "不足: \(missing.joined(separator: ", "))", .transcription)
@@ -197,7 +252,7 @@ struct Doctor: AsyncParsableCommand {
             add(.fail, "バケットの権限", "\(error)", .transcription)
         }
         do {
-            let info = try await provider.storage.bucketInfo(g.bucket!)
+            let info = try await storage.bucketInfo(bucket)
             add(info.uniformAccess ? .ok : .warn, "バケットのアクセス制御",
                 info.uniformAccess ? "均一なアクセス制御が有効です" : "均一なアクセス制御が無効です（有効化を推奨）", .transcription)
             if let age = info.deleteAgeDays, age <= 1 {
@@ -210,7 +265,7 @@ struct Doctor: AsyncParsableCommand {
                 add(.ok, "バケットの場所", loc, .transcription)
             }
         } catch let e as GoogleAPIError where e.httpStatus == 404 {
-            add(.fail, "バケット", "\(g.bucket!) が見つかりません", .transcription)
+            add(.fail, "バケット", "\(bucket) が見つかりません", .transcription)
         } catch {
             add(.warn, "バケットの設定", "確認できません（storage.buckets.get 権限が必要）: \(error)", .transcription)
         }

@@ -18,17 +18,18 @@ enum TranscribeRunner {
             return
         }
         let provider = try ProviderFactory.make(name: providerName, profile: profile)
+        let gemini = providerName == "gemini"
         var opts = Transcriber.Options(
             language: request.language ?? profile.language,
             mix: request.mix,
             formats: request.formats,
-            diarization: profile.google.diarization,
-            wordTimestamps: profile.google.wordTimestamps,
-            minSpeakers: profile.google.minSpeakers,
-            maxSpeakers: profile.google.maxSpeakers,
+            diarization: gemini ? profile.gemini.diarization : profile.google.diarization,
+            wordTimestamps: gemini ? profile.gemini.wordTimestamps : profile.google.wordTimestamps,
+            minSpeakers: gemini ? nil : profile.google.minSpeakers,
+            maxSpeakers: gemini ? nil : profile.google.maxSpeakers,
             cleanup: profile.google.deleteRemoteAfter && !request.keepRemote,
             force: request.force,
-            location: providerName == "google" ? profile.google.location : nil)
+            location: gemini ? profile.gemini.location : (providerName == "google" ? profile.google.location : nil))
         opts.pollMax = 300
         if request.mix {
             Console.print("注意: --mix では自分と相手の区別が失われ、話者の区別はプロバイダの話者分離に頼ります")
@@ -153,6 +154,33 @@ final class InterruptController: @unchecked Sendable {
             Foundation.exit(130)
         case .done:
             Foundation.exit(130)
+        }
+    }
+}
+
+/// 録音中のステータス行に出す、認識途中の文字
+final class LiveCaptions: @unchecked Sendable {
+    static let shared = LiveCaptions()
+    private let lock = NSLock()
+    private var latest: (track: TrackID, text: String)?
+
+    func set(_ track: TrackID, _ text: String?) {
+        lock.withLock {
+            if let text {
+                latest = (track, text)
+            } else if latest?.track == track {
+                latest = nil
+            }
+        }
+    }
+
+    /// 末尾の maxLength 文字（長ければ先頭を省く）
+    func line(maxLength: Int) -> String? {
+        lock.withLock {
+            guard let l = latest else { return nil }
+            let t = l.text.replacingOccurrences(of: "\n", with: " ")
+            let tail = t.count > maxLength ? "…" + t.suffix(maxLength) : t
+            return "\(l.track.displayName): \(tail)"
         }
     }
 }

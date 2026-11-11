@@ -95,6 +95,9 @@ public enum SessionProcessing {
             m.recording.recoveredAt = TimeFormat.iso8601(Date())
         }
         try convert(store)
+        if !FileManager.default.fileExists(atPath: store.url(for: "\(LiveTranscription.baseName).json").path) {
+            _ = try? LiveTranscription.recoverJournal(store)
+        }
         return RecoveryReport(rebuiltSessionJSON: rebuilt, repairedFiles: repaired, tracks: durations)
     }
 

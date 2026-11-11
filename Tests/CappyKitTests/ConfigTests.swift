@@ -97,7 +97,7 @@ import Testing
         let c = try CappyConfig.load(from: URL(fileURLWithPath: "/nonexistent/cappy/config.toml"))
         #expect(!c.fileExists)
         let p = try c.profile(named: "default")
-        #expect(p.provider == "google")
+        #expect(p.provider == "gemini")
         #expect(p.google.location == "us")
     }
 

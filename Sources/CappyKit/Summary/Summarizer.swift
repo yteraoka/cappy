@@ -54,7 +54,15 @@ public struct Summarizer: Sendable {
     }
 
     public func run() async throws -> Outcome {
-        let transcriptURL = store.url(for: TranscriptFormat.json.fileName)
+        var transcriptURL = store.url(for: TranscriptFormat.json.fileName)
+        var fromLive = false
+        if !FileManager.default.fileExists(atPath: transcriptURL.path) {
+            let live = store.url(for: TranscriptFormat.json.fileName(base: LiveTranscription.baseName))
+            if FileManager.default.fileExists(atPath: live.path) {
+                transcriptURL = live
+                fromLive = true
+            }
+        }
         guard let data = try? Data(contentsOf: transcriptURL) else {
             throw CappyError.usage("文字起こしの結果（transcript.json）がありません: \(store.directory.path)",
                                    hint: "先に `cappy transcribe \(store.directory.path)` を実行してください")
@@ -91,6 +99,9 @@ public struct Summarizer: Sendable {
         CappyLog.shared.info("要約を開始しました provider=\(client.providerName) model=\(options.model) segments=\(doc.segments.count)")
 
         var notes: [String] = []
+        if fromLive {
+            notes.append("リアルタイム文字起こし（live-transcript.json）から作成しました。精度を上げるには `cappy transcribe` の後に `cappy summarize --force`")
+        }
         let response: SummaryResponse
         do {
             var r = try await client.generate(request, model: options.model)
