@@ -25,6 +25,29 @@ make test                       # 単体テスト
 
 利用目的の文字列（`NSAudioCaptureUsageDescription` / `NSMicrophoneUsageDescription`）を書いた Info.plist は、リンク時に `-sectcreate __TEXT __info_plist` でバイナリに埋め込みます（`Support/Info.plist`）。
 
+## シェルの補完
+
+`cappy completion bash|zsh` で補完スクリプトを出力します（省略時は `$SHELL` から判断）。Homebrew で入れた場合は formula が配置します。
+
+```bash
+# zsh（~/.zshrc で compinit を呼んでいること）
+mkdir -p ~/.zfunc
+cappy completion zsh > ~/.zfunc/_cappy
+# ~/.zshrc の compinit より前に: fpath=(~/.zfunc $fpath)
+
+# bash（bash-completion を使っている場合）
+mkdir -p ~/.local/share/bash-completion/completions
+cappy completion bash > ~/.local/share/bash-completion/completions/cappy
+# bash-completion がなければ ~/.bashrc に: source <(cappy completion bash)
+```
+
+サブコマンドとオプションのほか、次の値も補完します。
+
+- `--profile`: 設定ファイルのプロファイル名
+- `record --app` / `--pid` / `--mic`: その時点の音声プロセスの bundle ID・PID、入力デバイスの UID（zsh では名前や「出力中」も表示）
+- `summarize --model`: よく使うモデルと、設定ファイルに書かれたモデル
+- `--effort`・`transcribe --provider`・`--format`・`--language`、セッションディレクトリ
+
 ## 権限
 
 「システムオーディオ録音」と「マイク」の 2 つが必要です。CLI では、許可の対象は**実行元のターミナルアプリ**（Terminal、iTerm など）になります。
@@ -61,6 +84,9 @@ cappy summarize ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
 # 異常終了したセッションの修復
 cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
+
+# シェルの補完スクリプト（下の「シェルの補完」を参照）
+cappy completion zsh > ~/.zfunc/_cappy
 ```
 
 ### record

@@ -17,10 +17,11 @@ struct Record: AsyncParsableCommand {
         """
     )
 
-    @Option(name: .customLong("app"), help: "録音対象の bundle ID（前方一致でヘルパープロセスも含む。複数指定可）")
+    @Option(name: .customLong("app"), help: "録音対象の bundle ID（前方一致でヘルパープロセスも含む。複数指定可）",
+            completion: .custom { _, _, _ in CompletionCandidates.apps() })
     var apps: [String] = []
 
-    @Option(name: .customLong("pid"), help: "録音対象の PID（複数指定可）")
+    @Option(name: .customLong("pid"), help: "録音対象の PID（複数指定可）", completion: .custom { _, _, _ in CompletionCandidates.pids() })
     var pids: [Int32] = []
 
     @Flag(help: "自分自身を除くシステム全体の出力を録音する")
@@ -29,16 +30,17 @@ struct Record: AsyncParsableCommand {
     @Flag(name: .customLong("no-mic"), help: "マイクを録音しない")
     var noMic = false
 
-    @Option(help: "マイクの入力デバイス UID（既定はシステムの既定入力。`cappy devices` で確認）")
+    @Option(help: "マイクの入力デバイス UID（既定はシステムの既定入力。`cappy devices` で確認）",
+            completion: .custom { _, _, _ in CompletionCandidates.microphones() })
     var mic: String?
 
-    @Option(help: "出力先ディレクトリ（既定はプロファイルの output_dir）")
+    @Option(help: "出力先ディレクトリ（既定はプロファイルの output_dir）", completion: .directory)
     var out: String?
 
     @Option(help: "セッション名（ディレクトリ名と transcript の見出しに使う）")
     var name: String?
 
-    @Option(help: "指定時間で自動停止する（例: 90m, 1h30m, 45s）")
+    @Option(help: "指定時間で自動停止する（例: 90m, 1h30m, 45s）", completion: .list(["30m", "1h", "90m", "2h"]))
     var duration: String?
 
     @Flag(help: "録音終了後に続けて文字起こしする")
@@ -47,7 +49,7 @@ struct Record: AsyncParsableCommand {
     @Flag(help: "--transcribe 時に 2 トラックをミックスした 1 本で送る")
     var mix = false
 
-    @Option(help: "--transcribe 時の出力形式（md,json,srt）")
+    @Option(help: "--transcribe 時の出力形式（md,json,srt）", completion: .list(CompletionCandidates.formats))
     var format: String = "md,json,srt"
 
     @Flag(inversion: .prefixedNo, help: "--transcribe / --live 時に続けて会議の要約を作る（既定はプロファイルの summary.auto）")

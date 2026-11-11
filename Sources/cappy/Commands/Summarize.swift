@@ -13,13 +13,15 @@ struct Summarize: AsyncParsableCommand {
         """
     )
 
-    @Argument(help: "セッションディレクトリ")
+    @Argument(help: "セッションディレクトリ", completion: .directory)
     var sessionDir: String
 
-    @Option(help: "モデル（既定はプロファイルの summary.model。例: gemini-4-argon, claude-opus-5-5、Bedrock なら global.moonshotai.kimi-k3.1）")
+    @Option(help: "モデル（既定はプロファイルの summary.model。例: gemini-4-argon, claude-opus-5-5、Bedrock なら global.moonshotai.kimi-k3.1）",
+            completion: .custom { _, _, _ in CompletionCandidates.models() })
     var model: String?
 
-    @Option(help: "思考の深さ（low / medium / high / xhigh / max。既定はプロファイルの summary.effort）")
+    @Option(help: "思考の深さ（low / medium / high / xhigh / max。既定はプロファイルの summary.effort）",
+            completion: .list(CompletionCandidates.efforts))
     var effort: String?
 
     @Flag(help: "既存の要約があっても作り直す")

@@ -87,7 +87,7 @@ struct Recover: ParsableCommand {
         abstract: "異常終了したセッションの CAF を修復し、送信用ファイルと session.json を再生成する"
     )
 
-    @Argument(help: "セッションディレクトリ")
+    @Argument(help: "セッションディレクトリ", completion: .directory)
     var sessionDir: String
 
     func run() throws {
