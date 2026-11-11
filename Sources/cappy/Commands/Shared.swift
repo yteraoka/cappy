@@ -19,17 +19,31 @@ enum TranscribeRunner {
         }
         let provider = try ProviderFactory.make(name: providerName, profile: profile)
         let gemini = providerName == "gemini"
-        var opts = Transcriber.Options(
-            language: request.language ?? profile.language,
-            mix: request.mix,
-            formats: request.formats,
-            diarization: gemini ? profile.gemini.diarization : profile.google.diarization,
-            wordTimestamps: gemini ? profile.gemini.wordTimestamps : profile.google.wordTimestamps,
-            minSpeakers: gemini ? nil : profile.google.minSpeakers,
-            maxSpeakers: gemini ? nil : profile.google.maxSpeakers,
-            cleanup: profile.google.deleteRemoteAfter && !request.keepRemote,
-            force: request.force,
-            location: gemini ? profile.gemini.location : (providerName == "google" ? profile.google.location : nil))
+        var opts: Transcriber.Options
+        if let aws = provider as? AmazonTranscribeProvider {
+            opts = Transcriber.Options(
+                language: request.language ?? profile.language,
+                mix: request.mix,
+                formats: request.formats,
+                diarization: profile.transcribe.diarization,
+                wordTimestamps: true,
+                maxSpeakers: profile.transcribe.maxSpeakers,
+                cleanup: (profile.aws?.deleteRemoteAfter ?? true) && !request.keepRemote,
+                force: request.force,
+                location: aws.region)
+        } else {
+            opts = Transcriber.Options(
+                language: request.language ?? profile.language,
+                mix: request.mix,
+                formats: request.formats,
+                diarization: gemini ? profile.gemini.diarization : profile.google.diarization,
+                wordTimestamps: gemini ? profile.gemini.wordTimestamps : profile.google.wordTimestamps,
+                minSpeakers: gemini ? nil : profile.google.minSpeakers,
+                maxSpeakers: gemini ? nil : profile.google.maxSpeakers,
+                cleanup: profile.google.deleteRemoteAfter && !request.keepRemote,
+                force: request.force,
+                location: gemini ? profile.gemini.location : (providerName == "google" ? profile.google.location : nil))
+        }
         opts.pollMax = 300
         if request.mix {
             Console.print("注意: --mix では自分と相手の区別が失われ、話者の区別はプロバイダの話者分離に頼ります")

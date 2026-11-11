@@ -2,7 +2,7 @@
 # 認証情報そのものは書かない（Google はアプリケーションデフォルト認証情報を使う）
 
 [profiles.default]
-provider = "gemini"          # gemini（Vertex AI）/ google（Speech-to-Text v2）/ none（録音だけ行い、外部へ送信しない）
+provider = "gemini"          # gemini（Vertex AI）/ google（Speech-to-Text v2）/ transcribe（Amazon Transcribe）/ none（録音だけ行い、外部へ送信しない）
 language = "ja-JP"
 output_dir = "~/Recordings/cappy"
 # disk_warn_mb = 1024        # 空き容量がこれを下回ったら警告
@@ -45,11 +45,31 @@ effort = "high"              # low / medium / high / xhigh / max（深いほど�
 auto = false                 # true なら transcribe の後に自動で要約する（--no-summarize で抑止）
 # instructions_file = "~/.config/cappy/summary-instructions.md"  # 要約の書き方の追加指示
 
-# AWS の認証（Amazon Bedrock での要約に使う）
+# AWS の共通設定（Amazon Transcribe での文字起こし・Amazon Bedrock での要約に使う）
 # 認証情報は書かず、~/.aws/config のプロファイル（SSO・アクセスキー・credential_process など）を使う
 # [profiles.default.aws]
 # profile = "my-sso-profile"   # 省略時は AWS_PROFILE → AWS_DEFAULT_PROFILE → default
 # region = "ap-northeast-1"    # 省略時は AWS_REGION → AWS_DEFAULT_REGION → プロファイルの region
+# bucket = "my-cappy-bucket"   # provider = "transcribe" で音声を一時的に置く S3 バケット（同じリージョン）
+# delete_remote_after = true   # 文字起こし後に S3 上の音声と Transcribe のジョブを削除
+
+# Amazon Transcribe で文字起こしし、Bedrock の Claude で要約する例
+[profiles.aws]
+provider = "transcribe"
+
+[profiles.aws.aws]
+region = "ap-northeast-1"
+bucket = "my-cappy-bucket"
+
+[profiles.aws.transcribe]
+diarization = true           # remote トラックで話者分離
+max_speakers = 10            # 話者分離の最大人数（2〜30）
+# vocabulary_name = "cappy-terms"     # 事前に登録したカスタム語彙（同じリージョン・言語）
+# language_model_name = "my-model"    # 事前に作成したカスタム言語モデル
+
+[profiles.aws.summary]
+provider = "bedrock"
+region = "jp"
 
 # Amazon Bedrock の Claude で要約する例
 [profiles.bedrock]

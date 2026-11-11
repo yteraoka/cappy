@@ -307,29 +307,31 @@ public enum GeminiTranscriptParser {
     }
 
     static func split(words: [Word], speaker: String?, track: TrackID, offsetMs: Int64, sep: String) -> [Segment] {
-        var out: [Segment] = []
-        var group: [Word] = []
-        func flush() {
-            guard let first = group.first, let last = group.last else { return }
+        let timed = words.map { (startMs: $0.startMs!, endMs: $0.endMs!, text: $0.text) }
+        return groups(timed).compactMap { r in
+            let group = words[r]
             let text = group.map(\.text).joined(separator: sep).trimmingCharacters(in: .whitespaces)
-            if !text.isEmpty {
-                out.append(Segment(track: track, speaker: speaker, startMs: offsetMs + first.startMs!,
-                                   endMs: offsetMs + last.endMs!, text: text, confidence: nil))
-            }
-            group = []
+            guard !text.isEmpty else { return nil }
+            return Segment(track: track, speaker: speaker, startMs: offsetMs + group.first!.startMs!,
+                           endMs: offsetMs + group.last!.endMs!, text: text, confidence: nil)
         }
-        for w in words {
-            if let prev = group.last, let first = group.first {
-                let pause = w.startMs! - prev.endMs!
-                let length = prev.endMs! - first.startMs!
-                let sentenceEnd = ["。", "？", "！", ".", "?", "!"].contains { prev.text.hasSuffix($0) }
-                if length >= maxSegmentMs || (length >= 5_000 && (sentenceEnd || pause >= 800)) {
-                    flush()
-                }
+    }
+
+    /// 単語の並びを、長さ（30 秒）・文の終わり・間（0.8 秒）で区切った範囲。5 秒未満では文の終わりや間でも区切らない
+    static func groups(_ words: [(startMs: Int64, endMs: Int64, text: String)]) -> [Range<Int>] {
+        var out: [Range<Int>] = []
+        var begin = 0
+        for i in words.indices where i > begin {
+            let prev = words[i - 1]
+            let pause = words[i].startMs - prev.endMs
+            let length = prev.endMs - words[begin].startMs
+            let sentenceEnd = ["。", "？", "！", ".", "?", "!"].contains { prev.text.hasSuffix($0) }
+            if length >= maxSegmentMs || (length >= 5_000 && (sentenceEnd || pause >= 800)) {
+                out.append(begin..<i)
+                begin = i
             }
-            group.append(w)
         }
-        flush()
+        if begin < words.count { out.append(begin..<words.count) }
         return out
     }
 }

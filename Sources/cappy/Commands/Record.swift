@@ -276,6 +276,10 @@ struct Record: AsyncParsableCommand {
         guard profile.provider != "none" else {
             throw CappyError.usage("プロファイル \(profile.name) の provider が none のため、--live は使えません")
         }
+        if profile.provider == "transcribe" && profile.geminiProjectID == nil {
+            throw CappyError.usage("Amazon Transcribe でのリアルタイム文字起こしにはまだ対応していません",
+                                   hint: "--live は Vertex AI の Gemini Live API を使います。[profiles.\(profile.name).google] に project_id を設定してください")
+        }
         guard let project = profile.geminiProjectID, !project.isEmpty else {
             throw CappyError.usage("リアルタイム文字起こしに使う project_id が設定されていません",
                                    hint: "[profiles.\(profile.name).google] か [profiles.\(profile.name).gemini] に project_id を書いてください")

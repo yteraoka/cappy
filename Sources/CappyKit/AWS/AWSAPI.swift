@@ -19,7 +19,7 @@ public struct AWSAPIError: RetryableError, CustomStringConvertible, Sendable {
     public var isTransient: Bool {
         if [408, 429, 500, 502, 503, 504, 529].contains(httpStatus) { return true }
         let throttling: Set<String> = ["overloaded_error", "rate_limit_error", "Throttling", "ThrottlingException", "ThrottledException", "RequestLimitExceeded",
-                                       "TooManyRequestsException", "RequestThrottled", "SlowDown"]
+                                       "TooManyRequestsException", "RequestThrottled", "SlowDown", "LimitExceededException"]
         return code.map(throttling.contains) ?? false
     }
 

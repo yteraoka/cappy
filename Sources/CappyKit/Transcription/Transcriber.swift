@@ -323,6 +323,15 @@ public final class Transcriber: @unchecked Sendable {
 
     func wrap(_ error: Error) -> Error {
         if error is CappyError { return error }
+        if let a = error as? AWSAPIError {
+            var hint: String?
+            if a.httpStatus == 401 || a.httpStatus == 403 {
+                hint = "認証情報と権限を確認してください（`cappy doctor`）"
+            } else if a.isTransient {
+                hint = "時間をおいて同じコマンドで再開してください"
+            }
+            return CappyError.transcription("文字起こしサービスのエラー: \(a)", hint: hint)
+        }
         if let g = error as? GoogleAPIError {
             var hint: String?
             if g.httpStatus == 401 || g.httpStatus == 403 {
@@ -347,10 +356,20 @@ public enum ProviderFactory {
         case "google":
             let auth = try ApplicationDefaultCredentials.load(transport: transport)
             return try GoogleSpeechProvider(settings: profile.google, auth: auth, transport: transport)
+        case "transcribe":
+            let aws = profile.aws ?? AWSSettings()
+            let credentials = try AWSCredentialsProvider.resolve(profile: aws.profile, region: aws.region, transport: transport)
+            guard let region = credentials.region else {
+                throw CappyError.usage(
+                    "Amazon Transcribe を呼び出す AWS のリージョンが設定されていません",
+                    hint: "[profiles.\(profile.name).aws] の region、AWS_REGION、AWS のプロファイルの region のいずれかを設定してください")
+            }
+            return try AmazonTranscribeProvider(settings: profile.transcribe, region: region, bucket: aws.bucket,
+                                                credentials: credentials, transport: transport)
         case "none":
             throw CappyError.usage("プロバイダが none のため、文字起こしは行いません（録音のみ）")
         default:
-            throw CappyError.usage("未対応のプロバイダです: \(name)（gemini / google / none）")
+            throw CappyError.usage("未対応のプロバイダです: \(name)（gemini / google / transcribe / none）")
         }
     }
 }
