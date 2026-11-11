@@ -53,7 +53,7 @@ struct Record: AsyncParsableCommand {
     @Flag(inversion: .prefixedNo, help: "--transcribe / --live 時に続けて会議の要約を作る（既定はプロファイルの summary.auto）")
     var summarize: Bool?
 
-    @Flag(help: "録音しながらリアルタイムで文字起こしする（Vertex AI の gemini.live_model。結果は live-transcript.*）")
+    @Flag(help: "録音しながらリアルタイムで文字起こしする（Vertex AI の gemini.live_model、provider = transcribe なら Amazon Transcribe Streaming。結果は live-transcript.*）")
     var live = false
 
     @Flag(help: "対象が音声を出し始めるまで待つ")
@@ -137,10 +137,10 @@ struct Record: AsyncParsableCommand {
 
         var liveSession: LiveTranscription?
         if let liveSetup {
-            let l = LiveTranscription(store: store, settings: profile.gemini, projectID: liveSetup.project,
-                                      language: profile.language, connector: liveSetup.connector)
+            let l = LiveTranscription(store: store, language: profile.language, config: liveSetup.config)
             l.onSegment = { s in
-                Console.print("[\(TimeFormat.hms(ms: s.startMs))] \(s.track.displayName): \(s.text)")
+                let who = s.speaker.map { "\(s.track.displayName)（\($0)）" } ?? s.track.displayName
+                Console.print("[\(TimeFormat.hms(ms: s.startMs))] \(who): \(s.text)")
             }
             l.onInterim = { track, text in LiveCaptions.shared.set(track, text) }
             l.onNotice = { Console.print("リアルタイム文字起こし: \($0)") }
@@ -267,8 +267,7 @@ struct Record: AsyncParsableCommand {
     }
 
     struct LiveSetup {
-        var project: String
-        var connector: LiveConnector
+        var config: LiveConfig
     }
 
     /// --live の準備（設定と認証を確認する。録音を始める前に失敗させる）
@@ -276,14 +275,25 @@ struct Record: AsyncParsableCommand {
         guard profile.provider != "none" else {
             throw CappyError.usage("プロファイル \(profile.name) の provider が none のため、--live は使えません")
         }
+        if profile.provider == "transcribe" {
+            let aws = profile.aws ?? AWSSettings()
+            let credentials = try AWSCredentialsProvider.resolve(profile: aws.profile, region: aws.region)
+            guard let region = credentials.region else {
+                throw CappyError.usage(
+                    "Amazon Transcribe Streaming を呼び出す AWS のリージョンが設定されていません",
+                    hint: "[profiles.\(profile.name).aws] の region、AWS_REGION、AWS のプロファイルの region のいずれかを設定してください")
+            }
+            Console.print("リアルタイム文字起こし: 録音中の音声を Amazon Transcribe Streaming（\(region)）に送信します")
+            return LiveSetup(config: .transcribe(region: region, settings: profile.transcribe, credentials: credentials))
+        }
         guard let project = profile.geminiProjectID, !project.isEmpty else {
             throw CappyError.usage("リアルタイム文字起こしに使う project_id が設定されていません",
                                    hint: "[profiles.\(profile.name).google] か [profiles.\(profile.name).gemini] に project_id を書いてください")
         }
         let auth = try ApplicationDefaultCredentials.load()
         Console.print("リアルタイム文字起こし: 録音中の音声を Vertex AI（\(profile.gemini.liveModel)、\(profile.gemini.location)）に送信します")
-        return LiveSetup(project: project,
-                         connector: VertexLiveConnector(location: profile.gemini.location, auth: auth, userProject: project))
+        return LiveSetup(config: .gemini(settings: profile.gemini, projectID: project,
+                                         connector: VertexLiveConnector(location: profile.gemini.location, auth: auth, userProject: project)))
     }
 
     enum StopEvent: Sendable {

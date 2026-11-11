@@ -4,7 +4,7 @@
 
 - 相手側は Core Audio の Process Tap API で特定プロセスから直接取得し、自分の声はマイクから取得します。
 - タップとマイクを 1 つのプライベート機器セット（集約デバイス）にまとめ、単一の IOProc で受け取ります。クロックが 1 本なので、トラック間の時刻合わせは不要です。
-- 録音しながら Live API で文字起こしし、字幕のように表示することもできます（`--live`）。
+- 録音しながら Live API（または Amazon Transcribe Streaming）で文字起こしし、字幕のように表示することもできます（`--live`）。
 - 録音から文字起こしまでの状態はすべて `session.json` に記録します。途中で終了しても `cappy transcribe <dir>` で再開できます。
 
 仕様は [`cappy：会議音声キャプチャ・文字起こし CLI 仕様書.md`](./cappy：会議音声キャプチャ・文字起こし%20CLI%20仕様書.md) を参照してください。
@@ -75,7 +75,7 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 | `--duration 90m` | 指定時間で自動停止（`1h30m`、`45s` なども可） |
 | `--wait` | 対象が音声を出し始めるまで待つ |
 | `--transcribe` (`--mix`, `--format`) | 録音後に続けて文字起こしする |
-| `--live` | 録音しながらリアルタイムで文字起こしする（`gemini.live_model`）。確定した発言を表示し、`live-transcript.{md,json,srt}` に保存する |
+| `--live` | 録音しながらリアルタイムで文字起こしする（`gemini.live_model`。`provider = "transcribe"` なら Amazon Transcribe Streaming）。確定した発言を表示し、`live-transcript.{md,json,srt}` に保存する |
 | `--summarize` / `--no-summarize` | `--transcribe` / `--live` の後に続けて要約する（既定はプロファイルの `summary.auto`） |
 | `--profile <name>` | 設定プロファイル |
 | `--quiet` | 録音の告知メッセージを出さない |
@@ -87,10 +87,10 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
 #### リアルタイム文字起こし（`--live`）
 
-- 自分（mic）と相手（remote）をそれぞれ 16 kHz・モノラルの PCM にして、100 ms ごとに Vertex AI の Live API に送ります。確定した発言は `[00:01:23] 相手: …` の形で表示し、認識途中の文字はステータス行に出します。
-- Live API は 1 セッションで約 10 分の音声までのため、9 分を過ぎたら話の切れ目で（遅くとも 9 分 45 秒で）次のセッションに張り替えます。時刻は録音全体の時刻にそろえます。
+- 自分（mic）と相手（remote）をそれぞれ 16 kHz・モノラルの PCM にして、100 ms ごとに送ります。送り先は、プロファイルの `provider` が `transcribe` なら Amazon Transcribe Streaming、それ以外は Vertex AI の Live API です。確定した発言は `[00:01:23] 相手: …` の形で表示し、認識途中の文字はステータス行に出します。
+- Live API は 1 セッションで約 10 分の音声までのため、9 分を過ぎたら話の切れ目で（遅くとも 9 分 45 秒で）次のセッションに張り替えます。Amazon Transcribe Streaming は 1 セッション 4 時間までのため、3 時間 50 分を過ぎたら同じように張り替えます。時刻は録音全体の時刻にそろえます。
 - 接続が切れたら再接続します（その間の音声はリアルタイム文字起こしに含まれず、`session.json` の `live.dropped_ms` に記録します）。権限や設定の誤りで接続できない場合は、リアルタイム文字起こしだけを止めて録音は続けます。
-- リアルタイム文字起こしでは話者分離はできません（相手側は「相手」とだけ表示します）。精度の高い結果や話者分離が必要なら、録音後に `cappy transcribe` を実行してください（`--live --transcribe` で両方行えます）。
+- Live API では話者分離はできません（相手側は「相手」とだけ表示します）。Amazon Transcribe Streaming では remote トラックで話者分離を行い（`transcribe.diarization`）、`相手（0）` のように表示します（`live-transcript.md` では「相手 1」「相手 2」）。精度の高い結果が必要なら、録音後に `cappy transcribe` を実行してください（`--live --transcribe` で両方行えます）。
 - 要約は `transcript.json` があればそれを、なければ `live-transcript.json` を使います。
 - 録音中は `live-transcript.jsonl` に確定した発言を追記します。異常終了した場合は `cappy recover` で `live-transcript.*` を作ります。
 
@@ -98,12 +98,12 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
 | オプション | 説明 |
 | --- | --- |
-| `--provider gemini\|google\|none` | 既定はプロファイルの `provider`（`gemini`）。`google` は Speech-to-Text v2（chirp_3） |
+| `--provider gemini\|google\|transcribe\|none` | 既定はプロファイルの `provider`（`gemini`）。`google` は Speech-to-Text v2（chirp_3）、`transcribe` は Amazon Transcribe |
 | `--language ja-JP` | 既定はプロファイルの `language` |
 | `--mix` | 2 トラックをミックスした 1 本で送る。課金対象は約半分になるが、自分と相手の区別は失われる |
 | `--format md,json,srt` | 出力形式 |
 | `--force` | 既存のジョブを破棄してやり直す |
-| `--keep-remote` | バケット上の音声と結果を削除しない |
+| `--keep-remote` | バケット上の音声と結果（Amazon Transcribe ならジョブ）を削除しない |
 | `--summarize` / `--no-summarize` | 続けて要約する（既定はプロファイルの `summary.auto`） |
 
 ### summarize
@@ -180,6 +180,40 @@ gcloud projects add-iam-policy-binding my-project \
 - `cappy doctor` は、課金されないトークン数の確認 API（Claude は `count-tokens:rawPredict`、Gemini は `countTokens`）でモデルへのアクセスを確認します。
 - 外部に送信したくない案件では、プロファイルで `[profiles.<name>.summary] provider = "none"` にしてください（`provider = "none"` のプロファイルでは要約も既定で none になります）。
 
+### 文字起こし（Amazon Transcribe）の準備
+
+```toml
+[profiles.default]
+provider = "transcribe"
+
+[profiles.default.aws]
+region = "ap-northeast-1"     # Transcribe とバケットのリージョン
+bucket = "my-cappy-bucket"    # 送信する音声を一時的に置く S3 バケット（同じリージョン）
+# delete_remote_after = true  # 文字起こし後に S3 上の音声と Transcribe のジョブを削除
+
+[profiles.default.transcribe]
+# diarization = true          # remote トラックで話者分離
+# max_speakers = 10           # 話者分離の最大人数（2〜30）
+# vocabulary_name = "cappy-terms"      # 事前に登録したカスタム語彙（同じリージョン・言語）
+# language_model_name = "my-model"     # 事前に作成したカスタム言語モデル
+```
+
+```bash
+aws s3api create-bucket --bucket my-cappy-bucket --region ap-northeast-1 \
+  --create-bucket-configuration LocationConstraint=ap-northeast-1
+aws s3api put-bucket-lifecycle-configuration --bucket my-cappy-bucket --lifecycle-configuration \
+  '{"Rules":[{"ID":"cappy","Status":"Enabled","Filter":{"Prefix":"cappy/"},"Expiration":{"Days":1}}]}'
+```
+
+- 認証は下の「AWS の認証」と同じです（`AWS_PROFILE`・SSO・アクセスキーなど）。
+- 音声（`remote.flac` など）を S3 に置き、`StartTranscriptionJob` でトラックごとにジョブを投入して、完了を待ちます。1 ファイル 8 時間まで扱えるため分割しません。結果は Transcribe が管理する場所に置かれ、署名付き URL から取得するので、出力用のバケットは不要です。
+- 必要な権限: `transcribe:StartTranscriptionJob` / `GetTranscriptionJob` / `DeleteTranscriptionJob` / `ListTranscriptionJobs`（doctor 用）、バケットに対する `s3:PutObject` / `s3:GetObject` / `s3:DeleteObject`（Transcribe は呼び出した人の権限で S3 の音声を読みます）、doctor 用に `s3:GetBucketLocation` / `s3:GetLifecycleConfiguration`。カスタム語彙を使う場合は `transcribe:GetVocabulary` も必要です。
+- 話者分離は remote トラック（`--mix` ならミックス）で有効にします。拒否された場合は話者分離なしで送り直します。
+- カスタム語彙は事前に登録しておく必要があります（`aws transcribe create-vocabulary`。表形式を推奨）。Gemini の `custom_vocabulary` のように設定ファイルで単語を渡すことはできません。
+- `cappy doctor` で、API へのアクセス、カスタム語彙の状態、バケットのリージョン・書き込み・読み取り・削除・ライフサイクルを確認できます。
+- `record --live` は Amazon Transcribe Streaming を使います（S3 は使いません）。必要な権限は `transcribe:StartStreamTranscriptionWebSocket` です。`diarization`・`vocabulary_name`・`language_model_name` はリアルタイム文字起こしにも使います。日本語のリアルタイム文字起こしでも話者分離が使えることを確認しています。
+- Amazon Transcribe Streaming は接続ごとに最低 15 秒分の料金がかかります（再接続が多いと割高になります）。
+
 ### 要約（Amazon Bedrock の Claude）の準備
 
 ```toml
@@ -206,7 +240,7 @@ model = "claude-opus-5-5"     # 省略時は claude-opus-5-5（Bedrock では Cl
 
 ### AWS の認証
 
-AWS のサービスを使うための認証です（現在は Amazon Bedrock での要約に使います。Amazon Transcribe は対応予定）。認証情報は設定ファイルに書かず、AWS CLI と同じ `~/.aws/config` / `~/.aws/credentials` のプロファイルを使います。
+AWS のサービス（Amazon Transcribe での文字起こし、Amazon Bedrock での要約）を使うための認証です。認証情報は設定ファイルに書かず、AWS CLI と同じ `~/.aws/config` / `~/.aws/credentials` のプロファイルを使います。
 
 ```toml
 [profiles.default.aws]
@@ -255,7 +289,9 @@ AWS_PROFILE=my-sso-profile cappy doctor
 - **ストリームの対応付け**: 機器セットの入力ストリームは「サブデバイス（リスト順）→ タップ」の順に並びます（実機で確認）。出力デバイスに入力ストリームがあれば読み飛ばします。
 - **録音中の変化への追従**: 対象アプリの音声プロセスが増えたら、まず `kAudioTapPropertyDescription` でタップの対象を差し替えます。差し替えられない場合（実機では `'!hog'` になることがある）は作り直し、欠落区間を `gaps` に記録します。プロセスが減っただけのときは何もしません。既定の出力・入力デバイスが変わったら機器セットを作り直します。IOProc が 6 秒以上止まった場合も作り直します。欠落区間は両トラックとも無音で埋めるため、トラック同士と実時間とのずれは生じません。
 - **Gemini による文字起こし（既定）**: `gemini-3.5-transcribe` の `generateContent`（v1beta1、`generationConfig.audioTranscriptionConfig`）に、バケットに置いた音声を `fileData` で渡します。話者分離・タイムスタンプ有効時は 1 リクエスト 15 分までのため、既定 14 分ごとに分割して並行（最大 3 本）に送り、時刻をずらしてマージします。分割ごとの結果はセッションディレクトリに一時保存し、中断しても完了した分割は送り直しません。応答の `parts[].audioTranscription`（`speakerLabel`、`words[].startOffset/endOffset`）から発言を作り、30 秒を超える発言は句点や間で分けます。話者分離を拒否された場合は話者分離なしで送り直します。
+- **リアルタイム文字起こし（Amazon Transcribe Streaming）**: `wss://transcribestreaming.<region>.amazonaws.com:8443/stream-transcription-websocket` に SigV4 の署名付き URL（クエリに署名、有効期限 5 分）で接続し、イベントストリーム形式（前半の長さと CRC32・ヘッダー・本文・全体の CRC32）の `AudioEvent` で音声を送ります。`TranscriptEvent` の `IsPartial = false` の結果を確定した発言にし、単語の `Speaker` が変わるところで分けます。終わりは空の `AudioEvent` で伝えます。WebSocket の ping には応答しないため、接続の失敗は最初の受信で検出します。`BadRequestException`（無音による時間切れを除く）は再接続しても直らないものとして、リアルタイム文字起こしだけを止めます。話者分離を拒否された場合は、話者分離なしで張り直します。
 - **リアルタイム文字起こし**: Live API（`wss://…/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`）に `setup`（`inputAudioTranscription`、`responseModalities: ["TEXT"]`）を送り、`realtimeInput.audio`（`audio/pcm;rate=16000`）で音声を送ります。`serverContent.inputTranscription` を確定、`interimInputTranscription` を途中の文字として扱います。仕様書ではフェーズ 3 の予定でしたが、要望により `AudioSink` を実装する `LiveAudioSink` として追加しました。
+- **Amazon Transcribe の結果**（`provider = "transcribe"` の場合）: 結果 JSON の `results.items` から単語と句読点を取り出し、話者（`speaker_label`、古い形式では `speaker_labels.segments`）が変わるところと、文の終わり・間（0.8 秒）・長さ（30 秒）で発言に分けます。日本語などは単語を空白なしでつなぎます。信頼度は単語の平均です。
 - **chirp_3 の制限**（`provider = "google"` の場合）: 公式ドキュメントでは、BatchRecognize は「概ね 1 時間まで、単語タイムスタンプ有効時は約 20 分まで」です。そのため、送信用ファイルを既定 19 分ごとに分割して 1 リクエストで送り、結果を時刻オフセット付きでマージします（`chunk_minutes` で変更可）。分割した場合、話者分離のラベルはチャンクをまたいで一致しない可能性があります。
 - **話者分離**（`provider = "google"` の場合）: chirp_3 は日本語の話者分離に対応しています（BatchRecognize のみ）。remote トラックで有効にし、モデルが拒否した場合（投入時・実行時のいずれも）は話者分離なしで再投入し、その旨を `session.json` の `transcription.jobs[].note` に記録します。
 - **要約**: 仕様書では対象外（transcript を別ツールに渡す運用）でしたが、要望により `cappy summarize` として追加しました。モデル名で呼び出し先を切り替えます。Claude は Vertex AI の Messages API（`streamRawPredict`、`anthropic_version = 2026-10-21`）を、適応的思考（adaptive thinking）と `effort` で呼び出します。Gemini は `streamGenerateContent?alt=sse` を `thinkingConfig.thinkingLevel` で呼び出し、思考の部分（`thought: true`）は出力に含めません。どちらもストリーミングで受け取ります。文字起こし本文は `<transcript>` で囲み、その中の指示には従わないようモデルに指示しています。
@@ -267,6 +303,8 @@ AWS_PROFILE=my-sso-profile cappy doctor
 make test                   # 単体テスト（形式変換、マージ、session.json、プロバイダ応答の変換、要約の依頼と応答、HTTP スタブなど）
 make integration-test       # 実機の機器セットを使った作り直しとタイムラインの確認
 make integration-test TAP=1 # afplay の音を PID でタップし、元音声との相互相関で欠落とずれを確認（要: システムオーディオ録音の許可）
+# 実際の Amazon Transcribe Streaming に 16 kHz の音声ファイルを実時間で送る（課金あり。CAPPY_AWS_LIVE_SPEAKERS=0 で話者分離なし）
+AWS_PROFILE=my-profile CAPPY_AWS_LIVE_TEST=/path/to/remote.flac swift test --filter TranscribeStreamingIntegrationTests
 ```
 
 ## 配布

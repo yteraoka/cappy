@@ -92,16 +92,22 @@ public struct AWSSettings: Sendable, Equatable {
     public var profile: String?
     /// nil なら AWS_REGION → AWS_DEFAULT_REGION → プロファイルの region
     public var region: String?
+    /// Amazon Transcribe に送る音声を一時的に置く S3 バケット（文字起こしと同じリージョン）
+    public var bucket: String?
+    /// 文字起こし後に S3 上の音声と Transcribe のジョブを削除する
+    public var deleteRemoteAfter: Bool = true
 
-    public init(profile: String? = nil, region: String? = nil) {
+    public init(profile: String? = nil, region: String? = nil, bucket: String? = nil, deleteRemoteAfter: Bool = true) {
         self.profile = profile
         self.region = region
+        self.bucket = bucket
+        self.deleteRemoteAfter = deleteRemoteAfter
     }
 }
 
 public struct Profile: Sendable, Equatable {
     public var name: String
-    /// gemini（Vertex AI の Gemini）/ google（Speech-to-Text v2）/ none
+    /// gemini（Vertex AI の Gemini）/ google（Speech-to-Text v2）/ transcribe（Amazon Transcribe）/ none
     public var provider: String = "gemini"
     public var language: String = "ja-JP"
     public var outputDir: String = "~/Recordings/cappy"
@@ -114,6 +120,8 @@ public struct Profile: Sendable, Equatable {
     public var summary = SummarySettings()
     /// [profiles.<name>.aws] があるときだけ設定される
     public var aws: AWSSettings?
+    /// Amazon Transcribe（provider = transcribe）
+    public var transcribe = TranscribeSettings()
 
     public init(name: String) { self.name = name }
 
@@ -291,17 +299,33 @@ public struct CappyConfig: Sendable {
         }
         if let a = t["aws"]?.table {
             let actx = ctx + ".aws"
-            p.aws = AWSSettings(profile: try str("profile", a, actx), region: try str("region", a, actx))
-            for key in a.keys where !["profile", "region"].contains(key) {
+            p.aws = AWSSettings(profile: try str("profile", a, actx), region: try str("region", a, actx),
+                                bucket: try str("bucket", a, actx),
+                                deleteRemoteAfter: try bool("delete_remote_after", a, actx) ?? true)
+            for key in a.keys where !["profile", "region", "bucket", "delete_remote_after"].contains(key) {
                 CappyLog.shared.warning("設定 \(actx).\(key) は不明なキーのため無視します")
             }
         }
-        let known: Set<String> = ["provider", "language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "gemini", "summary", "aws"]
+        if let tr = t["transcribe"]?.table {
+            let tctx = ctx + ".transcribe"
+            if let v = try bool("diarization", tr, tctx) { p.transcribe.diarization = v }
+            if let v = try int("max_speakers", tr, tctx) {
+                guard (2...30).contains(v) else { throw CappyError.usage("\(tctx).max_speakers は 2〜30 にしてください") }
+                p.transcribe.maxSpeakers = v
+            }
+            p.transcribe.vocabularyName = try str("vocabulary_name", tr, tctx)
+            p.transcribe.languageModelName = try str("language_model_name", tr, tctx)
+            for key in tr.keys where !["diarization", "max_speakers", "vocabulary_name", "language_model_name"].contains(key) {
+                CappyLog.shared.warning("設定 \(tctx).\(key) は不明なキーのため無視します")
+            }
+        }
+        let known: Set<String> = ["provider", "language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "gemini", "summary",
+                                  "aws", "transcribe"]
         for key in t.keys where !known.contains(key) {
             CappyLog.shared.warning("設定 \(ctx).\(key) は不明なキーのため無視します")
         }
         if !Profile.knownProviders.contains(p.provider) {
-            throw CappyError.usage("\(ctx).provider が不正です: \(p.provider)（gemini / google / none）")
+            throw CappyError.usage("\(ctx).provider が不正です: \(p.provider)（gemini / google / transcribe / none）")
         }
         return p
     }
@@ -319,5 +343,5 @@ public struct CappyConfig: Sendable {
 }
 
 extension Profile {
-    public static let knownProviders: Set<String> = ["gemini", "google", "none"]
+    public static let knownProviders: Set<String> = ["gemini", "google", "transcribe", "none"]
 }

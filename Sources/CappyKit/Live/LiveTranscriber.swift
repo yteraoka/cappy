@@ -1,5 +1,48 @@
 import Foundation
 
+/// リアルタイム文字起こしの 1 セッション（Gemini Live API / Amazon Transcribe Streaming）
+public protocol LiveSession: AnyObject, Sendable {
+    /// このセッションに最初に送った音声の、録音開始からの位置（ms）
+    var startMs: Int64 { get }
+    var isDead: Bool { get }
+    var deathReason: String? { get }
+    /// 再接続しても直らない理由で切れたか（設定・権限の誤りなど）
+    var deathIsPermanent: Bool { get }
+    func markDead(_ reason: String)
+    func sendAudio(_ chunk: LiveTranscriber.Chunk) async throws
+    func shouldRotate(at positionMs: Int64, options: LiveTranscriber.Options) -> Bool
+    /// 音声の終わりを伝え、残りの結果を受け取ってから閉じる
+    func endAndDrain(timeout: Double) async
+}
+
+/// セッションを開く（接続と準備まで）
+public protocol LiveBackend: Sendable {
+    func open(startMs: Int64, options: LiveTranscriber.Options,
+              onEvent: @escaping @Sendable (LiveTranscriber.Event) -> Void) async throws -> LiveSession
+}
+
+/// Vertex AI の Gemini Live API
+public struct GeminiLiveBackend: LiveBackend {
+    let connector: LiveConnector
+
+    public init(connector: LiveConnector) { self.connector = connector }
+
+    public func open(startMs: Int64, options: LiveTranscriber.Options,
+                     onEvent: @escaping @Sendable (LiveTranscriber.Event) -> Void) async throws -> LiveSession {
+        let socket = try await connector.connect()
+        let handle = LiveSessionHandle(socket: socket, startMs: startMs, track: options.track, language: options.language,
+                                       onEvent: onEvent)
+        do {
+            try await handle.setup(model: options.model, timeout: options.setupTimeoutSeconds)
+        } catch {
+            socket.close()
+            throw error
+        }
+        handle.startReceiving()
+        return handle
+    }
+}
+
 /// 1 トラック分のリアルタイム文字起こし。
 /// 音声（16 kHz・モノラル・16 bit PCM）を Live API に送り、確定した発言を Segment として返す。
 /// Live API は 1 セッションで約 10 分の音声までなので、話の切れ目でセッションを張り替える。
@@ -45,7 +88,7 @@ public final class LiveTranscriber: @unchecked Sendable {
     }
 
     public let options: Options
-    let connector: LiveConnector
+    let backend: LiveBackend
     let onEvent: @Sendable (Event) -> Void
     private let stream: AsyncStream<Chunk>
     private let continuation: AsyncStream<Chunk>.Continuation
@@ -57,9 +100,13 @@ public final class LiveTranscriber: @unchecked Sendable {
     private var _failed = false
     private var closing: [Task<Void, Never>] = []
 
-    public init(options: Options, connector: LiveConnector, onEvent: @escaping @Sendable (Event) -> Void) {
+    public convenience init(options: Options, connector: LiveConnector, onEvent: @escaping @Sendable (Event) -> Void) {
+        self.init(options: options, backend: GeminiLiveBackend(connector: connector), onEvent: onEvent)
+    }
+
+    public init(options: Options, backend: LiveBackend, onEvent: @escaping @Sendable (Event) -> Void) {
         self.options = options
-        self.connector = connector
+        self.backend = backend
         self.onEvent = onEvent
         (stream, continuation) = AsyncStream<Chunk>.makeStream()
     }
@@ -90,7 +137,7 @@ public final class LiveTranscriber: @unchecked Sendable {
     // MARK: 送信ループ
 
     private func run() async {
-        var current: LiveSessionHandle?
+        var current: LiveSession?
         var nextRetry = Date.distantPast
         var backoff = 1.0
         for await chunk in stream {
@@ -99,9 +146,14 @@ public final class LiveTranscriber: @unchecked Sendable {
                 continue
             }
             if let s = current, s.isDead {
-                onEvent(.disconnected(options.track, s.deathReason ?? "切断されました"))
                 end(s)
                 current = nil
+                if s.deathIsPermanent {
+                    handleConnectError(LiveConnectionError(message: s.deathReason ?? "切断されました", permanent: true))
+                    addDropped(chunk.durationMs)
+                    continue
+                }
+                onEvent(.disconnected(options.track, s.deathReason ?? "切断されました"))
             }
             if current == nil {
                 guard Date() >= nextRetry else {
@@ -119,7 +171,7 @@ public final class LiveTranscriber: @unchecked Sendable {
                     continue
                 }
             }
-            guard var s = current else { continue }
+            guard var s: LiveSession = current else { continue }
             if s.shouldRotate(at: chunk.startMs, options: options) {
                 // 新しいセッションを先に開き、古いほうは残りの結果を受け取ってから閉じる
                 if let fresh = try? await open(at: chunk.startMs) {
@@ -142,23 +194,14 @@ public final class LiveTranscriber: @unchecked Sendable {
         if let s = current { end(s) }
     }
 
-    private func open(at startMs: Int64) async throws -> LiveSessionHandle {
-        let socket = try await connector.connect()
-        let handle = LiveSessionHandle(socket: socket, startMs: startMs, track: options.track, language: options.language,
-                                       onEvent: onEvent)
-        do {
-            try await handle.setup(model: options.model, timeout: options.setupTimeoutSeconds)
-        } catch {
-            socket.close()
-            throw error
-        }
-        handle.startReceiving()
+    private func open(at startMs: Int64) async throws -> LiveSession {
+        let handle = try await backend.open(startMs: startMs, options: options, onEvent: onEvent)
         let n = lock.withLock { _sessions += 1; return _sessions }
         onEvent(.connected(options.track, sessions: n))
         return handle
     }
 
-    private func end(_ s: LiveSessionHandle) {
+    private func end(_ s: LiveSession) {
         let drain = options.drainSeconds
         let t = Task { await s.endAndDrain(timeout: drain) }
         lock.withLock { closing.append(t) }
@@ -179,8 +222,8 @@ public final class LiveTranscriber: @unchecked Sendable {
     }
 }
 
-/// Live API の 1 セッション
-final class LiveSessionHandle: @unchecked Sendable {
+/// Gemini Live API の 1 セッション
+final class LiveSessionHandle: LiveSession, @unchecked Sendable {
     let socket: LiveSocket
     /// このセッションに最初に送った音声の、録音開始からの位置（ms）
     let startMs: Int64
@@ -213,6 +256,7 @@ final class LiveSessionHandle: @unchecked Sendable {
 
     var isDead: Bool { lock.withLock { dead } }
     var deathReason: String? { lock.withLock { _deathReason } }
+    var deathIsPermanent: Bool { false }
 
     func markDead(_ reason: String) {
         lock.withLock {

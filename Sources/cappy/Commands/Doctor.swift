@@ -98,21 +98,23 @@ struct Doctor: AsyncParsableCommand {
             add(.ok, "保存先", outDir.path)
         }
 
+        await checkAWS(profile, add)
         if profile.provider == "gemini" {
             await checkGemini(profile, add)
         } else if profile.provider == "google" {
             await checkGoogle(profile, add)
+        } else if profile.provider == "transcribe" {
+            await checkTranscribe(profile, add)
         } else {
             add(.ok, "文字起こし", "provider = none（録音のみ）")
         }
-        await checkAWS(profile, add)
         await checkSummary(profile, add)
         finish(checks)
     }
 
     /// [profiles.<name>.aws] があるとき、認証情報を取得して STS の GetCallerIdentity で確かめる
     func checkAWS(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
-        guard profile.aws != nil || profile.summaryProvider == "bedrock" else { return }
+        guard profile.aws != nil || profile.summaryProvider == "bedrock" || profile.provider == "transcribe" else { return }
         let settings = profile.aws ?? AWSSettings()
         let provider: AWSCredentialsProvider
         do {
@@ -191,6 +193,94 @@ struct Doctor: AsyncParsableCommand {
             add(.fail, title, "\(s.model) が \(s.region) で使えません: \(e.message)\n\(hint)", .transcription)
         } catch {
             add(.warn, title, "確認できません: \(error)", .transcription)
+        }
+    }
+
+    /// Amazon Transcribe: API・カスタム語彙・S3 バケット（リージョン・書き込み・削除・ライフサイクル）
+    func checkTranscribe(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let title = "Amazon Transcribe"
+        let provider: AmazonTranscribeProvider
+        do {
+            guard let p = try ProviderFactory.make(name: "transcribe", profile: profile) as? AmazonTranscribeProvider else { return }
+            provider = p
+        } catch let e as CappyError {
+            add(.fail, title, e.message + (e.hint.map { "\n" + $0 } ?? ""), e.status)
+            return
+        } catch {
+            add(.fail, title, "\(error)", .transcription)
+            return
+        }
+        let t = profile.transcribe
+        add(.ok, "Transcribe 設定", "region=\(provider.region) bucket=\(provider.bucketName) language=\(profile.language)"
+            + (t.diarization ? " diarization(max \(t.maxSpeakers))" : "")
+            + (t.vocabularyName.map { " vocabulary=\($0)" } ?? "") + (t.languageModelName.map { " language_model=\($0)" } ?? ""), .usage)
+        do {
+            try await provider.checkAPI()
+            add(.ok, title, "\(provider.region) の API にアクセスできます", .transcription)
+        } catch let e as AWSAPIError {
+            add(.fail, title, "\(e)" + (e.httpStatus == 400 || e.httpStatus == 403
+                ? "\nIAM で transcribe:StartTranscriptionJob / GetTranscriptionJob / DeleteTranscriptionJob / ListTranscriptionJobs を許可してください" : ""),
+                .transcription)
+            return
+        } catch let e as CappyError {
+            add(.fail, title, e.message + (e.hint.map { "\n" + $0 } ?? ""), .transcription)
+            return
+        } catch {
+            add(.fail, title, "\(error)", .transcription)
+            return
+        }
+        if let name = t.vocabularyName, !name.isEmpty {
+            do {
+                let v = try await provider.vocabulary(name)
+                let ok = v.state == "READY" && v.language.lowercased() == profile.language.lowercased()
+                add(ok ? .ok : .fail, "カスタム語彙", "\(name)（\(v.state)、\(v.language)）"
+                    + (ok ? "" : "\nREADY で、言語が \(profile.language) の語彙が必要です"), .transcription)
+            } catch {
+                add(.fail, "カスタム語彙", "\(name) を確認できません: \(error)", .transcription)
+            }
+        }
+        await checkS3Bucket(provider, add)
+    }
+
+    func checkS3Bucket(_ provider: AmazonTranscribeProvider, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let bucket = provider.bucketName
+        let s3 = provider.s3
+        do {
+            let region = try await s3.bucketRegion(bucket)
+            add(region == provider.region ? .ok : .fail, "バケットの場所",
+                region == provider.region ? region : "\(region)（Amazon Transcribe と同じ \(provider.region) のバケットが必要です）", .transcription)
+        } catch let e as AWSAPIError where e.httpStatus == 404 {
+            add(.fail, "バケット", "\(bucket) が見つかりません", .transcription)
+            return
+        } catch {
+            add(.warn, "バケットの場所", "確認できません（s3:GetBucketLocation 権限が必要）: \(error)", .transcription)
+        }
+        // 小さなオブジェクトで、書き込み・読み取り・削除を確かめる
+        let object = S3ObjectRef(bucket: bucket, key: "cappy/.doctor/\(UUID().uuidString.lowercased()).txt")
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("cappy-doctor-\(UUID().uuidString).txt")
+        do {
+            try Data("cappy doctor\n".utf8).write(to: tmp)
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            try await s3.upload(file: tmp, to: object, contentType: "text/plain")
+            let readable = try await s3.exists(object)
+            try await s3.delete(object)
+            add(readable ? .ok : .fail, "バケットの権限",
+                readable ? "書き込み・読み取り・削除できます" : "書き込んだオブジェクトを読めません（s3:GetObject）", .transcription)
+        } catch {
+            add(.fail, "バケットの権限", "\(error)\ns3:PutObject / s3:GetObject / s3:DeleteObject を確認してください", .transcription)
+        }
+        do {
+            let rules = try await s3.lifecycleRules(bucket)
+            let days = rules.filter { $0.enabled && ($0.prefix.isEmpty || "cappy/".hasPrefix($0.prefix)) }
+                .compactMap(\.expirationDays).min()
+            if let days, days <= 1 {
+                add(.ok, "ライフサイクル", "\(days) 日後に自動削除されます", .transcription)
+            } else {
+                add(.warn, "ライフサイクル", days.map { "自動削除が \($0) 日後です（1 日を推奨）" } ?? "自動削除ルールがありません（1 日後に削除するルールを推奨）",
+                    .transcription)
+            }
+        } catch {
+            add(.warn, "ライフサイクル", "確認できません（s3:GetLifecycleConfiguration 権限が必要）: \(error)", .transcription)
         }
     }
 

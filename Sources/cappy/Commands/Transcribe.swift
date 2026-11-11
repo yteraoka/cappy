@@ -10,7 +10,7 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: "セッションディレクトリ")
     var sessionDir: String
 
-    @Option(help: "文字起こしプロバイダ（gemini / google / none。既定はプロファイルの provider）")
+    @Option(help: "文字起こしプロバイダ（gemini / google / transcribe / none。既定はプロファイルの provider）")
     var provider: String?
 
     @Option(help: "言語コード（既定はプロファイルの language。例: ja-JP）")
@@ -25,7 +25,7 @@ struct Transcribe: AsyncParsableCommand {
     @Flag(help: "完了済み・実行中のジョブを破棄してやり直す")
     var force = false
 
-    @Flag(name: .customLong("keep-remote"), help: "バケット上の音声と結果を削除しない")
+    @Flag(name: .customLong("keep-remote"), help: "バケット上の音声と結果（Transcribe ならジョブ）を削除しない")
     var keepRemote = false
 
     @Flag(inversion: .prefixedNo, help: "続けて会議の要約（summary.md）を作る（既定はプロファイルの summary.auto）")
