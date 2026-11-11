@@ -12,6 +12,37 @@ public protocol LiveConnector: Sendable {
     func connect() async throws -> LiveSocket
 }
 
+/// バイナリのメッセージをやりとりする WebSocket（Amazon Transcribe Streaming 用。テストでは偽物に差し替える）
+public protocol LiveDataSocket: AnyObject, Sendable {
+    func send(_ data: Data) async throws
+    /// 次のメッセージ。接続が閉じたら throw する
+    func receive() async throws -> Data
+    func close()
+}
+
+public protocol LiveDataConnector: Sendable {
+    func connect(_ url: URL) async throws -> LiveDataSocket
+}
+
+/// 署名付き URL に接続する。
+/// Transcribe Streaming は WebSocket の ping に応答しないため、接続の失敗（ハンドシェイクの 4xx など）は最初の受信で分かる
+public struct URLSessionDataConnector: LiveDataConnector {
+    let session: URLSession
+
+    public init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    public func connect(_ url: URL) async throws -> LiveDataSocket {
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 30
+        let task = session.webSocketTask(with: req)
+        task.maximumMessageSize = 16 << 20
+        task.resume()
+        return URLSessionLiveSocket(task: task)
+    }
+}
+
 /// 接続できなかった・切断された理由
 public struct LiveConnectionError: Error, CustomStringConvertible, Sendable {
     public var message: String
@@ -48,7 +79,7 @@ public struct VertexLiveConnector: LiveConnector {
     }
 }
 
-final class URLSessionLiveSocket: LiveSocket, @unchecked Sendable {
+final class URLSessionLiveSocket: LiveSocket, LiveDataSocket, @unchecked Sendable {
     let task: URLSessionWebSocketTask
 
     init(task: URLSessionWebSocketTask) { self.task = task }
@@ -73,6 +104,26 @@ final class URLSessionLiveSocket: LiveSocket, @unchecked Sendable {
         }
     }
 
+    func send(_ data: Data) async throws {
+        do {
+            try await task.send(.data(data))
+        } catch {
+            throw describe(error)
+        }
+    }
+
+    func receive() async throws -> Data {
+        do {
+            switch try await task.receive() {
+            case .data(let d): return d
+            case .string(let s): return Data(s.utf8)
+            @unknown default: return Data()
+            }
+        } catch {
+            throw describe(error)
+        }
+    }
+
     func close() {
         task.cancel(with: .normalClosure, reason: nil)
     }
@@ -82,7 +133,8 @@ final class URLSessionLiveSocket: LiveSocket, @unchecked Sendable {
         if let http = task.response as? HTTPURLResponse, http.statusCode != 101 {
             let code = http.statusCode
             let permanent = [400, 401, 403, 404].contains(code)
-            return LiveConnectionError(message: "Live API への接続に失敗しました（HTTP \(code)）", permanent: permanent)
+            return LiveConnectionError(message: "リアルタイム文字起こしの接続に失敗しました（HTTP \(code)\(code == 403 ? "。認証情報か権限を確認してください" : "")）",
+                                       permanent: permanent)
         }
         let reason = task.closeReason.map { String(decoding: $0, as: UTF8.self) } ?? ""
         switch task.closeCode {

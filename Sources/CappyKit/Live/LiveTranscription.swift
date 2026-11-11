@@ -110,16 +110,55 @@ public final class LiveAudioSink: AudioSink, @unchecked Sendable {
     }
 }
 
+/// リアルタイム文字起こしの接続先
+public struct LiveConfig: Sendable {
+    /// session.json の live.provider（gemini / transcribe）
+    public var provider: String
+    /// 記録用のモデル名
+    public var model: String
+    public var location: String
+    public var backend: LiveBackend
+    /// LiveTranscriber に渡すモデル（Gemini はリソース名。Transcribe では使わない）
+    public var modelResource: String
+    public var softLimitMs: Int64?
+    public var hardLimitMs: Int64?
+    /// 話者分離を試みるトラック
+    public var diarizedTracks: Set<TrackID>
+
+    public static func gemini(settings: GeminiSettings, projectID: String, connector: LiveConnector) -> LiveConfig {
+        LiveConfig(provider: "gemini", model: settings.liveModel, location: settings.location,
+                   backend: GeminiLiveBackend(connector: connector),
+                   modelResource: "projects/\(projectID)/locations/\(settings.location)/publishers/google/models/\(settings.liveModel)",
+                   softLimitMs: nil, hardLimitMs: nil, diarizedTracks: [])
+    }
+
+    public static func transcribe(region: String, settings: TranscribeSettings, credentials: AWSCredentialsSource,
+                                  connector: LiveDataConnector = URLSessionDataConnector()) -> LiveConfig {
+        LiveConfig(provider: "transcribe", model: "transcribe-streaming", location: region,
+                   backend: TranscribeStreamingBackend(region: region, settings: settings, credentials: credentials, connector: connector),
+                   modelResource: "", softLimitMs: TranscribeStreamingBackend.softLimitMs, hardLimitMs: TranscribeStreamingBackend.hardLimitMs,
+                   diarizedTracks: settings.diarization ? [.remote] : [])
+    }
+
+    /// transcript の provider（gemini-live / transcribe-streaming）
+    public static func documentProvider(_ provider: String?) -> String {
+        provider == "transcribe" ? "transcribe-streaming" : "gemini-live"
+    }
+
+    /// transcript の model（Transcribe はモデルを選ばないので書かない）
+    public static func documentModel(provider: String?, model: String?) -> String? {
+        provider == "transcribe" ? nil : model
+    }
+}
+
 /// 録音 1 回分のリアルタイム文字起こし（トラックごとの LiveTranscriber と結果の保存）
 public final class LiveTranscription: @unchecked Sendable {
     public static let baseName = "live-transcript"
     public static let journalName = "live-transcript.jsonl"
 
     let store: SessionStore
-    let settings: GeminiSettings
-    let projectID: String
+    let config: LiveConfig
     let language: String
-    let connector: LiveConnector
     private let lock = NSLock()
     private var transcribers: [TrackID: LiveTranscriber] = [:]
     private var segments: [Segment] = []
@@ -132,22 +171,25 @@ public final class LiveTranscription: @unchecked Sendable {
     /// 接続・切断などの知らせ
     public var onNotice: (@Sendable (String) -> Void)?
 
-    public init(store: SessionStore, settings: GeminiSettings, projectID: String, language: String, connector: LiveConnector) {
-        self.store = store
-        self.settings = settings
-        self.projectID = projectID
-        self.language = language
-        self.connector = connector
+    public convenience init(store: SessionStore, settings: GeminiSettings, projectID: String, language: String,
+                            connector: LiveConnector) {
+        self.init(store: store, language: language, config: .gemini(settings: settings, projectID: projectID, connector: connector))
     }
 
-    public var modelResource: String {
-        "projects/\(projectID)/locations/\(settings.location)/publishers/google/models/\(settings.liveModel)"
+    public init(store: SessionStore, language: String, config: LiveConfig) {
+        self.store = store
+        self.language = language
+        self.config = config
     }
+
+    public var modelResource: String { config.modelResource }
 
     /// Recorder に渡すシンクを作る
     public func sink(for track: TrackID) -> AudioSink {
-        let t = LiveTranscriber(options: .init(model: modelResource, language: language, track: track),
-                                connector: connector) { [weak self] event in self?.handle(event) }
+        var options = LiveTranscriber.Options(model: config.modelResource, language: language, track: track)
+        if let v = config.softLimitMs { options.softLimitMs = v }
+        if let v = config.hardLimitMs { options.hardLimitMs = v }
+        let t = LiveTranscriber(options: options, backend: config.backend) { [weak self] event in self?.handle(event) }
         lock.withLock { transcribers[track] = t }
         if journal == nil { openJournal() }
         return LiveAudioSink(transcriber: t)
@@ -156,7 +198,7 @@ public final class LiveTranscription: @unchecked Sendable {
     /// 開始時の状態を書く
     public func begin() throws {
         try store.update { m in
-            m.live = LiveTranscriptionState(provider: "gemini", model: settings.liveModel, location: settings.location,
+            m.live = LiveTranscriptionState(provider: config.provider, model: config.model, location: config.location,
                                             language: language)
             m.live?.updatedAt = TimeFormat.iso8601(Date())
         }
@@ -202,8 +244,13 @@ public final class LiveTranscription: @unchecked Sendable {
         let failed = ts.values.contains { $0.failed }
         let errors = ts.values.compactMap(\.lastError)
         let meta = store.metadata
-        let doc = TranscriptDocument(sessionID: meta.id, name: meta.name, startedAt: meta.startedAt, provider: "gemini-live",
-                                     model: settings.liveModel, language: language, mix: false, diarization: [:],
+        var diarization: [String: Bool] = [:]
+        for track in ts.keys where track != .mic {
+            diarization[track.rawValue] = config.diarizedTracks.contains(track) && all.contains { $0.track == track && $0.speaker != nil }
+        }
+        let doc = TranscriptDocument(sessionID: meta.id, name: meta.name, startedAt: meta.startedAt,
+                                     provider: LiveConfig.documentProvider(config.provider),
+                                     model: LiveConfig.documentModel(provider: config.provider, model: config.model), language: language, mix: false, diarization: diarization,
                                      segments: TranscriptMerger.merge([all]))
         var urls: [URL] = []
         if !doc.segments.isEmpty {
@@ -232,8 +279,9 @@ public final class LiveTranscription: @unchecked Sendable {
         }
         guard !segments.isEmpty else { return [] }
         let meta = store.metadata
-        let doc = TranscriptDocument(sessionID: meta.id, name: meta.name, startedAt: meta.startedAt, provider: "gemini-live",
-                                     model: meta.live?.model, language: meta.live?.language ?? "ja-JP", mix: false,
+        let doc = TranscriptDocument(sessionID: meta.id, name: meta.name, startedAt: meta.startedAt,
+                                     provider: LiveConfig.documentProvider(meta.live?.provider),
+                                     model: LiveConfig.documentModel(provider: meta.live?.provider, model: meta.live?.model), language: meta.live?.language ?? "ja-JP", mix: false,
                                      diarization: [:], segments: TranscriptMerger.merge([segments]))
         let urls = try TranscriptRenderer.write(doc, formats: TranscriptFormat.allCases, to: store.directory, baseName: baseName)
         try store.update { m in

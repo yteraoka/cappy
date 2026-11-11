@@ -61,6 +61,7 @@ provider = "transcribe"
 region = "ap-northeast-1"
 bucket = "my-cappy-bucket"
 
+# record --live も Amazon Transcribe Streaming を使う（diarization・vocabulary_name・language_model_name も共通）
 [profiles.aws.transcribe]
 diarization = true           # remote トラックで話者分離
 max_speakers = 10            # 話者分離の最大人数（2〜30）
