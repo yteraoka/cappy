@@ -85,7 +85,7 @@ struct Doctor: AsyncParsableCommand {
         let profile: Profile
         do {
             profile = try config.profile(named: common.profile)
-            add(.ok, "プロファイル", "\(profile.name)（provider=\(profile.provider), language=\(profile.language)）")
+            add(.ok, "プロファイル", "\(profile.name)（provider=\(profile.provider), summary=\(profile.summaryProvider), language=\(profile.language)）")
         } catch let e as CappyError {
             add(.fail, "プロファイル", e.message)
             finish(checks)
@@ -103,7 +103,51 @@ struct Doctor: AsyncParsableCommand {
         } else {
             add(.ok, "文字起こし", "provider = none（録音のみ）")
         }
+        await checkSummary(profile, add)
         finish(checks)
+    }
+
+    func checkSummary(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let s = profile.summary
+        guard profile.summaryProvider == "vertex" else {
+            add(.ok, "要約", "provider = none（要約しない）", .usage)
+            return
+        }
+        guard let project = profile.summaryProjectID, !project.isEmpty else {
+            add(.fail, "要約の設定", "project_id がありません（[profiles.\(profile.name).google] か [profiles.\(profile.name).summary] に設定）", .usage)
+            return
+        }
+        add(.ok, "要約の設定", "Vertex AI project=\(project) region=\(s.region) model=\(s.model) effort=\(s.effort)"
+            + (s.auto ? " auto" : ""), .usage)
+        if s.instructionsFile != nil {
+            do {
+                _ = try SummaryClientFactory.instructions(profile: profile)
+            } catch let e as CappyError {
+                add(.fail, "要約の追加指示", e.message, .usage)
+            } catch {}
+        }
+        let client: SummaryModelClient
+        do {
+            client = try SummaryClientFactory.make(profile: profile)
+        } catch let e as CappyError {
+            add(.fail, "要約（Claude）", e.message + (e.hint.map { "\n" + $0 } ?? ""), .transcription)
+            return
+        } catch {
+            add(.fail, "要約（Claude）", "\(error)", .transcription)
+            return
+        }
+        // トークン数の確認は課金されないので、アクセス確認に使う
+        let probe = SummaryRequest(system: "ping", userText: "ping", maxTokens: 1024, effort: s.effort)
+        do {
+            _ = try await client.countTokens(probe, model: s.model)
+            add(.ok, "要約（Claude）", "\(s.model)（\(s.region)）にアクセスできます", .transcription)
+        } catch let e as GoogleAPIError where e.httpStatus == 403 {
+            add(.fail, "要約（Claude）", "権限がありません: \(e.message)\nVertex AI API の有効化と roles/aiplatform.user の付与を確認してください", .transcription)
+        } catch let e as GoogleAPIError where e.httpStatus == 404 {
+            add(.fail, "要約（Claude）", "\(s.model) が \(s.region) で使えません: \(e.message)\nModel Garden で Claude を有効にしているか確認してください", .transcription)
+        } catch {
+            add(.warn, "要約（Claude）", "確認できません: \(error)", .transcription)
+        }
     }
 
     func checkGoogle(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {

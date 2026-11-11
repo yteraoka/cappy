@@ -215,6 +215,40 @@ public struct TranscriptionState: Codable, Sendable, Equatable {
     }
 }
 
+/// 要約の状態
+public struct SummaryState: Codable, Sendable, Equatable {
+    public var provider: String
+    public var model: String
+    public var region: String?
+    public var state: JobState
+    /// 要約ファイル（セッションディレクトリからの相対パス）
+    public var file: String?
+    /// 要約の元にした transcript.json の SHA-256（文字起こしをやり直したら要約も作り直す）
+    public var transcriptDigest: String?
+    public var inputTokens: Int?
+    public var outputTokens: Int?
+    public var stopReason: String?
+    public var note: String?
+    public var error: String?
+    public var updatedAt: String?
+
+    public init(provider: String, model: String, region: String?) {
+        self.provider = provider
+        self.model = model
+        self.region = region
+        self.state = .pending
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider, model, region, state, file, note, error
+        case transcriptDigest = "transcript_digest"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case stopReason = "stop_reason"
+        case updatedAt = "updated_at"
+    }
+}
+
 public struct SessionMetadata: Codable, Sendable, Equatable {
     public var id: String
     public var name: String?
@@ -226,6 +260,7 @@ public struct SessionMetadata: Codable, Sendable, Equatable {
     public var markers: [SessionMarker]
     public var recording: RecordingState
     public var transcription: TranscriptionState?
+    public var summary: SummaryState?
     public var profile: String?
     public var toolVersion: String
 
@@ -241,7 +276,7 @@ public struct SessionMetadata: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, targets, tracks, gaps, markers, recording, transcription, profile
+        case id, name, targets, tracks, gaps, markers, recording, transcription, summary, profile
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case toolVersion = "tool_version"

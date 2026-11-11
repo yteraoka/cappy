@@ -41,6 +41,49 @@ enum TranscribeRunner {
     }
 }
 
+enum SummarizeRunner {
+    struct Request {
+        var force = false
+        var model: String?
+        var effort: String?
+        /// --summarize を明示したか（none のときの表示を変える）
+        var explicit = false
+    }
+
+    static func run(store: SessionStore, profile: Profile, request: Request) async throws {
+        if profile.summaryProvider == "none" {
+            if request.explicit {
+                Console.print("要約のプロバイダが none のため、要約は行いません")
+            }
+            return
+        }
+        if let e = request.effort, !SummarySettings.knownEfforts.contains(e) {
+            throw CappyError.usage("--effort が不正です: \(e)（low / medium / high / xhigh / max）")
+        }
+        let client = try SummaryClientFactory.make(profile: profile)
+        let s = profile.summary
+        let options = Summarizer.Options(
+            model: request.model ?? s.model,
+            fallbackModel: request.model == nil ? s.fallbackModel : nil,
+            effort: request.effort ?? s.effort,
+            maxTokens: s.maxTokens,
+            language: profile.language,
+            instructions: try SummaryClientFactory.instructions(profile: profile),
+            force: request.force)
+        Console.status("要約を作成しています（\(options.model)）…")
+        let outcome = try await Summarizer(store: store, client: client, options: options).run()
+        Console.clearStatus()
+        switch outcome {
+        case .created(let url):
+            Console.print("要約を作成しました:")
+            Console.print("  \(url.path)")
+        case .upToDate(let url):
+            Console.print("同じ文字起こしから作った要約があります（作り直すには --force）:")
+            Console.print("  \(url.path)")
+        }
+    }
+}
+
 /// レベルメーター（ピーク値 → 5 段）
 enum LevelMeter {
     static func bar(_ peak: Float?) -> String {
@@ -54,7 +97,7 @@ enum LevelMeter {
 
 /// 割り込み（Ctrl-C / SIGTERM）の扱い。1 回目で停止、2 回目で変換を省いて即時終了する
 final class InterruptController: @unchecked Sendable {
-    enum Phase { case recording, finalizing, converting, transcribing, done }
+    enum Phase { case recording, finalizing, converting, transcribing, summarizing, done }
 
     private let lock = NSLock()
     private var phase: Phase = .recording
@@ -99,6 +142,10 @@ final class InterruptController: @unchecked Sendable {
         case .transcribing:
             Console.clearStatus()
             Console.print("\(name): 中断しました。`cappy transcribe \(sessionPath)` で再開できます")
+            Foundation.exit(130)
+        case .summarizing:
+            Console.clearStatus()
+            Console.print("\(name): 中断しました。`cappy summarize \(sessionPath)` で要約を作り直せます")
             Foundation.exit(130)
         case .done:
             Foundation.exit(130)

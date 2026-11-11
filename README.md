@@ -1,6 +1,6 @@
 # cappy
 
-会議アプリの音声（相手）とマイク音声（自分）を、仮想オーディオデバイスなしで別トラックとして録音し、外部サービス（Google Cloud Speech-to-Text v2）で文字起こしする macOS 用 CLI です。
+会議アプリの音声（相手）とマイク音声（自分）を、仮想オーディオデバイスなしで別トラックとして録音し、外部サービス（Google Cloud Speech-to-Text v2）で文字起こしして、Claude（Vertex AI）で会議の要約まで作る macOS 用 CLI です。
 
 - 相手側は Core Audio の Process Tap API で特定プロセスから直接取得し、自分の声はマイクから取得します。
 - タップとマイクを 1 つのプライベート機器セット（集約デバイス）にまとめ、単一の IOProc で受け取ります。クロックが 1 本なので、トラック間の時刻合わせは不要です。
@@ -46,8 +46,14 @@ cappy record --app us.zoom.xos --name weekly-sync
 # ブラウザ版 Meet を 90 分で自動停止し、続けて文字起こし
 cappy record --app com.google.Chrome --duration 90m --transcribe
 
+# 録音から文字起こし・要約まで続けて行う
+cappy record --app us.zoom.xos --name weekly-sync --transcribe --summarize
+
 # 録音後に文字起こし（中断しても同じコマンドで再開）
 cappy transcribe ~/Recordings/cappy/2026-11-11T1000_weekly-sync
+
+# 文字起こし済みのセッションから要約を作る
+cappy summarize ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
 # 異常終了したセッションの修復
 cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
@@ -65,6 +71,7 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 | `--duration 90m` | 指定時間で自動停止（`1h30m`、`45s` なども可） |
 | `--wait` | 対象が音声を出し始めるまで待つ |
 | `--transcribe` (`--mix`, `--format`) | 録音後に続けて文字起こしする |
+| `--summarize` / `--no-summarize` | `--transcribe` の後に続けて要約する（既定はプロファイルの `summary.auto`） |
 | `--profile <name>` | 設定プロファイル |
 | `--quiet` | 録音の告知メッセージを出さない |
 | `-v, --verbose` | IOProc のバッファ欠落数やリングバッファの使用率も出す |
@@ -83,6 +90,22 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 | `--format md,json,srt` | 出力形式 |
 | `--force` | 既存のジョブを破棄してやり直す |
 | `--keep-remote` | バケット上の音声と結果を削除しない |
+| `--summarize` / `--no-summarize` | 続けて要約する（既定はプロファイルの `summary.auto`） |
+
+### summarize
+
+`transcript.json` を Claude（Vertex AI）に送り、`summary.md` に次の構成で書き出します: 概要 / 決定事項 / アクションアイテム（担当・内容・期限・時刻の表）/ 議論の要点 / 未解決事項・持ち越し。決定事項などには根拠となる発言の時刻 `[HH:MM:SS]` が付くので、`transcript.md` で前後を確認できます。
+
+| オプション | 説明 |
+| --- | --- |
+| `--model <id>` | 既定はプロファイルの `summary.model`（`claude-opus-5-5`） |
+| `--effort low\|medium\|high\|xhigh\|max` | 思考の深さ。既定はプロファイルの `summary.effort`（`high`） |
+| `--force` | 同じ文字起こしから作った要約があっても作り直す |
+
+- 文字起こしをやり直した場合（`transcript.json` が変わった場合）は、`--force` なしでも作り直します。
+- 録音中に付けたマーカーは「本人が重要だと考えた箇所」として要約に反映されます。録音の欠落区間も伝えます。
+- 要約の本文は `cappy.log` や `session.json` には書きません（`session.json` の `summary` にはモデル・トークン数・状態だけを記録します）。
+- モデルが要約を拒否（`stop_reason: refusal`）した場合は、`summary.fallback_model`（既定 `claude-opus-4-8`）で 1 回だけ再試行し、その旨を `summary.md` に書きます。Vertex AI ではサーバー側の自動フォールバックが使えないため、cappy 側で行っています。
 
 ### 終了コード
 
@@ -93,7 +116,7 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 | 2 | 権限不足（システムオーディオ録音またはマイク） |
 | 3 | 録音対象のプロセスが見つからない |
 | 4 | 録音中の I/O エラー（ディスク容量不足など） |
-| 5 | 文字起こしサービスのエラー（認証・クォータ・ジョブ失敗） |
+| 5 | 文字起こし・要約サービスのエラー（認証・クォータ・ジョブ失敗） |
 
 ## 設定
 
@@ -124,6 +147,22 @@ gcloud storage buckets update gs://my-cappy-bucket --lifecycle-file lifecycle.js
 - Speech-to-Text のサービスエージェントがバケットを読み書きできる必要があります（同じプロジェクトのバケットなら通常は不要）。
 - `cappy doctor` で、認証の有効性、API へのアクセス、バケットの権限・均一アクセス制御・ライフサイクルを確認できます。
 
+### 要約（Claude on Vertex AI）の準備
+
+文字起こしと同じプロジェクト・同じ ADC を使います。追加の API キーは不要です。
+
+```bash
+gcloud services enable aiplatform.googleapis.com --project my-project
+gcloud projects add-iam-policy-binding my-project \
+  --member="user:you@example.com" --role="roles/aiplatform.user"
+```
+
+- Google Cloud コンソールの Model Garden で「Claude Opus 5.5」を開き、利用を有効にしてください（初回のみ。利用規約への同意が必要です）。
+- 既定はグローバルエンドポイント（`region = "global"`）です。データの処理地域を限定したい場合は `us` / `eu`（マルチリージョン、約 10% 高い）を指定します。新しいモデルは単一リージョンのエンドポイントでは提供されていません。
+- 課金は Google Cloud から請求されます（[料金](https://cloud.google.com/vertex-ai/generative-ai/pricing#claude-models)）。使ったトークン数は `session.json` の `summary.input_tokens` / `output_tokens` で確認できます。
+- `cappy doctor` は、課金されないトークン数の確認 API でモデルへのアクセスを確認します。
+- 外部に送信したくない案件では、プロファイルで `[profiles.<name>.summary] provider = "none"` にしてください（`provider = "none"` のプロファイルでは要約も既定で none になります）。
+
 ## 出力
 
 ```text
@@ -136,6 +175,7 @@ gcloud storage buckets update gs://my-cappy-bucket --lifecycle-file lifecycle.js
 ├── transcript.json    # 正規化した文字起こし結果（segments: track, speaker, start_ms, end_ms, text, confidence）
 ├── transcript.md      # 読む用（mic =「自分」、remote =「相手」／話者分離があれば「相手 1」「相手 2」）
 ├── transcript.srt     # 字幕・動画編集用
+├── summary.md         # 会議の要約（cappy summarize / --summarize）
 └── cappy.log          # イベント・時刻・エラーのみ（本文は出さない）
 ```
 
@@ -149,12 +189,13 @@ gcloud storage buckets update gs://my-cappy-bucket --lifecycle-file lifecycle.js
 - **録音中の変化への追従**: 対象アプリの音声プロセスが増えたら、まず `kAudioTapPropertyDescription` でタップの対象を差し替えます。差し替えられない場合（実機では `'!hog'` になることがある）は作り直し、欠落区間を `gaps` に記録します。プロセスが減っただけのときは何もしません。既定の出力・入力デバイスが変わったら機器セットを作り直します。IOProc が 6 秒以上止まった場合も作り直します。欠落区間は両トラックとも無音で埋めるため、トラック同士と実時間とのずれは生じません。
 - **chirp_3 の制限**: 公式ドキュメントでは、BatchRecognize は「概ね 1 時間まで、単語タイムスタンプ有効時は約 20 分まで」です。そのため、送信用ファイルを既定 19 分ごとに分割して 1 リクエストで送り、結果を時刻オフセット付きでマージします（`chunk_minutes` で変更可）。分割した場合、話者分離のラベルはチャンクをまたいで一致しない可能性があります。
 - **話者分離**: chirp_3 は日本語の話者分離に対応しています（BatchRecognize のみ）。remote トラックで有効にし、モデルが拒否した場合（投入時・実行時のいずれも）は話者分離なしで再投入し、その旨を `session.json` の `transcription.jobs[].note` に記録します。
+- **要約**: 仕様書では対象外（transcript を別ツールに渡す運用）でしたが、要望により `cappy summarize` として追加しました。Claude on Vertex AI の Messages API（`streamRawPredict`、`anthropic_version = 2026-10-21`）をストリーミングで呼び出し、適応的思考（adaptive thinking）と `effort` で深さを調整します。文字起こし本文は `<transcript>` で囲み、その中の指示には従わないようモデルに指示しています。
 - **システムオーディオ録音の許可状態**: 公開 API がないため、TCC.framework の `TCCAccessPreflight` / `TCCAccessRequest` を動的に呼び出して確認しています。
 
 ## テスト
 
 ```bash
-make test                   # 単体テスト（形式変換、マージ、session.json、プロバイダ応答の変換、HTTP スタブなど）
+make test                   # 単体テスト（形式変換、マージ、session.json、プロバイダ応答の変換、要約の依頼と応答、HTTP スタブなど）
 make integration-test       # 実機の機器セットを使った作り直しとタイムラインの確認
 make integration-test TAP=1 # afplay の音を PID でタップし、元音声との相互相関で欠落とずれを確認（要: システムオーディオ録音の許可）
 ```

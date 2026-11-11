@@ -5,16 +5,16 @@ import Foundation
 struct Cappy: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "cappy",
-        abstract: "会議アプリの音声とマイク音声を別トラックで録音し、外部サービスで文字起こしする",
+        abstract: "会議アプリの音声とマイク音声を別トラックで録音し、外部サービスで文字起こし・要約する",
         discussion: """
         設定ファイル: ~/.config/cappy/config.toml（CAPPY_CONFIG で変更可）
 
         終了コード:
           0 正常終了  1 引数・設定の誤り  2 権限不足  3 録音対象が見つからない
-          4 録音中の I/O エラー  5 文字起こしサービスのエラー
+          4 録音中の I/O エラー  5 文字起こし・要約サービスのエラー
         """,
         version: CappyVersion.current,
-        subcommands: [Record.self, Transcribe.self, Apps.self, Devices.self, Doctor.self, Recover.self]
+        subcommands: [Record.self, Transcribe.self, Summarize.self, Apps.self, Devices.self, Doctor.self, Recover.self]
     )
 }
 

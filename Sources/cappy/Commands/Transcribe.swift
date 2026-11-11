@@ -28,6 +28,9 @@ struct Transcribe: AsyncParsableCommand {
     @Flag(name: .customLong("keep-remote"), help: "バケット上の音声と結果を削除しない")
     var keepRemote = false
 
+    @Flag(inversion: .prefixedNo, help: "続けて会議の要約（summary.md）を作る（既定はプロファイルの summary.auto）")
+    var summarize: Bool?
+
     @OptionGroup var common: CommonOptions
 
     func run() async throws {
@@ -48,7 +51,7 @@ struct Transcribe: AsyncParsableCommand {
             let src = DispatchSource.makeSignalSource(signal: sig, queue: .global())
             src.setEventHandler {
                 Console.clearStatus()
-                Console.print("中断しました。`cappy transcribe \(path)` で再開できます")
+                Console.print("中断しました。`cappy transcribe \(path)` で再開できます（要約は `cappy summarize \(path)`）")
                 Foundation.exit(130)
             }
             src.resume()
@@ -58,6 +61,9 @@ struct Transcribe: AsyncParsableCommand {
 
         try await TranscribeRunner.run(store: store, profile: profile, request: .init(
             providerName: provider, language: language, mix: mix, formats: formats, force: force, keepRemote: keepRemote))
+        if (summarize ?? profile.summary.auto) && (provider ?? profile.provider) != "none" {
+            try await SummarizeRunner.run(store: store, profile: profile, request: .init(explicit: summarize == true))
+        }
         CappyLog.shared.detach()
     }
 }
