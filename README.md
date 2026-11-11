@@ -1,9 +1,10 @@
 # cappy
 
-会議アプリの音声（相手）とマイク音声（自分）を、仮想オーディオデバイスなしで別トラックとして録音し、外部サービス（Google Cloud Speech-to-Text v2）で文字起こしして、Vertex AI の Claude または Gemini で会議の要約まで作る macOS 用 CLI です。
+会議アプリの音声（相手）とマイク音声（自分）を、仮想オーディオデバイスなしで別トラックとして録音し、Vertex AI の Gemini（`gemini-3.5-transcribe`）で文字起こしして、Claude または Gemini で会議の要約まで作る macOS 用 CLI です。録音しながらのリアルタイム文字起こし（`gemini-3.5-transcribe-live`）にも対応しています。
 
 - 相手側は Core Audio の Process Tap API で特定プロセスから直接取得し、自分の声はマイクから取得します。
 - タップとマイクを 1 つのプライベート機器セット（集約デバイス）にまとめ、単一の IOProc で受け取ります。クロックが 1 本なので、トラック間の時刻合わせは不要です。
+- 録音しながら Live API で文字起こしし、字幕のように表示することもできます（`--live`）。
 - 録音から文字起こしまでの状態はすべて `session.json` に記録します。途中で終了しても `cappy transcribe <dir>` で再開できます。
 
 仕様は [`cappy：会議音声キャプチャ・文字起こし CLI 仕様書.md`](./cappy：会議音声キャプチャ・文字起こし%20CLI%20仕様書.md) を参照してください。
@@ -52,6 +53,9 @@ cappy record --app us.zoom.xos --name weekly-sync --transcribe --summarize
 # 録音後に文字起こし（中断しても同じコマンドで再開）
 cappy transcribe ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
+# 録音しながらリアルタイムで文字起こし（字幕を表示し、live-transcript.* に保存）
+cappy record --app us.zoom.xos --name weekly-sync --live
+
 # 文字起こし済みのセッションから要約を作る
 cappy summarize ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
@@ -71,7 +75,8 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 | `--duration 90m` | 指定時間で自動停止（`1h30m`、`45s` なども可） |
 | `--wait` | 対象が音声を出し始めるまで待つ |
 | `--transcribe` (`--mix`, `--format`) | 録音後に続けて文字起こしする |
-| `--summarize` / `--no-summarize` | `--transcribe` の後に続けて要約する（既定はプロファイルの `summary.auto`） |
+| `--live` | 録音しながらリアルタイムで文字起こしする（`gemini.live_model`）。確定した発言を表示し、`live-transcript.{md,json,srt}` に保存する |
+| `--summarize` / `--no-summarize` | `--transcribe` / `--live` の後に続けて要約する（既定はプロファイルの `summary.auto`） |
 | `--profile <name>` | 設定プロファイル |
 | `--quiet` | 録音の告知メッセージを出さない |
 | `-v, --verbose` | IOProc のバッファ欠落数やリングバッファの使用率も出す |
@@ -80,11 +85,20 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 - Ctrl-C / SIGTERM で停止し、CAF を確定して送信用ファイルまで作ります。2 回目の Ctrl-C で変換を省いて終了します（あとで `recover` で作れます）。
 - スリープの直前に停止して確定します。復帰後に自動で再開はしません。
 
+#### リアルタイム文字起こし（`--live`）
+
+- 自分（mic）と相手（remote）をそれぞれ 16 kHz・モノラルの PCM にして、100 ms ごとに Vertex AI の Live API に送ります。確定した発言は `[00:01:23] 相手: …` の形で表示し、認識途中の文字はステータス行に出します。
+- Live API は 1 セッションで約 10 分の音声までのため、9 分を過ぎたら話の切れ目で（遅くとも 9 分 45 秒で）次のセッションに張り替えます。時刻は録音全体の時刻にそろえます。
+- 接続が切れたら再接続します（その間の音声はリアルタイム文字起こしに含まれず、`session.json` の `live.dropped_ms` に記録します）。権限や設定の誤りで接続できない場合は、リアルタイム文字起こしだけを止めて録音は続けます。
+- リアルタイム文字起こしでは話者分離はできません（相手側は「相手」とだけ表示します）。精度の高い結果や話者分離が必要なら、録音後に `cappy transcribe` を実行してください（`--live --transcribe` で両方行えます）。
+- 要約は `transcript.json` があればそれを、なければ `live-transcript.json` を使います。
+- 録音中は `live-transcript.jsonl` に確定した発言を追記します。異常終了した場合は `cappy recover` で `live-transcript.*` を作ります。
+
 ### transcribe
 
 | オプション | 説明 |
 | --- | --- |
-| `--provider google\|none` | 既定はプロファイルの `provider` |
+| `--provider gemini\|google\|none` | 既定はプロファイルの `provider`（`gemini`）。`google` は Speech-to-Text v2（chirp_3） |
 | `--language ja-JP` | 既定はプロファイルの `language` |
 | `--mix` | 2 トラックをミックスした 1 本で送る。課金対象は約半分になるが、自分と相手の区別は失われる |
 | `--format md,json,srt` | 出力形式 |
@@ -121,7 +135,7 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
 ## 設定
 
-`~/.config/cappy/config.toml`（環境変数 `CAPPY_CONFIG` で変更可）にプロファイル単位で書きます。例は [`config.example.toml`](./config.example.toml) を参照してください。設定ファイルがなければ `default` プロファイルの既定値（provider = google、language = ja-JP、output_dir = ~/Recordings/cappy）を使います。
+`~/.config/cappy/config.toml`（環境変数 `CAPPY_CONFIG` で変更可）にプロファイル単位で書きます。例は [`config.example.toml`](./config.example.toml) を参照してください。設定ファイルがなければ `default` プロファイルの既定値（provider = gemini、language = ja-JP、output_dir = ~/Recordings/cappy）を使います。
 
 認証情報は設定ファイルに書かず、Google のアプリケーションデフォルト認証情報（ADC）を使います。
 
@@ -135,7 +149,7 @@ gcloud auth application-default login
 ### Google Cloud 側の準備
 
 ```bash
-gcloud services enable speech.googleapis.com storage.googleapis.com --project my-project
+gcloud services enable aiplatform.googleapis.com storage.googleapis.com --project my-project
 gcloud storage buckets create gs://my-cappy-bucket --project my-project --location us \
   --uniform-bucket-level-access
 cat > lifecycle.json <<'JSON'
@@ -144,8 +158,9 @@ JSON
 gcloud storage buckets update gs://my-cappy-bucket --lifecycle-file lifecycle.json
 ```
 
-- 必要な権限: Speech-to-Text の利用（`roles/speech.client` など）、バケットに対する `storage.objects.create/get/list/delete`
-- Speech-to-Text のサービスエージェントがバケットを読み書きできる必要があります（同じプロジェクトのバケットなら通常は不要）。
+- 必要な権限: Vertex AI の利用（`roles/aiplatform.user`）、バケットに対する `storage.objects.create/get/list/delete`。`provider = "google"` を使う場合は Speech-to-Text の利用（`roles/speech.client` など）も必要です（`gcloud services enable speech.googleapis.com` も）。
+- 文字起こしの既定は Vertex AI の `gemini-3.5-transcribe`（`location = "global"`）です。`aiplatform.googleapis.com` を有効にしてください（下の「要約の準備」と同じ）。
+- 送信する音声はバケットに置いて `gs://` で渡します。Vertex AI（または Speech-to-Text）のサービスエージェントがバケットを読める必要があります（同じプロジェクトのバケットなら通常は不要）。
 - `cappy doctor` で、認証の有効性、API へのアクセス、バケットの権限・均一アクセス制御・ライフサイクルを確認できます。
 
 ### 要約（Vertex AI の Claude / Gemini）の準備
@@ -177,6 +192,7 @@ gcloud projects add-iam-policy-binding my-project \
 ├── transcript.json    # 正規化した文字起こし結果（segments: track, speaker, start_ms, end_ms, text, confidence）
 ├── transcript.md      # 読む用（mic =「自分」、remote =「相手」／話者分離があれば「相手 1」「相手 2」）
 ├── transcript.srt     # 字幕・動画編集用
+├── live-transcript.{md,json,srt}  # リアルタイム文字起こしの結果（record --live）
 ├── summary.md         # 会議の要約（cappy summarize / --summarize）
 └── cappy.log          # イベント・時刻・エラーのみ（本文は出さない）
 ```
@@ -189,8 +205,10 @@ gcloud projects add-iam-policy-binding my-project \
 - **`tapautostart` は無効**: 有効にすると、タップ対象が音を出すまで機器セットの IO が始まりません。その間はマイクも録れないため、無効にしています（実機で確認）。
 - **ストリームの対応付け**: 機器セットの入力ストリームは「サブデバイス（リスト順）→ タップ」の順に並びます（実機で確認）。出力デバイスに入力ストリームがあれば読み飛ばします。
 - **録音中の変化への追従**: 対象アプリの音声プロセスが増えたら、まず `kAudioTapPropertyDescription` でタップの対象を差し替えます。差し替えられない場合（実機では `'!hog'` になることがある）は作り直し、欠落区間を `gaps` に記録します。プロセスが減っただけのときは何もしません。既定の出力・入力デバイスが変わったら機器セットを作り直します。IOProc が 6 秒以上止まった場合も作り直します。欠落区間は両トラックとも無音で埋めるため、トラック同士と実時間とのずれは生じません。
-- **chirp_3 の制限**: 公式ドキュメントでは、BatchRecognize は「概ね 1 時間まで、単語タイムスタンプ有効時は約 20 分まで」です。そのため、送信用ファイルを既定 19 分ごとに分割して 1 リクエストで送り、結果を時刻オフセット付きでマージします（`chunk_minutes` で変更可）。分割した場合、話者分離のラベルはチャンクをまたいで一致しない可能性があります。
-- **話者分離**: chirp_3 は日本語の話者分離に対応しています（BatchRecognize のみ）。remote トラックで有効にし、モデルが拒否した場合（投入時・実行時のいずれも）は話者分離なしで再投入し、その旨を `session.json` の `transcription.jobs[].note` に記録します。
+- **Gemini による文字起こし（既定）**: `gemini-3.5-transcribe` の `generateContent`（v1beta1、`generationConfig.audioTranscriptionConfig`）に、バケットに置いた音声を `fileData` で渡します。話者分離・タイムスタンプ有効時は 1 リクエスト 15 分までのため、既定 14 分ごとに分割して並行（最大 3 本）に送り、時刻をずらしてマージします。分割ごとの結果はセッションディレクトリに一時保存し、中断しても完了した分割は送り直しません。応答の `parts[].audioTranscription`（`speakerLabel`、`words[].startOffset/endOffset`）から発言を作り、30 秒を超える発言は句点や間で分けます。話者分離を拒否された場合は話者分離なしで送り直します。
+- **リアルタイム文字起こし**: Live API（`wss://…/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`）に `setup`（`inputAudioTranscription`、`responseModalities: ["TEXT"]`）を送り、`realtimeInput.audio`（`audio/pcm;rate=16000`）で音声を送ります。`serverContent.inputTranscription` を確定、`interimInputTranscription` を途中の文字として扱います。仕様書ではフェーズ 3 の予定でしたが、要望により `AudioSink` を実装する `LiveAudioSink` として追加しました。
+- **chirp_3 の制限**（`provider = "google"` の場合）: 公式ドキュメントでは、BatchRecognize は「概ね 1 時間まで、単語タイムスタンプ有効時は約 20 分まで」です。そのため、送信用ファイルを既定 19 分ごとに分割して 1 リクエストで送り、結果を時刻オフセット付きでマージします（`chunk_minutes` で変更可）。分割した場合、話者分離のラベルはチャンクをまたいで一致しない可能性があります。
+- **話者分離**（`provider = "google"` の場合）: chirp_3 は日本語の話者分離に対応しています（BatchRecognize のみ）。remote トラックで有効にし、モデルが拒否した場合（投入時・実行時のいずれも）は話者分離なしで再投入し、その旨を `session.json` の `transcription.jobs[].note` に記録します。
 - **要約**: 仕様書では対象外（transcript を別ツールに渡す運用）でしたが、要望により `cappy summarize` として追加しました。モデル名で呼び出し先を切り替えます。Claude は Vertex AI の Messages API（`streamRawPredict`、`anthropic_version = 2026-10-21`）を、適応的思考（adaptive thinking）と `effort` で呼び出します。Gemini は `streamGenerateContent?alt=sse` を `thinkingConfig.thinkingLevel` で呼び出し、思考の部分（`thought: true`）は出力に含めません。どちらもストリーミングで受け取ります。文字起こし本文は `<transcript>` で囲み、その中の指示には従わないようモデルに指示しています。
 - **システムオーディオ録音の許可状態**: 公開 API がないため、TCC.framework の `TCCAccessPreflight` / `TCCAccessRequest` を動的に呼び出して確認しています。
 
@@ -214,6 +232,6 @@ make release                               # dist/cappy-<version>-macos-arm64.zi
 
 formula の雛形は [`packaging/cappy.rb`](./packaging/cappy.rb) です。
 
-## 今後（フェーズ 3）
+## 構成メモ
 
-Writer は `AudioSink` プロトコルを実装する「シンク」の 1 つ（`FileSink`）として作ってあり、リングバッファから取り出した音声を複数のシンクに配れます。リアルタイム文字起こしは `StreamingSink` を追加するだけで載せられる構造です。
+Writer は `AudioSink` プロトコルを実装する「シンク」に音声を配ります。録音中の原本は `FileSink`、リアルタイム文字起こしは `LiveAudioSink` で、どちらもリングバッファから取り出した同じ音声（欠落区間は無音で埋めたもの）を受け取るため、時刻は録音全体でそろいます。

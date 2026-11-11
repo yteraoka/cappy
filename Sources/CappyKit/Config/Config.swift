@@ -24,6 +24,29 @@ public struct GoogleSettings: Sendable, Equatable {
     }
 }
 
+/// Vertex AI の Gemini による文字起こし（ファイル: generateContent、リアルタイム: Live API）
+public struct GeminiSettings: Sendable, Equatable {
+    /// 既定は google.project_id
+    public var projectID: String?
+    public var location: String = "global"
+    /// 録音済みファイルの文字起こしに使うモデル
+    public var model: String = "gemini-3.5-transcribe"
+    /// リアルタイム文字起こし（record --live）に使うモデル
+    public var liveModel: String = "gemini-3.5-transcribe-live"
+    /// 1 リクエストあたりの長さ（分）。話者分離・タイムスタンプ有効時は 15 分までのため既定 14 分
+    public var chunkMinutes: Int = 14
+    /// remote トラックで話者分離を行うか
+    public var diarization: Bool = true
+    /// 単語タイムスタンプ（無効にすると発言の時刻が推定になる）
+    public var wordTimestamps: Bool = true
+    /// 認識を寄せたい語句（固有名詞・製品名など。1000 語まで）
+    public var customVocabulary: [String] = []
+
+    public init() {}
+
+    public var chunkSeconds: TimeInterval { TimeInterval(max(1, chunkMinutes) * 60) }
+}
+
 /// 会議の要約（Vertex AI の Claude / Gemini）
 public struct SummarySettings: Sendable, Equatable {
     /// vertex / none。nil ならプロファイルの provider から決める（none なら none、それ以外は vertex）
@@ -59,7 +82,8 @@ public struct SummarySettings: Sendable, Equatable {
 
 public struct Profile: Sendable, Equatable {
     public var name: String
-    public var provider: String = "google"
+    /// gemini（Vertex AI の Gemini）/ google（Speech-to-Text v2）/ none
+    public var provider: String = "gemini"
     public var language: String = "ja-JP"
     public var outputDir: String = "~/Recordings/cappy"
     /// 空き容量がこれを下回ったら警告（MB）
@@ -67,6 +91,7 @@ public struct Profile: Sendable, Equatable {
     /// 空き容量がこれを下回ったら録音を停止（MB）
     public var diskStopMB: Int = 300
     public var google = GoogleSettings()
+    public var gemini = GeminiSettings()
     public var summary = SummarySettings()
 
     public init(name: String) { self.name = name }
@@ -76,6 +101,9 @@ public struct Profile: Sendable, Equatable {
         if let p = summary.provider { return p }
         return provider == "none" ? "none" : "vertex"
     }
+
+    /// Gemini の文字起こしに使う Google Cloud プロジェクト
+    public var geminiProjectID: String? { gemini.projectID ?? google.projectID }
 
     /// 要約に使う Google Cloud プロジェクト
     public var summaryProjectID: String? { summary.projectID ?? google.projectID }
@@ -169,6 +197,31 @@ public struct CappyConfig: Sendable {
             p.google.minSpeakers = try int("min_speakers", g, gctx)
             p.google.maxSpeakers = try int("max_speakers", g, gctx)
         }
+        if let g = t["gemini"]?.table {
+            let gctx = ctx + ".gemini"
+            p.gemini.projectID = try str("project_id", g, gctx)
+            if let v = try str("location", g, gctx) { p.gemini.location = v }
+            if let v = try str("model", g, gctx) { p.gemini.model = v }
+            if let v = try str("live_model", g, gctx) { p.gemini.liveModel = v }
+            if let v = try int("chunk_minutes", g, gctx) {
+                guard (1...15).contains(v) else { throw CappyError.usage("\(gctx).chunk_minutes は 1〜15 にしてください") }
+                p.gemini.chunkMinutes = v
+            }
+            if let v = try bool("diarization", g, gctx) { p.gemini.diarization = v }
+            if let v = try bool("word_timestamps", g, gctx) { p.gemini.wordTimestamps = v }
+            if let v = g["custom_vocabulary"] {
+                guard let list = v.array?.compactMap(\.string), list.count == v.array?.count else {
+                    throw CappyError.usage("\(gctx).custom_vocabulary は文字列の配列である必要があります")
+                }
+                guard list.count <= 1000 else { throw CappyError.usage("\(gctx).custom_vocabulary は 1000 語までです") }
+                p.gemini.customVocabulary = list
+            }
+            let knownGemini: Set<String> = ["project_id", "location", "model", "live_model", "chunk_minutes",
+                                            "diarization", "word_timestamps", "custom_vocabulary"]
+            for key in g.keys where !knownGemini.contains(key) {
+                CappyLog.shared.warning("設定 \(gctx).\(key) は不明なキーのため無視します")
+            }
+        }
         if let m = t["summary"]?.table {
             let sctx = ctx + ".summary"
             p.summary.provider = try str("provider", m, sctx)
@@ -199,12 +252,12 @@ public struct CappyConfig: Sendable {
                 CappyLog.shared.warning("設定 \(sctx).\(key) は不明なキーのため無視します")
             }
         }
-        let known: Set<String> = ["provider", "language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "summary"]
+        let known: Set<String> = ["provider", "language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "gemini", "summary"]
         for key in t.keys where !known.contains(key) {
             CappyLog.shared.warning("設定 \(ctx).\(key) は不明なキーのため無視します")
         }
         if !Profile.knownProviders.contains(p.provider) {
-            throw CappyError.usage("\(ctx).provider が不正です: \(p.provider)（google / none）")
+            throw CappyError.usage("\(ctx).provider が不正です: \(p.provider)（gemini / google / none）")
         }
         return p
     }
@@ -222,5 +275,5 @@ public struct CappyConfig: Sendable {
 }
 
 extension Profile {
-    public static let knownProviders: Set<String> = ["google", "none"]
+    public static let knownProviders: Set<String> = ["gemini", "google", "none"]
 }

@@ -340,13 +340,17 @@ public final class Transcriber: @unchecked Sendable {
 public enum ProviderFactory {
     public static func make(name: String, profile: Profile, transport: HTTPTransport = URLSessionTransport()) throws -> TranscriptionProvider {
         switch name {
+        case "gemini":
+            let auth = try ApplicationDefaultCredentials.load(transport: transport)
+            return try GeminiTranscribeProvider(settings: profile.gemini, projectID: profile.geminiProjectID,
+                                                bucket: profile.google.bucket, auth: auth, transport: transport)
         case "google":
             let auth = try ApplicationDefaultCredentials.load(transport: transport)
             return try GoogleSpeechProvider(settings: profile.google, auth: auth, transport: transport)
         case "none":
             throw CappyError.usage("プロバイダが none のため、文字起こしは行いません（録音のみ）")
         default:
-            throw CappyError.usage("未対応のプロバイダです: \(name)（google / none）")
+            throw CappyError.usage("未対応のプロバイダです: \(name)（gemini / google / none）")
         }
     }
 }

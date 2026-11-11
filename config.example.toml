@@ -2,23 +2,36 @@
 # 認証情報そのものは書かない（Google はアプリケーションデフォルト認証情報を使う）
 
 [profiles.default]
-provider = "google"          # google / none（none なら録音だけ行い、外部へ送信しない）
+provider = "gemini"          # gemini（Vertex AI）/ google（Speech-to-Text v2）/ none（録音だけ行い、外部へ送信しない）
 language = "ja-JP"
 output_dir = "~/Recordings/cappy"
 # disk_warn_mb = 1024        # 空き容量がこれを下回ったら警告
 # disk_stop_mb = 300         # さらに下回ったら録音を安全に停止（終了コード 4）
 
+# Google Cloud の共通設定（project_id と bucket は gemini でも使う）と、provider = "google" のときの設定
 [profiles.default.google]
 project_id = "my-project"
-location = "us"
-bucket = "my-cappy-bucket"
-model = "chirp_3"
+bucket = "my-cappy-bucket"   # 送信する音声を一時的に置くバケット
 delete_remote_after = true   # 文字起こし後にバケット上の音声と結果を削除
+# 以下は provider = "google"（Speech-to-Text v2）のときだけ使う
+location = "us"
+model = "chirp_3"
 # word_timestamps = true     # 単語タイムスタンプ（有効時は 1 ファイル約 20 分の制限があるため自動分割）
 # chunk_minutes = 19         # 分割長（分）。省略時は word_timestamps に応じて 19 / 59
 # diarization = true         # remote トラックで話者分離を試みる
 # min_speakers = 1
 # max_speakers = 6
+
+# Vertex AI の Gemini による文字起こし（provider = "gemini"、record --live）
+[profiles.default.gemini]
+# project_id = "my-project"  # 省略時は google.project_id
+location = "global"          # global / us / eu
+model = "gemini-3.5-transcribe"            # 録音済みファイルの文字起こし
+live_model = "gemini-3.5-transcribe-live"  # record --live のリアルタイム文字起こし
+# chunk_minutes = 14         # 1 リクエストの長さ（分、1〜15）。話者分離・タイムスタンプ有効時は 15 分まで
+# diarization = true         # remote トラックで話者分離（最大 8 人）
+# word_timestamps = true     # 単語タイムスタンプ（無効にすると発言の時刻は推定になる）
+# custom_vocabulary = ["cappy", "Vertex AI"]  # 認識を寄せたい固有名詞など（1000 語まで）
 
 # 会議の要約（Vertex AI の Claude / Gemini）。認証は上と同じ ADC を使う
 [profiles.default.summary]

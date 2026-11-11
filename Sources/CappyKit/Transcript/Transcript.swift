@@ -43,7 +43,9 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
 public enum TranscriptFormat: String, CaseIterable, Sendable {
     case md, json, srt
 
-    public var fileName: String { "transcript.\(rawValue)" }
+    public var fileName: String { fileName(base: "transcript") }
+
+    public func fileName(base: String) -> String { "\(base).\(rawValue)" }
 
     public static func parseList(_ s: String) throws -> [TranscriptFormat] {
         var out: [TranscriptFormat] = []
@@ -137,10 +139,11 @@ public enum TranscriptRenderer {
 
     /// 指定形式でセッションディレクトリに書き出す
     @discardableResult
-    public static func write(_ doc: TranscriptDocument, formats: [TranscriptFormat], to directory: URL) throws -> [URL] {
+    public static func write(_ doc: TranscriptDocument, formats: [TranscriptFormat], to directory: URL,
+                             baseName: String = "transcript") throws -> [URL] {
         var urls: [URL] = []
         for f in formats {
-            let url = directory.appendingPathComponent(f.fileName)
+            let url = directory.appendingPathComponent(f.fileName(base: baseName))
             let data: Data
             switch f {
             case .json: data = try json(doc)

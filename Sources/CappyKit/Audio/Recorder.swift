@@ -137,6 +137,9 @@ public final class Recorder: @unchecked Sendable {
     /// 録音を続けられない障害（ディスク不足・書き込み失敗）
     public var onFatalError: (@Sendable (CappyError) -> Void)?
 
+    /// トラックごとに追加するシンク（リアルタイム文字起こしなど）。start の前に設定する
+    public var extraSinks: ((TrackID) -> [AudioSink])?
+
     public init(options: RecorderOptions, session: SessionStore) {
         self.options = options
         self.session = session
@@ -172,6 +175,10 @@ public final class Recorder: @unchecked Sendable {
                 try sink.start(format: layout.format, track: .remote)
                 fileSinks[.remote] = sink
                 sinks[.remote] = [sink]
+                for extra in extraSinks?(.remote) ?? [] {
+                    try extra.start(format: layout.format, track: .remote)
+                    sinks[.remote]!.append(extra)
+                }
                 var t = SessionTrack(id: .remote, file: "remote.caf", sampleRate: layout.format.sampleRate,
                                      channels: Int(layout.format.channelCount))
                 t.deviceUID = outputUID
@@ -186,6 +193,10 @@ public final class Recorder: @unchecked Sendable {
                 try sink.start(format: layout.format, track: .mic)
                 fileSinks[.mic] = sink
                 sinks[.mic] = [sink]
+                for extra in extraSinks?(.mic) ?? [] {
+                    try extra.start(format: layout.format, track: .mic)
+                    sinks[.mic]!.append(extra)
+                }
                 var t = SessionTrack(id: .mic, file: "mic.caf", sampleRate: layout.format.sampleRate,
                                      channels: Int(layout.format.channelCount))
                 t.deviceUID = currentMicUID
