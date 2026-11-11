@@ -144,7 +144,7 @@ final class CaptureEngine: @unchecked Sendable {
             AudioHardwareDestroyAggregateDevice(aggID)
             throw error
         }
-        CappyLog.shared.info("集約デバイスを作成しました id=\(aggID) output=\(outputUID) mic=\(micUID ?? "-") "
+        CappyLog.shared.info(tr("Created the aggregate device id=\(aggID) output=\(outputUID) mic=\(micUID ?? "-") ", ja: "集約デバイスを作成しました id=\(aggID) output=\(outputUID) mic=\(micUID ?? "-") ")
             + "remote=\(io.remote.map { Self.describe($0.format) } ?? "-") micfmt=\(io.mic.map { Self.describe($0.format) } ?? "-")")
     }
 
@@ -176,8 +176,8 @@ final class CaptureEngine: @unchecked Sendable {
             if micUID != nil, micStreams > 0 { micStreamIndex = outputStreams }
             if tap != nil { tapStreamIndex = streams.count - 1 }
         } else {
-            CappyLog.shared.warning("集約デバイスのストリーム数が想定と異なります（実際 \(streams.count)、"
-                + "想定 out=\(outputStreams) mic=\(micStreams) tap=\(tapStreams)）。末尾をタップとみなします")
+            CappyLog.shared.warning(tr("The aggregate device has an unexpected number of streams (actual \(streams.count), ", ja: "集約デバイスのストリーム数が想定と異なります（実際 \(streams.count)、")
+                + tr("expected out=\(outputStreams) mic=\(micStreams) tap=\(tapStreams)). Treating the last ones as the tap", ja: "想定 out=\(outputStreams) mic=\(micStreams) tap=\(tapStreams)）。末尾をタップとみなします"))
             if tap != nil, !streams.isEmpty { tapStreamIndex = streams.count - 1 }
             if micUID != nil {
                 let candidate = min(outputStreams, streams.count - 1 - (tap == nil ? 0 : 1))
@@ -185,7 +185,7 @@ final class CaptureEngine: @unchecked Sendable {
             }
         }
         if let micUID, micStreamIndex == nil {
-            CappyLog.shared.warning("マイク \(micUID) の入力ストリームが見つかりません")
+            CappyLog.shared.warning(tr("No input stream found for microphone \(micUID)", ja: "マイク \(micUID) の入力ストリームが見つかりません"))
         }
         // ストリーム → バッファインデックス
         var bufferStart: [Int] = []
@@ -199,7 +199,7 @@ final class CaptureEngine: @unchecked Sendable {
             guard let i = index else { return nil }
             var asbd = formats[i]
             guard let fmt = AVAudioFormat(streamDescription: &asbd) else {
-                throw CappyError.io("未対応の音声フォーマットです（stream \(i)）")
+                throw CappyError.io(tr("Unsupported audio format (stream \(i))", ja: "未対応の音声フォーマットです（stream \(i)）"))
             }
             let nonInterleaved = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
             let n = nonInterleaved ? Int(asbd.mChannelsPerFrame) : 1
@@ -225,7 +225,7 @@ final class CaptureEngine: @unchecked Sendable {
     func stop() {
         if running, let procID {
             let st = AudioDeviceStop(aggregateID, procID)
-            if st != noErr { CappyLog.shared.warning("AudioDeviceStop に失敗しました: \(osStatusString(st))") }
+            if st != noErr { CappyLog.shared.warning(tr("AudioDeviceStop failed: \(osStatusString(st))", ja: "AudioDeviceStop に失敗しました: \(osStatusString(st))")) }
             running = false
         }
         io.stopped.store(true, ordering: .releasing)

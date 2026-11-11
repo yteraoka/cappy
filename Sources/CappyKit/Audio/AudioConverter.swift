@@ -40,10 +40,10 @@ public enum SendFileConverter {
             } catch {
                 lastError = error
                 try? FileManager.default.removeItem(at: url)
-                CappyLog.shared.warning("\(c.rawValue) で書き出せないため次の形式を試します: \(error.localizedDescription)")
+                CappyLog.shared.warning(tr("Cannot write \(c.rawValue); trying the next format: \(error.localizedDescription)", ja: "\(c.rawValue) で書き出せないため次の形式を試します: \(error.localizedDescription)"))
             }
         }
-        throw CappyError.io("送信用ファイルを作成できません: \(lastError?.localizedDescription ?? "")")
+        throw CappyError.io(tr("Cannot create the file to send: \(lastError?.localizedDescription ?? "")", ja: "送信用ファイルを作成できません: \(lastError?.localizedDescription ?? "")"))
     }
 
     public struct Result: Sendable {
@@ -59,13 +59,13 @@ public enum SendFileConverter {
         do {
             inFile = try AVAudioFile(forReading: input)
         } catch {
-            throw CappyError.io("\(input.lastPathComponent) を読めません: \(error.localizedDescription)",
-                                hint: "`cappy recover` で修復を試してください")
+            throw CappyError.io(tr("Cannot read \(input.lastPathComponent): \(error.localizedDescription)", ja: "\(input.lastPathComponent) を読めません: \(error.localizedDescription)"),
+                                hint: tr("Try repairing it with `cappy recover`", ja: "`cappy recover` で修復を試してください"))
         }
         let (outFile, outURL, container) = try openOutput(base: outputBase, preferred: preferred)
         let inFormat = inFile.processingFormat
         guard let converter = AVAudioConverter(from: inFormat, to: outputFormat) else {
-            throw CappyError.io("形式変換を作成できません（\(inFormat)）")
+            throw CappyError.io(tr("Cannot create the format converter (\(inFormat))", ja: "形式変換を作成できません（\(inFormat)）"))
         }
         converter.downmix = true
         converter.sampleRateConverterQuality = AVAudioQuality.high.rawValue
@@ -74,7 +74,7 @@ public enum SendFileConverter {
         guard let inBuf = AVAudioPCMBuffer(pcmFormat: inFormat, frameCapacity: inCapacity),
               let outBuf = AVAudioPCMBuffer(pcmFormat: outputFormat,
                                             frameCapacity: AVAudioFrameCount(Double(inCapacity) * sampleRate / inFormat.sampleRate) + 1024)
-        else { throw CappyError.io("バッファを確保できません") }
+        else { throw CappyError.io(tr("Cannot allocate a buffer", ja: "バッファを確保できません")) }
 
         var readError: Error?
         var eof = false
@@ -109,13 +109,13 @@ public enum SendFileConverter {
                 return inBuf
             }
             if status == .error {
-                throw CappyError.io("形式変換に失敗しました: \(convError?.localizedDescription ?? "")")
+                throw CappyError.io(tr("Format conversion failed: \(convError?.localizedDescription ?? "")", ja: "形式変換に失敗しました: \(convError?.localizedDescription ?? "")"))
             }
             if outBuf.frameLength > 0 {
                 do {
                     try outFile.write(from: outBuf)
                 } catch {
-                    throw CappyError.io("\(outURL.lastPathComponent) に書き込めません: \(error.localizedDescription)")
+                    throw CappyError.io(tr("Cannot write \(outURL.lastPathComponent): \(error.localizedDescription)", ja: "\(outURL.lastPathComponent) に書き込めません: \(error.localizedDescription)"))
                 }
                 written += Int64(outBuf.frameLength)
             }
@@ -124,7 +124,7 @@ public enum SendFileConverter {
         outFile.close()
         if let readError {
             // 末尾が壊れていても、読めたところまでで送信用ファイルを作る
-            CappyLog.shared.warning("\(input.lastPathComponent) の末尾を読めませんでした: \(readError.localizedDescription)")
+            CappyLog.shared.warning(tr("Could not read the end of \(input.lastPathComponent): \(readError.localizedDescription)", ja: "\(input.lastPathComponent) の末尾を読めませんでした: \(readError.localizedDescription)"))
         }
         FileSecurity.makePrivate(outURL)
         return Result(url: outURL, container: container, frames: written)
@@ -137,7 +137,7 @@ public enum SendFileConverter {
         for input in inputs {
             let f = try AVAudioFile(forReading: input.url, commonFormat: .pcmFormatFloat32, interleaved: false)
             guard f.processingFormat.sampleRate == sampleRate, f.processingFormat.channelCount == 1 else {
-                throw CappyError.io("\(input.url.lastPathComponent) は 16 kHz モノラルではありません")
+                throw CappyError.io(tr("\(input.url.lastPathComponent) is not 16 kHz mono", ja: "\(input.url.lastPathComponent) は 16 kHz モノラルではありません"))
             }
             files.append((f, Int64(Double(input.offsetMs) / 1000 * sampleRate)))
         }
@@ -147,7 +147,7 @@ public enum SendFileConverter {
         guard let acc = AVAudioPCMBuffer(pcmFormat: floatFormat, frameCapacity: chunk),
               let tmp = AVAudioPCMBuffer(pcmFormat: floatFormat, frameCapacity: chunk),
               let out = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: chunk)
-        else { throw CappyError.io("バッファを確保できません") }
+        else { throw CappyError.io(tr("Cannot allocate a buffer", ja: "バッファを確保できません")) }
 
         var pos: Int64 = 0
         while pos < total {
@@ -200,7 +200,7 @@ public enum SendFileConverter {
         var chunks: [Chunk] = []
         let bufFrames: AVAudioFrameCount = 65_536
         guard let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: bufFrames) else {
-            throw CappyError.io("バッファを確保できません")
+            throw CappyError.io(tr("Cannot allocate a buffer", ja: "バッファを確保できません"))
         }
         var index = 0
         var start: Int64 = 0

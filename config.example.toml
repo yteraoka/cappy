@@ -1,59 +1,59 @@
-# ~/.config/cappy/config.toml の例
-# 認証情報そのものは書かない（Google はアプリケーションデフォルト認証情報を使う）
+# Example of ~/.config/cappy/config.toml (a Japanese version is in config.example.ja.toml)
+# Do not write credentials here (Google uses Application Default Credentials, AWS uses ~/.aws profiles)
 
 [profiles.default]
-provider = "gemini"          # gemini（Vertex AI）/ google（Speech-to-Text v2）/ transcribe（Amazon Transcribe）/ none（録音だけ行い、外部へ送信しない）
-language = "ja-JP"
+provider = "gemini"          # gemini (Vertex AI) / google (Speech-to-Text v2) / transcribe (Amazon Transcribe) / none (record only; nothing is sent)
+language = "ja-JP"           # meeting language; also used for the headings and speaker names in transcript.md and summary.md
 output_dir = "~/Recordings/cappy"
-# disk_warn_mb = 1024        # 空き容量がこれを下回ったら警告
-# disk_stop_mb = 300         # さらに下回ったら録音を安全に停止（終了コード 4）
+# disk_warn_mb = 1024        # warn when free space drops below this
+# disk_stop_mb = 300         # stop recording safely below this (exit code 4)
 
-# Google Cloud の共通設定（project_id と bucket は gemini でも使う）と、provider = "google" のときの設定
+# Common Google Cloud settings (project_id and bucket are also used by gemini), and settings for provider = "google"
 [profiles.default.google]
 project_id = "my-project"
-bucket = "my-cappy-bucket"   # 送信する音声を一時的に置くバケット
-delete_remote_after = true   # 文字起こし後にバケット上の音声と結果を削除
-# 以下は provider = "google"（Speech-to-Text v2）のときだけ使う
+bucket = "my-cappy-bucket"   # bucket that holds the audio to send temporarily
+delete_remote_after = true   # delete the audio and results in the bucket after transcription
+# The following are used only with provider = "google" (Speech-to-Text v2)
 location = "us"
 model = "chirp_3"
-# word_timestamps = true     # 単語タイムスタンプ（有効時は 1 ファイル約 20 分の制限があるため自動分割）
-# chunk_minutes = 19         # 分割長（分）。省略時は word_timestamps に応じて 19 / 59
-# diarization = true         # remote トラックで話者分離を試みる
+# word_timestamps = true     # word timestamps (with them, a file is limited to about 20 minutes, so audio is split automatically)
+# chunk_minutes = 19         # chunk length (minutes). Default: 19 / 59 depending on word_timestamps
+# diarization = true         # try speaker diarization on the remote track
 # min_speakers = 1
 # max_speakers = 6
 
-# Vertex AI の Gemini による文字起こし（provider = "gemini"、record --live）
+# Transcription with Gemini on Vertex AI (provider = "gemini", record --live)
 [profiles.default.gemini]
-# project_id = "my-project"  # 省略時は google.project_id
+# project_id = "my-project"  # default: google.project_id
 location = "global"          # global / us / eu
-model = "gemini-3.5-transcribe"            # 録音済みファイルの文字起こし
-live_model = "gemini-3.5-transcribe-live"  # record --live のリアルタイム文字起こし
-# chunk_minutes = 14         # 1 リクエストの長さ（分、1〜15）。話者分離・タイムスタンプ有効時は 15 分まで
-# diarization = true         # remote トラックで話者分離（最大 8 人）
-# word_timestamps = true     # 単語タイムスタンプ（無効にすると発言の時刻は推定になる）
-# custom_vocabulary = ["cappy", "Vertex AI"]  # 認識を寄せたい固有名詞など（1000 語まで）
+model = "gemini-3.5-transcribe"            # transcription of recorded files
+live_model = "gemini-3.5-transcribe-live"  # live transcription with record --live
+# chunk_minutes = 14         # length of one request (minutes, 1-15). Up to 15 minutes with diarization and timestamps
+# diarization = true         # speaker diarization on the remote track (up to 8 speakers)
+# word_timestamps = true     # word timestamps (without them, segment times are estimated)
+# custom_vocabulary = ["cappy", "Vertex AI"]  # proper nouns and other words to favor (up to 1000)
 
-# 会議の要約（Vertex AI の Claude / Gemini）。認証は上と同じ ADC を使う
+# Meeting summary (Claude / Gemini on Vertex AI). Uses the same ADC as above
 [profiles.default.summary]
-# provider = "vertex"        # vertex / bedrock / none（省略時は、上の provider が none なら none、それ以外は vertex）
-# project_id = "my-project"  # 省略時は google.project_id
-region = "global"            # global / us / eu（us・eu はデータの処理地域を限定できるが約 10% 高い）
-model = "gemini-4-argon"     # gemini- で始まれば Gemini、claude- で始まれば Claude（例: "claude-opus-5-5"）
-# fallback_model = "claude-opus-4-8"  # 要約を拒否されたときに再試行するモデル（省略時: Claude なら claude-opus-4-8、Gemini なら再試行しない。"" で再試行しない）
-effort = "high"              # low / medium / high / xhigh / max（深いほど丁寧だが遅く高い。Gemini 3 以降は thinkingLevel の LOW / MEDIUM / HIGH に対応）
+# provider = "vertex"        # vertex / bedrock / none (default: none if provider above is none, otherwise vertex)
+# project_id = "my-project"  # default: google.project_id
+region = "global"            # global / us / eu (us / eu restrict where data is processed, about 10% more expensive)
+model = "gemini-4-argon"     # gemini-* uses Gemini, claude-* uses Claude (e.g. "claude-opus-5-5")
+# fallback_model = "claude-opus-4-8"  # model to retry with when the summary is refused (default: claude-opus-4-8 for Claude, no retry for Gemini; "" disables)
+effort = "high"              # low / medium / high / xhigh / max (deeper is more careful but slower and more expensive; Gemini 3+ maps to thinkingLevel LOW / MEDIUM / HIGH)
 # max_tokens = 32000
-auto = false                 # true なら transcribe の後に自動で要約する（--no-summarize で抑止）
-# instructions_file = "~/.config/cappy/summary-instructions.md"  # 要約の書き方の追加指示
+auto = false                 # if true, summarize automatically after transcribe (suppress with --no-summarize)
+# instructions_file = "~/.config/cappy/summary-instructions.md"  # extra instructions on how to write the summary
 
-# AWS の共通設定（Amazon Transcribe での文字起こし・Amazon Bedrock での要約に使う）
-# 認証情報は書かず、~/.aws/config のプロファイル（SSO・アクセスキー・credential_process など）を使う
+# Common AWS settings (used for transcription with Amazon Transcribe and summaries with Amazon Bedrock)
+# Do not write credentials; cappy uses the profiles in ~/.aws/config (SSO, access keys, credential_process, ...)
 # [profiles.default.aws]
-# profile = "my-sso-profile"   # 省略時は AWS_PROFILE → AWS_DEFAULT_PROFILE → default
-# region = "ap-northeast-1"    # 省略時は AWS_REGION → AWS_DEFAULT_REGION → プロファイルの region
-# bucket = "my-cappy-bucket"   # provider = "transcribe" で音声を一時的に置く S3 バケット（同じリージョン）
-# delete_remote_after = true   # 文字起こし後に S3 上の音声と Transcribe のジョブを削除
+# profile = "my-sso-profile"   # default: AWS_PROFILE, then AWS_DEFAULT_PROFILE, then default
+# region = "ap-northeast-1"    # default: AWS_REGION, then AWS_DEFAULT_REGION, then region of the profile
+# bucket = "my-cappy-bucket"   # S3 bucket that holds the audio temporarily with provider = "transcribe" (same Region)
+# delete_remote_after = true   # delete the audio in S3 and the Transcribe job after transcription
 
-# Amazon Transcribe で文字起こしし、Bedrock の Claude で要約する例
+# Example: transcribe with Amazon Transcribe and summarize with Claude on Bedrock
 [profiles.aws]
 provider = "transcribe"
 
@@ -61,19 +61,19 @@ provider = "transcribe"
 region = "ap-northeast-1"
 bucket = "my-cappy-bucket"
 
-# record --live も Amazon Transcribe Streaming を使う（diarization・vocabulary_name・language_model_name も共通）
+# record --live also uses Amazon Transcribe Streaming (diarization, vocabulary_name and language_model_name apply too)
 [profiles.aws.transcribe]
-diarization = true           # remote トラックで話者分離
-max_speakers = 10            # 話者分離の最大人数（2〜30）
-# vocabulary_name = "cappy-terms"     # 事前に登録したカスタム語彙（同じリージョン・言語）
-# language_model_name = "my-model"    # 事前に作成したカスタム言語モデル
+diarization = true           # speaker diarization on the remote track
+max_speakers = 10            # maximum number of speakers (2-30)
+# vocabulary_name = "cappy-terms"     # custom vocabulary registered in advance (same Region and language)
+# language_model_name = "my-model"    # custom language model created in advance
 
 [profiles.aws.summary]
 provider = "bedrock"
 region = "jp"
 
-# Vertex AI の Gemini で文字起こしし、Amazon Bedrock の Claude で要約する例
-# プロファイルはほかのプロファイルの設定を引き継がないため、文字起こしに使う Google Cloud の設定もここに書く
+# Example: transcribe with Gemini on Vertex AI and summarize with Claude on Amazon Bedrock
+# Profiles do not inherit settings from other profiles, so the Google Cloud settings for transcription go here too
 [profiles.bedrock]
 provider = "gemini"
 
@@ -86,12 +86,12 @@ region = "ap-northeast-1"
 
 [profiles.bedrock.summary]
 provider = "bedrock"
-region = "jp"                # 推論プロファイルの範囲: global / jp / us / eu / au / apac、またはリージョン名（そのリージョンだけで処理）
-model = "claude-opus-5-5"    # 省略時は claude-opus-5-5。jp.anthropic.claude-opus-5-5 のような Bedrock のモデル ID も可
-# model = "global.moonshotai.kimi-k3.1"  # Claude 以外（Kimi K3.1、GLM-5.3 = "global.zai.glm-5.3" など）も可。東京では global のみ
+region = "jp"                # inference profile scope: global / jp / us / eu / au / apac, or a Region name (processed only in that Region)
+model = "claude-opus-5-5"    # default: claude-opus-5-5. A Bedrock model ID such as jp.anthropic.claude-opus-5-5 also works
+# model = "global.moonshotai.kimi-k3.1"  # non-Claude models also work (Kimi K3.1, GLM-5.3 = "global.zai.glm-5.3", ...). Tokyo: global only
 effort = "high"
 
-# クライアントごとに送信先や保存先を分ける例
+# Example: separate destinations and output directories per client
 [profiles.client-a]
 provider = "google"
 output_dir = "~/Recordings/client-a"
@@ -101,7 +101,7 @@ project_id = "client-a-project"
 location = "eu"
 bucket = "client-a-cappy"
 
-# 外部送信が許されない案件
+# Meetings whose content must not be sent outside
 [profiles.local-only]
 provider = "none"
 output_dir = "~/Recordings/local-only"

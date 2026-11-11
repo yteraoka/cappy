@@ -55,7 +55,7 @@ public final class Transcriber: @unchecked Sendable {
         // 完了済みなら transcript.json から出力し直すだけ
         if !options.force, let t = meta.transcription, t.state == .done,
            let doc = try? loadTranscript(), t.mix == options.mix {
-            Console.print("文字起こしは完了済みです。transcript を出力し直します（再実行は --force）")
+            Console.print(tr("Transcription is already done. Writing the transcript again (use --force to rerun)", ja: "文字起こしは完了済みです。transcript を出力し直します（再実行は --force）"))
             return try TranscriptRenderer.write(doc, formats: options.formats, to: store.directory)
         }
 
@@ -70,7 +70,7 @@ public final class Transcriber: @unchecked Sendable {
             m.transcription?.error = nil
             m.transcription?.updatedAt = TimeFormat.iso8601(Date())
         }
-        CappyLog.shared.info("文字起こしが完了しました segments=\(doc.segments.count)")
+        CappyLog.shared.info(tr("Transcription finished segments=\(doc.segments.count)", ja: "文字起こしが完了しました segments=\(doc.segments.count)"))
         if options.cleanup {
             await cleanupRemote()
         }
@@ -84,23 +84,23 @@ public final class Transcriber: @unchecked Sendable {
         let meta = store.metadata
         switch meta.recording.state {
         case .recording:
-            throw CappyError.usage("このセッションは録音中か、異常終了しています",
-                                   hint: "異常終了した場合は `cappy recover \(store.directory.path)` を実行してください")
+            throw CappyError.usage(tr("This session is still recording or ended abnormally", ja: "このセッションは録音中か、異常終了しています"),
+                                   hint: tr("If it ended abnormally, run `cappy recover \(store.directory.path)`", ja: "異常終了した場合は `cappy recover \(store.directory.path)` を実行してください"))
         case .finalized:
-            Console.print("送信用ファイルを作成しています…")
+            Console.print(tr("Creating the files to send…", ja: "送信用ファイルを作成しています…"))
             try SessionProcessing.convert(store)
         case .converted:
             let missing = meta.tracks.contains { t in
                 t.sendFile.map { !FileManager.default.fileExists(atPath: store.url(for: $0).path) } ?? true
             }
             if missing {
-                Console.print("送信用ファイルが見つからないため作り直しています…")
+                Console.print(tr("The files to send are missing; creating them again…", ja: "送信用ファイルが見つからないため作り直しています…"))
                 try SessionProcessing.convert(store)
             }
         }
         if options.mix {
             let tracks = store.metadata.tracks.filter { $0.id != .mix && $0.sendFile != nil }
-            guard tracks.count >= 1 else { throw CappyError.usage("ミックスするトラックがありません") }
+            guard tracks.count >= 1 else { throw CappyError.usage(tr("No tracks to mix", ja: "ミックスするトラックがありません")) }
             let mixExists = store.metadata.track(.mix).flatMap(\.sendFile).map {
                 FileManager.default.fileExists(atPath: store.url(for: $0).path)
             } ?? false
@@ -132,8 +132,8 @@ public final class Transcriber: @unchecked Sendable {
             let compatible = t.provider == provider.name && t.mix == options.mix && t.language == options.language
             if submitted && !compatible {
                 throw CappyError.usage(
-                    "既存の文字起こしジョブ（\(t.provider), \(t.language)\(t.mix ? ", mix" : "")）と指定が異なります",
-                    hint: "やり直す場合は --force を指定してください")
+                    tr("The options differ from the existing transcription job (\(t.provider), \(t.language)\(t.mix ? ", mix" : ""))", ja: "既存の文字起こしジョブ（\(t.provider), \(t.language)\(t.mix ? ", mix" : "")）と指定が異なります"),
+                    hint: tr("Use --force to start over", ja: "やり直す場合は --force を指定してください"))
             }
             if compatible {
                 if t.state == .failed {
@@ -154,7 +154,7 @@ public final class Transcriber: @unchecked Sendable {
         state.jobs = tracksToSend().map { TranscriptionJobRecord(track: $0.id, state: .pending) }
         state.state = .running
         state.updatedAt = TimeFormat.iso8601(Date())
-        guard !state.jobs.isEmpty else { throw CappyError.usage("送信するトラックがありません") }
+        guard !state.jobs.isEmpty else { throw CappyError.usage(tr("No tracks to send", ja: "送信するトラックがありません")) }
         try store.update { m in m.transcription = state }
     }
 
@@ -170,7 +170,7 @@ public final class Transcriber: @unchecked Sendable {
                                             diarization: options.diarization && track.id != .mic,
                                             wordTimestamps: options.wordTimestamps,
                                             minSpeakers: options.minSpeakers, maxSpeakers: options.maxSpeakers)
-            Console.print("\(track.id.displayName)（\(track.id.rawValue)）を送信しています…")
+            Console.print(tr("Sending \(track.id.displayName) (\(track.id.rawValue))…", ja: "\(track.id.displayName)（\(track.id.rawValue)）を送信しています…"))
             let handle: JobHandle
             do {
                 handle = try await provider.submit(audio, options: opts)
@@ -219,16 +219,16 @@ public final class Transcriber: @unchecked Sendable {
                         m.transcription!.jobs[i].state = .done
                         m.transcription!.jobs[i].completedAt = TimeFormat.iso8601(Date())
                     }
-                    Console.print("\(record.track.displayName)（\(record.track.rawValue)）の認識が完了しました")
+                    Console.print(tr("Recognition of \(record.track.displayName) (\(record.track.rawValue)) finished", ja: "\(record.track.displayName)（\(record.track.rawValue)）の認識が完了しました"))
                 case .failed(let message):
                     if handle.info["diarization"] == "true", Self.mentionsDiarization(message) {
                         // 実行時に話者分離が拒否された場合は、話者分離なしで投入し直す
-                        Console.print("話者分離が使えなかったため、話者分離なしで再送信します")
+                        Console.print(tr("Speaker diarization is not available; sending again without it", ja: "話者分離が使えなかったため、話者分離なしで再送信します"))
                         try await resubmitWithoutDiarization(record)
                         running[record.track] = .some(nil)
                         continue
                     }
-                    let err = CappyError.transcription("\(record.track.rawValue) の文字起こしに失敗しました: \(message)")
+                    let err = CappyError.transcription(tr("Transcription of \(record.track.rawValue) failed: \(message)", ja: "\(record.track.rawValue) の文字起こしに失敗しました: \(message)"))
                     try markFailed(record.track, err)
                     throw err
                 }
@@ -237,7 +237,7 @@ public final class Transcriber: @unchecked Sendable {
             let progress = running.keys.sorted().map { t in
                 "\(t.rawValue) \(running[t]!.flatMap { $0 }.map { "\($0)%" } ?? "…")"
             }.joined(separator: "  ")
-            Console.status("認識中 \(TimeFormat.elapsed(Date().timeIntervalSince(started)))  \(progress)")
+            Console.status(tr("Recognizing \(TimeFormat.elapsed(Date().timeIntervalSince(started)))  \(progress)", ja: "認識中 \(TimeFormat.elapsed(Date().timeIntervalSince(started)))  \(progress)"))
             try await sleep(delay)
             delay = min(options.pollMax, delay * options.pollFactor)
         }
@@ -259,7 +259,7 @@ public final class Transcriber: @unchecked Sendable {
             guard let i = m.transcription?.jobs.firstIndex(where: { $0.track == record.track }) else { return }
             m.transcription!.jobs[i].handle = handle
             m.transcription!.jobs[i].diarization = false
-            m.transcription!.jobs[i].note = "モデルが話者分離に対応していないため、話者分離なしで実行しました"
+            m.transcription!.jobs[i].note = tr("Ran without speaker diarization because the model does not support it", ja: "モデルが話者分離に対応していないため、話者分離なしで実行しました")
         }
     }
 
@@ -267,7 +267,7 @@ public final class Transcriber: @unchecked Sendable {
 
     func collectResults() async throws -> TranscriptDocument {
         let meta = store.metadata
-        guard let t = meta.transcription else { throw CappyError.transcription("文字起こしの状態がありません") }
+        guard let t = meta.transcription else { throw CappyError.transcription(tr("No transcription state", ja: "文字起こしの状態がありません")) }
         var perTrack: [[Segment]] = []
         var diarization: [String: Bool] = [:]
         for record in t.jobs {
@@ -298,8 +298,8 @@ public final class Transcriber: @unchecked Sendable {
                 try await provider.cleanup(h)
             } catch {
                 ok = false
-                CappyLog.shared.warning("クラウド上のファイルを削除できませんでした（ライフサイクルルールで削除されます）: \(error)")
-                Console.print("警告: クラウド上のファイルを削除できませんでした: \(error)")
+                CappyLog.shared.warning(tr("Could not delete the files in the cloud (the lifecycle rule will delete them): \(error)", ja: "クラウド上のファイルを削除できませんでした（ライフサイクルルールで削除されます）: \(error)"))
+                Console.print(tr("Warning: could not delete the files in the cloud: \(error)", ja: "警告: クラウド上のファイルを削除できませんでした: \(error)"))
             }
         }
         _ = try? store.update { m in m.transcription?.cleanedUp = ok }
@@ -309,7 +309,7 @@ public final class Transcriber: @unchecked Sendable {
 
     func markFailed(_ track: TrackID, _ error: Error) throws {
         let message = String(describing: error)
-        CappyLog.shared.error("文字起こしエラー track=\(track.rawValue): \(message)")
+        CappyLog.shared.error(tr("Transcription error track=\(track.rawValue): \(message)", ja: "文字起こしエラー track=\(track.rawValue): \(message)"))
         try store.update { m in
             if let i = m.transcription?.jobs.firstIndex(where: { $0.track == track }) {
                 m.transcription!.jobs[i].state = .failed
@@ -326,22 +326,22 @@ public final class Transcriber: @unchecked Sendable {
         if let a = error as? AWSAPIError {
             var hint: String?
             if a.httpStatus == 401 || a.httpStatus == 403 {
-                hint = "認証情報と権限を確認してください（`cappy doctor`）"
+                hint = tr("Check the credentials and permissions (`cappy doctor`)", ja: "認証情報と権限を確認してください（`cappy doctor`）")
             } else if a.isTransient {
-                hint = "時間をおいて同じコマンドで再開してください"
+                hint = tr("Wait a while and resume with the same command", ja: "時間をおいて同じコマンドで再開してください")
             }
-            return CappyError.transcription("文字起こしサービスのエラー: \(a)", hint: hint)
+            return CappyError.transcription(tr("Transcription service error: \(a)", ja: "文字起こしサービスのエラー: \(a)"), hint: hint)
         }
         if let g = error as? GoogleAPIError {
             var hint: String?
             if g.httpStatus == 401 || g.httpStatus == 403 {
-                hint = "認証情報と権限を確認してください（`cappy doctor`）"
+                hint = tr("Check the credentials and permissions (`cappy doctor`)", ja: "認証情報と権限を確認してください（`cappy doctor`）")
             } else if g.httpStatus == 429 {
-                hint = "クォータを超えている可能性があります"
+                hint = tr("The quota may be exceeded", ja: "クォータを超えている可能性があります")
             }
-            return CappyError.transcription("文字起こしサービスのエラー: \(g)", hint: hint)
+            return CappyError.transcription(tr("Transcription service error: \(g)", ja: "文字起こしサービスのエラー: \(g)"), hint: hint)
         }
-        return CappyError.transcription("文字起こしに失敗しました: \(error)")
+        return CappyError.transcription(tr("Transcription failed: \(error)", ja: "文字起こしに失敗しました: \(error)"))
     }
 }
 
@@ -361,15 +361,15 @@ public enum ProviderFactory {
             let credentials = try AWSCredentialsProvider.resolve(profile: aws.profile, region: aws.region, transport: transport)
             guard let region = credentials.region else {
                 throw CappyError.usage(
-                    "Amazon Transcribe を呼び出す AWS のリージョンが設定されていません",
-                    hint: "[profiles.\(profile.name).aws] の region、AWS_REGION、AWS のプロファイルの region のいずれかを設定してください")
+                    tr("The AWS region for Amazon Transcribe is not set", ja: "Amazon Transcribe を呼び出す AWS のリージョンが設定されていません"),
+                    hint: tr("Set region in [profiles.\(profile.name).aws], AWS_REGION, or region in the AWS profile", ja: "[profiles.\(profile.name).aws] の region、AWS_REGION、AWS のプロファイルの region のいずれかを設定してください"))
             }
             return try AmazonTranscribeProvider(settings: profile.transcribe, region: region, bucket: aws.bucket,
                                                 credentials: credentials, transport: transport)
         case "none":
-            throw CappyError.usage("プロバイダが none のため、文字起こしは行いません（録音のみ）")
+            throw CappyError.usage(tr("Provider is none, so no transcription (recording only)", ja: "プロバイダが none のため、文字起こしは行いません（録音のみ）"))
         default:
-            throw CappyError.usage("未対応のプロバイダです: \(name)（gemini / google / transcribe / none）")
+            throw CappyError.usage(tr("Unsupported provider: \(name) (gemini / google / transcribe / none)", ja: "未対応のプロバイダです: \(name)（gemini / google / transcribe / none）"))
         }
     }
 }

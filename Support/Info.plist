@@ -13,8 +13,8 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>cappy は会議アプリの音声を録音するためにシステムオーディオ録音を使用します。</string>
+	<string>cappy uses system audio recording to record the audio of meeting apps. / cappy は会議アプリの音声を録音するためにシステムオーディオ録音を使用します。</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>cappy は自分の声を録音するためにマイクを使用します。</string>
+	<string>cappy uses the microphone to record your voice. / cappy は自分の声を録音するためにマイクを使用します。</string>
 </dict>
 </plist>

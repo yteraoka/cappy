@@ -94,7 +94,7 @@ final class CaptureWriter: @unchecked Sendable {
                 if empty, io.stopped.load(ordering: .acquiring), !pending.isEmpty {
                     droppedTotal += io.ring.droppedCount - lastDropped
                     current = pending.removeFirst()
-                    CappyLog.shared.debug("writer: 新しい集約デバイスの入力に切り替えました")
+                    CappyLog.shared.debug(tr("writer: switched to the input of the new aggregate device", ja: "writer: 新しい集約デバイスの入力に切り替えました"))
                     lastDropped = 0
                     pendingReason = current.reason
                     buffers = [:]

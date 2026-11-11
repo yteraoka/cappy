@@ -45,7 +45,7 @@ public final class FileSink: AudioSink, @unchecked Sendable {
             fileFormat = f.processingFormat
             FileSecurity.makePrivate(url)
         } catch {
-            throw CappyError.io("\(url.lastPathComponent) を作成できません: \(error.localizedDescription)")
+            throw CappyError.io(tr("Cannot create \(url.lastPathComponent): \(error.localizedDescription)", ja: "\(url.lastPathComponent) を作成できません: \(error.localizedDescription)"))
         }
     }
 
@@ -61,11 +61,11 @@ public final class FileSink: AudioSink, @unchecked Sendable {
             if converterInput == nil || !(converterInput!.isEqual(buffer.format)) {
                 converter = AVAudioConverter(from: buffer.format, to: fileFormat)
                 converterInput = buffer.format
-                CappyLog.shared.info("\(url.lastPathComponent): 入力形式が変わったため変換して書き込みます "
+                CappyLog.shared.info(tr("\(url.lastPathComponent): the input format changed; converting before writing ", ja: "\(url.lastPathComponent): 入力形式が変わったため変換して書き込みます ")
                     + "(\(Int(buffer.format.sampleRate))Hz/\(buffer.format.channelCount)ch → "
                     + "\(Int(fileFormat.sampleRate))Hz/\(fileFormat.channelCount)ch)")
             }
-            guard let converter else { throw CappyError.io("形式変換を作成できません") }
+            guard let converter else { throw CappyError.io(tr("Cannot create the format converter", ja: "形式変換を作成できません")) }
             let ratio = fileFormat.sampleRate / buffer.format.sampleRate
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
             guard let out = AVAudioPCMBuffer(pcmFormat: fileFormat, frameCapacity: capacity) else { return }
@@ -80,14 +80,14 @@ public final class FileSink: AudioSink, @unchecked Sendable {
                 inputStatus.pointee = .haveData
                 return buffer
             }
-            if status == .error { throw convError ?? CappyError.io("形式変換に失敗しました") }
+            if status == .error { throw convError ?? CappyError.io(tr("Format conversion failed", ja: "形式変換に失敗しました")) }
             if out.frameLength > 0 {
                 try file.write(from: out)
                 lock.withLock { _framesWritten += Int64(out.frameLength) }
             }
         } catch {
             lock.withLock { if _failure == nil { _failure = error } }
-            CappyLog.shared.error("\(url.lastPathComponent) への書き込みに失敗しました: \(error.localizedDescription)")
+            CappyLog.shared.error(tr("Failed to write \(url.lastPathComponent): \(error.localizedDescription)", ja: "\(url.lastPathComponent) への書き込みに失敗しました: \(error.localizedDescription)"))
         }
     }
 
@@ -100,6 +100,6 @@ public final class FileSink: AudioSink, @unchecked Sendable {
         file?.close()
         file = nil
         FileSecurity.makePrivate(url)
-        if let failure { throw CappyError.io("\(url.lastPathComponent) の書き込みに失敗しました: \(failure.localizedDescription)") }
+        if let failure { throw CappyError.io(tr("Failed to write \(url.lastPathComponent): \(failure.localizedDescription)", ja: "\(url.lastPathComponent) の書き込みに失敗しました: \(failure.localizedDescription)")) }
     }
 }

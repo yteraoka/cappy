@@ -111,7 +111,7 @@ public struct STSClient: Sendable {
         }
         let f = XMLFields.parse(resp.body)
         guard let arn = f["Arn"], let account = f["Account"] else {
-            throw CappyError.transcription("GetCallerIdentity の応答を解釈できません")
+            throw CappyError.transcription(tr("Cannot parse the GetCallerIdentity response", ja: "GetCallerIdentity の応答を解釈できません"))
         }
         return Identity(account: account, arn: arn, userID: f["UserId"] ?? "")
     }

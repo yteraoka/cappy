@@ -4,8 +4,21 @@ import Foundation
 
 struct Completion: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "シェルの補完スクリプトを出力する（bash / zsh）",
-        discussion: """
+        abstract: tr("Print a shell completion script (bash / zsh)", ja: "シェルの補完スクリプトを出力する（bash / zsh）"),
+        discussion: tr("""
+        zsh (compinit must be called in ~/.zshrc):
+          mkdir -p ~/.zfunc
+          cappy completion zsh > ~/.zfunc/_cappy
+          # In ~/.zshrc, before compinit: fpath=(~/.zfunc $fpath)
+
+        bash (with bash-completion):
+          mkdir -p ~/.local/share/bash-completion/completions
+          cappy completion bash > ~/.local/share/bash-completion/completions/cappy
+          # Without bash-completion, add to ~/.bashrc: source <(cappy completion bash)
+
+        When installed with Homebrew, the formula installs the completion scripts.
+        --profile, --app, --pid, --mic and others are completed from the current config file, audio processes and devices.
+        """, ja: """
         zsh（~/.zshrc で compinit を呼んでいること）:
           mkdir -p ~/.zfunc
           cappy completion zsh > ~/.zfunc/_cappy
@@ -18,17 +31,17 @@ struct Completion: ParsableCommand {
 
         Homebrew で入れた場合は、formula が補完スクリプトも配置します。
         --profile・--app・--pid・--mic などは、その時点の設定ファイルや音声プロセス・デバイスから候補を出します。
-        """
+        """)
     )
 
-    @Argument(help: "シェル（bash / zsh。省略時は $SHELL から判断）", completion: .list(["bash", "zsh"]))
+    @Argument(help: ArgumentHelp(tr("Shell (bash / zsh; detected from $SHELL if omitted)", ja: "シェル（bash / zsh。省略時は $SHELL から判断）")), completion: .list(["bash", "zsh"]))
     var shell: String?
 
     func run() throws {
         let name = shell ?? CompletionShell.autodetected()?.rawValue
         guard let name, let s = CompletionShell(rawValue: name), s == .bash || s == .zsh else {
-            throw CappyError.usage("対応しているシェルは bash と zsh です" + (name.map { "（指定: \($0)）" } ?? ""),
-                                   hint: "`cappy completion zsh` のようにシェルを指定してください")
+            throw CappyError.usage(tr("Supported shells are bash and zsh", ja: "対応しているシェルは bash と zsh です") + (name.map { tr(" (given: \($0))", ja: "（指定: \($0)）") } ?? ""),
+                                   hint: tr("Specify the shell, e.g. `cappy completion zsh`", ja: "`cappy completion zsh` のようにシェルを指定してください"))
         }
         print(Cappy.completionScript(for: s), terminator: "")
     }
@@ -66,20 +79,20 @@ enum CompletionCandidates {
     static func apps() -> [String] {
         var seen = Set<String>()
         let items = processes().filter { !$0.bundleID.isEmpty && seen.insert($0.bundleID).inserted }.map {
-            ($0.bundleID, Optional($0.name + ($0.isRunningOutput ? "（出力中）" : "")))
+            ($0.bundleID, Optional($0.name + ($0.isRunningOutput ? tr(" (playing)", ja: "（出力中）") : "")))
         }
         return format(items)
     }
 
     static func pids() -> [String] {
         format(processes().map { (String($0.pid), Optional([$0.name, $0.bundleID].filter { !$0.isEmpty }.joined(separator: " ")
-            + ($0.isRunningOutput ? "（出力中）" : ""))) })
+            + ($0.isRunningOutput ? tr(" (playing)", ja: "（出力中）") : ""))) })
     }
 
     /// 入力デバイスの UID
     static func microphones() -> [String] {
         let devices = ((try? AudioDevices.all()) ?? []).filter { $0.inputChannels > 0 && !$0.uid.hasPrefix("dev.cappy.") }
-        return format(devices.map { ($0.uid, Optional($0.name + ($0.isDefaultInput ? "（既定）" : ""))) })
+        return format(devices.map { ($0.uid, Optional($0.name + ($0.isDefaultInput ? tr(" (default)", ja: "（既定）") : ""))) })
     }
 
     /// よく使うモデルと、設定ファイルに書かれたモデル

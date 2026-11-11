@@ -85,8 +85,8 @@ import Testing
             _ = try await client(stub).generate(Self.request, model: "claude-opus-5-5")
         } throws: { e in
             guard let a = e as? AWSAPIError else { return false }
-            let hint = Summarizer.hint(for: a, model: "claude-opus-5-5", region: "jp", provider: "bedrock") ?? ""
-            return a.httpStatus == 403 && a.code == "permission_error" && a.message.contains("not available") && hint.contains("モデルアクセス")
+            let hint = L10n.$override.withValue(.en) { Summarizer.hint(for: a, model: "claude-opus-5-5", region: "jp", provider: "bedrock") } ?? ""
+            return a.httpStatus == 403 && a.code == "permission_error" && a.message.contains("not available") && hint.contains("Model access")
         }
         let iam = AWSAPIError(httpStatus: 403, code: "AccessDeniedException", message: "not authorized to perform: bedrock:InvokeModel")
         #expect(Summarizer.bedrockHint(iam, model: "claude-opus-5-5", routing: "jp")?.contains("bedrock:InvokeModel") == true)

@@ -86,7 +86,7 @@ public struct BedrockChatClient: SummaryModelClient {
     public func generate(_ request: SummaryRequest, model: String) async throws -> SummaryResponse {
         let id = BedrockModels.modelID(model, routing: routing)
         let body = try JSONSerialization.data(withJSONObject: Self.body(request, modelID: id), options: [.sortedKeys])
-        return try await retry.run("要約（\(id)）") {
+        return try await retry.run(tr("Summary (\(id))", ja: "要約（\(id)）")) {
             let req = try await makeRequest(body: body, stream: true)
             var parser = ChatCompletionsStreamParser(model: id)
             var head = ""
@@ -102,7 +102,7 @@ public struct BedrockChatClient: SummaryModelClient {
     }
 
     public func countTokens(_ request: SummaryRequest, model: String) async throws -> Int {
-        throw CappyError.usage("\(model) のトークン数の確認には対応していません")
+        throw CappyError.usage(tr("Counting tokens is not supported for \(model)", ja: "\(model) のトークン数の確認には対応していません"))
     }
 
     /// 課金されない確認: max_tokens = 0 の不正なリクエストを送る。
@@ -112,7 +112,7 @@ public struct BedrockChatClient: SummaryModelClient {
         let body = try JSONSerialization.data(withJSONObject: [
             "model": id, "max_tokens": 0, "messages": [["role": "user", "content": "ping"]],
         ] as [String: Any], options: [.sortedKeys])
-        let resp = try await retry.run("モデルの確認") {
+        let resp = try await retry.run(tr("Checking the model", ja: "モデルの確認")) {
             let r = try await transport.send(try await makeRequest(body: body, stream: false))
             if r.status >= 500 || r.status == 429 { throw AWSAPIError.from(r) }
             return r
@@ -148,7 +148,7 @@ public struct ChatCompletionsStreamParser {
         guard !payload.isEmpty, let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] else { return }
         if let err = obj["error"] as? [String: Any] {
             let type = err["type"] as? String ?? err["code"] as? String
-            let message = err["message"] as? String ?? "不明なエラー"
+            let message = err["message"] as? String ?? tr("unknown error", ja: "不明なエラー")
             let status = ["rate_limit_error": 429, "overloaded_error": 529, "server_error": 500, "api_error": 500][type ?? ""] ?? 400
             throw AWSAPIError(httpStatus: status, code: type, message: message)
         }
@@ -179,9 +179,9 @@ public struct ChatCompletionsStreamParser {
     }
 
     public func finish() throws -> SummaryResponse {
-        guard sawChunk else { throw CappyError.transcription("要約の応答が空です") }
+        guard sawChunk else { throw CappyError.transcription(tr("The summary response is empty", ja: "要約の応答が空です")) }
         guard done || finishReason != nil else {
-            throw AWSAPIError(httpStatus: 503, code: "incomplete_stream", message: "応答が途中で切れました")
+            throw AWSAPIError(httpStatus: 503, code: "incomplete_stream", message: tr("The response was cut off", ja: "応答が途中で切れました"))
         }
         let refused = !refusal.isEmpty && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return SummaryResponse(text: text.trimmingCharacters(in: .whitespacesAndNewlines), model: model,
@@ -211,7 +211,7 @@ public struct BedrockSummaryClient: SummaryModelClient {
         case .claude: return claude
         case .bedrockChat: return chat
         case .gemini, nil:
-            throw CappyError.usage("Bedrock では使えないモデルです: \(model)（claude- で始まるモデル、または moonshotai.kimi-k3.1 のような Bedrock のモデル ID）")
+            throw CappyError.usage(tr("This model cannot be used on Bedrock: \(model) (use a model starting with claude-, or a Bedrock model ID such as moonshotai.kimi-k3.1)", ja: "Bedrock では使えないモデルです: \(model)（claude- で始まるモデル、または moonshotai.kimi-k3.1 のような Bedrock のモデル ID）"))
         }
     }
 

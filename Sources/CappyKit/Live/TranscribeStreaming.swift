@@ -180,7 +180,7 @@ final class TranscribeStreamSession: LiveSession, @unchecked Sendable {
 
     func handle(_ data: Data) {
         guard let msg = try? EventStreamMessage.decode(data) else {
-            CappyLog.shared.warning("live \(track.rawValue): Transcribe Streaming のメッセージを解釈できません（\(data.count) バイト）")
+            CappyLog.shared.warning(tr("live \(track.rawValue): cannot parse a Transcribe Streaming message (\(data.count) bytes)", ja: "live \(track.rawValue): Transcribe Streaming のメッセージを解釈できません（\(data.count) バイト）"))
             return
         }
         if msg.string(":message-type") == "exception" {
@@ -218,13 +218,13 @@ final class TranscribeStreamSession: LiveSession, @unchecked Sendable {
         if speakerLabels && (lower.contains("speaker") || lower.contains("partition")) {
             // 話者分離に対応していない場合は、話者分離なしで張り直す
             onSpeakerLabelsRejected()
-            CappyLog.shared.warning("live \(track.rawValue): 話者分離を使えないため、話者分離なしで再接続します: \(message)")
-            markDead("話者分離を使えないため、話者分離なしで再接続します（\(message)）", permanent: false)
+            CappyLog.shared.warning(tr("live \(track.rawValue): speaker diarization is not available; reconnecting without it: \(message)", ja: "live \(track.rawValue): 話者分離を使えないため、話者分離なしで再接続します: \(message)"))
+            markDead(tr("Speaker diarization is not available; reconnecting without it (\(message))", ja: "話者分離を使えないため、話者分離なしで再接続します（\(message)）"), permanent: false)
             return
         }
         // 設定の誤り（言語・語彙など）は再接続しても直らない。無音が続いた時間切れなどは再接続する
         let permanent = type == "BadRequestException" && !lower.contains("timed out")
-        markDead("Amazon Transcribe Streaming のエラー（\(type)）: \(message)", permanent: permanent)
+        markDead(tr("Amazon Transcribe Streaming error (\(type)): \(message)", ja: "Amazon Transcribe Streaming のエラー（\(type)）: \(message)"), permanent: permanent)
     }
 }
 

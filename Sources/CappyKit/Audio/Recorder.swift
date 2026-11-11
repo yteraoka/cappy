@@ -50,7 +50,7 @@ public enum TargetResolver {
         for prefix in spec.bundleIDs {
             let matched = processes.filter { !$0.bundleID.isEmpty && $0.bundleID.hasPrefix(prefix) }
             if matched.isEmpty {
-                CappyLog.shared.warning("bundle ID \(prefix) に一致する音声プロセスがありません")
+                CappyLog.shared.warning(tr("No audio process matches bundle ID \(prefix)", ja: "bundle ID \(prefix) に一致する音声プロセスがありません"))
             }
             ids.append(contentsOf: matched.map(\.objectID))
             targets.append(SessionTarget(kind: .app, bundleID: prefix, matchedPIDs: matched.map(\.pid)))
@@ -60,7 +60,7 @@ public enum TargetResolver {
                 ids.append(obj)
                 targets.append(SessionTarget(kind: .pid, pid: pid, matchedPIDs: [pid]))
             } else {
-                CappyLog.shared.warning("PID \(pid) は音声プロセスとして見つかりません")
+                CappyLog.shared.warning(tr("PID \(pid) is not found as an audio process", ja: "PID \(pid) は音声プロセスとして見つかりません"))
                 targets.append(SessionTarget(kind: .pid, pid: pid, matchedPIDs: []))
             }
         }
@@ -68,8 +68,8 @@ public enum TargetResolver {
         ids = ids.filter { seen.insert($0).inserted }
         guard !ids.isEmpty else {
             throw CappyError.targetNotFound(
-                "録音対象のプロセスが見つかりません（\(describe(spec))）",
-                hint: "`cappy apps` で音声プロセスを確認してください。対象が音声を出し始めるまで待つには --wait を指定します")
+                tr("No process to record was found (\(describe(spec)))", ja: "録音対象のプロセスが見つかりません（\(describe(spec))）"),
+                hint: tr("Check the audio processes with `cappy apps`. Use --wait to wait until the target starts playing audio", ja: "`cappy apps` で音声プロセスを確認してください。対象が音声を出し始めるまで待つには --wait を指定します"))
         }
         return ResolvedTargets(tapMode: .processes(ids.sorted()), targets: targets, objectIDs: ids.sorted())
     }
@@ -156,15 +156,15 @@ public final class Recorder: @unchecked Sendable {
             do {
                 tap = try ProcessTap(mode: resolved.tapMode.mode)
             } catch {
-                throw CappyError.io("タップを作成できません: \(error)",
-                                    hint: "macOS 15 以降が必要です。`cappy doctor` で権限を確認してください")
+                throw CappyError.io(tr("Cannot create the process tap: \(error)", ja: "タップを作成できません: \(error)"),
+                                    hint: tr("macOS 15 or later is required. Check the permissions with `cappy doctor`", ja: "macOS 15 以降が必要です。`cappy doctor` で権限を確認してください"))
             }
             let engine: CaptureEngine
             do {
                 engine = try CaptureEngine(tap: tap, outputUID: outputUID, micUID: currentMicUID, reason: nil)
             } catch {
                 tap?.destroy()
-                throw CappyError.io("集約デバイスを作成できません: \(error)")
+                throw CappyError.io(tr("Cannot create the aggregate device: \(error)", ja: "集約デバイスを作成できません: \(error)"))
             }
             self.engine = engine
 
@@ -186,7 +186,7 @@ public final class Recorder: @unchecked Sendable {
             } else {
                 engine.destroy()
                 tap?.destroy()
-                throw CappyError.io("集約デバイスにタップのストリームがありません")
+                throw CappyError.io(tr("The aggregate device has no tap stream", ja: "集約デバイスにタップのストリームがありません"))
             }
             if let layout = engine.io.mic {
                 let sink = FileSink(url: session.url(for: "mic.caf"))
@@ -203,7 +203,7 @@ public final class Recorder: @unchecked Sendable {
                 t.deviceName = currentMicUID.flatMap { try? AudioDevices.device(uid: $0)?.name }
                 tracks.append(t)
             } else if options.micEnabled {
-                Console.print("警告: マイクの入力ストリームが見つからないため、マイクは録音しません")
+                Console.print(tr("Warning: no microphone input stream was found, so the microphone is not recorded", ja: "警告: マイクの入力ストリームが見つからないため、マイクは録音しません"))
             }
 
             let writer = CaptureWriter(io: engine.io, sinks: sinks)
@@ -225,31 +225,31 @@ public final class Recorder: @unchecked Sendable {
             } catch {
                 engine.destroy()
                 tap?.destroy()
-                throw CappyError.io("録音を開始できません: \(error)")
+                throw CappyError.io(tr("Cannot start recording: \(error)", ja: "録音を開始できません: \(error)"))
             }
             running = true
             installListeners()
             startMonitor()
-            CappyLog.shared.info("録音を開始しました tracks=\(tracks.map(\.id.rawValue))")
+            CappyLog.shared.info(tr("Recording started tracks=\(tracks.map(\.id.rawValue))", ja: "録音を開始しました tracks=\(tracks.map(\.id.rawValue))"))
         }
     }
 
     private static func defaultOutputUID() throws -> String {
         let out = try AudioDevices.defaultOutputDevice()
-        guard out != kAudioObjectUnknown else { throw CappyError.io("既定の出力デバイスがありません") }
+        guard out != kAudioObjectUnknown else { throw CappyError.io(tr("No default output device", ja: "既定の出力デバイスがありません")) }
         return try CA.string(out, kAudioDevicePropertyDeviceUID)
     }
 
     private func resolveMicUID() throws -> String? {
         if let uid = options.micUID {
             guard (try? AudioDevices.device(uid: uid)) != nil else {
-                throw CappyError.usage("入力デバイス \(uid) が見つかりません", hint: "`cappy devices` で UID を確認してください")
+                throw CappyError.usage(tr("Input device \(uid) not found", ja: "入力デバイス \(uid) が見つかりません"), hint: tr("Check the UID with `cappy devices`", ja: "`cappy devices` で UID を確認してください"))
             }
             return uid
         }
         let dev = try AudioDevices.defaultInputDevice()
         guard dev != kAudioObjectUnknown else {
-            Console.print("警告: 既定の入力デバイスがないため、マイクは録音しません")
+            Console.print(tr("Warning: there is no default input device, so the microphone is not recorded", ja: "警告: 既定の入力デバイスがないため、マイクは録音しません"))
             return nil
         }
         return try CA.string(dev, kAudioDevicePropertyDeviceUID)
@@ -267,10 +267,10 @@ public final class Recorder: @unchecked Sendable {
 
     private func recordGap(_ gap: SessionGap) {
         guard gap.endMs > gap.startMs else {
-            CappyLog.shared.info("集約デバイスを作り直しました（欠落なし） reason=\(gap.reason)")
+            CappyLog.shared.info(tr("Recreated the aggregate device (no gap) reason=\(gap.reason)", ja: "集約デバイスを作り直しました（欠落なし） reason=\(gap.reason)"))
             return
         }
-        CappyLog.shared.warning("欠落区間 \(gap.startMs)–\(gap.endMs) ms reason=\(gap.reason)")
+        CappyLog.shared.warning(tr("Gap \(gap.startMs)–\(gap.endMs) ms reason=\(gap.reason)", ja: "欠落区間 \(gap.startMs)–\(gap.endMs) ms reason=\(gap.reason)"))
         _ = try? session.update { m in GapMerger.append(gap, to: &m.gaps) }
     }
 
@@ -294,8 +294,8 @@ public final class Recorder: @unchecked Sendable {
             guard let self else { return }
             let uid = (try? Self.defaultOutputUID()) ?? ""
             guard !uid.isEmpty, uid != self.currentOutputUID else { return }
-            CappyLog.shared.info("既定の出力デバイスが変わりました: \(self.currentOutputUID) → \(uid)")
-            Console.print("出力デバイスが変わったため、録音を切り替えます")
+            CappyLog.shared.info(tr("Default output device changed: \(self.currentOutputUID) → \(uid)", ja: "既定の出力デバイスが変わりました: \(self.currentOutputUID) → \(uid)"))
+            Console.print(tr("The output device changed; switching the recording", ja: "出力デバイスが変わったため、録音を切り替えます"))
             self.rebuildEngine(reason: "output_device_changed")
         }
         if options.micEnabled, options.micUID == nil {
@@ -303,8 +303,8 @@ public final class Recorder: @unchecked Sendable {
                 guard let self else { return }
                 let uid = try? self.resolveMicUID()
                 guard uid != self.currentMicUID else { return }
-                CappyLog.shared.info("既定の入力デバイスが変わりました: \(self.currentMicUID ?? "-") → \(uid ?? "-")")
-                Console.print("入力デバイスが変わったため、録音を切り替えます")
+                CappyLog.shared.info(tr("Default input device changed: \(self.currentMicUID ?? "-") → \(uid ?? "-")", ja: "既定の入力デバイスが変わりました: \(self.currentMicUID ?? "-") → \(uid ?? "-")"))
+                Console.print(tr("The input device changed; switching the recording", ja: "入力デバイスが変わったため、録音を切り替えます"))
                 self.rebuildEngine(reason: "input_device_changed")
             }
         }
@@ -338,7 +338,7 @@ public final class Recorder: @unchecked Sendable {
         // 終了して減っただけなら作り直さない（消えたプロセスは音を出さないので害がない）
         guard !Set(newIDs).isSubset(of: Set(currentIDs)) else { return }
         let mergedIDs = Array(Set(newIDs).union(currentIDs.filter { AudioProcesses.info(objectID: $0) != nil })).sorted()
-        CappyLog.shared.info("対象の音声プロセスが変わりました: \(currentIDs) → \(newIDs)")
+        CappyLog.shared.info(tr("Target audio processes changed: \(currentIDs) → \(newIDs)", ja: "対象の音声プロセスが変わりました: \(currentIDs) → \(newIDs)"))
         _ = try? session.update { m in
             // 一致した PID の記録を更新（既存の PID は残す）
             for i in m.targets.indices {
@@ -378,7 +378,7 @@ public final class Recorder: @unchecked Sendable {
             _ = try? session.update { m in m.recording.outputDeviceUID = outputUID }
         } catch {
             old?.destroy()
-            CappyLog.shared.error("集約デバイスを作り直せませんでした（2 秒後に再試行）: \(error)")
+            CappyLog.shared.error(tr("Could not recreate the aggregate device (retrying in 2 seconds): \(error)", ja: "集約デバイスを作り直せませんでした（2 秒後に再試行）: \(error)"))
             rebuildPending = true
             control.asyncAfter(deadline: .now() + 2) { [weak self] in
                 guard let self, self.running, self.engine == nil else { return }
@@ -407,20 +407,20 @@ public final class Recorder: @unchecked Sendable {
         // 書き込みエラー
         for (track, sink) in fileSinks {
             if let err = sink.failure {
-                fatal(CappyError.io("\(track.rawValue) トラックの書き込みに失敗しました: \(err.localizedDescription)"))
+                fatal(CappyError.io(tr("Failed to write the \(track.rawValue) track: \(err.localizedDescription)", ja: "\(track.rawValue) トラックの書き込みに失敗しました: \(err.localizedDescription)")))
                 return
             }
         }
         // ディスクの空き
         if let free = FileSecurity.availableBytes(at: session.directory) {
             if free < options.diskStopBytes {
-                fatal(CappyError.io("ディスクの空き容量が不足したため録音を停止しました（残り \(free >> 20) MB）"))
+                fatal(CappyError.io(tr("Stopped recording because the disk is almost full (\(free >> 20) MB left)", ja: "ディスクの空き容量が不足したため録音を停止しました（残り \(free >> 20) MB）")))
                 return
             }
             if free < options.diskWarnBytes, !diskWarned {
                 diskWarned = true
-                Console.print("警告: ディスクの空き容量が少なくなっています（残り \(free >> 20) MB）")
-                CappyLog.shared.warning("ディスクの空き容量が少ない: \(free >> 20) MB")
+                Console.print(tr("Warning: the disk is getting full (\(free >> 20) MB left)", ja: "警告: ディスクの空き容量が少なくなっています（残り \(free >> 20) MB）"))
+                CappyLog.shared.warning(tr("Low disk space: \(free >> 20) MB", ja: "ディスクの空き容量が少ない: \(free >> 20) MB"))
             }
         }
         // IOProc が止まっていないか（デバイスが消えた場合など）
@@ -429,7 +429,7 @@ public final class Recorder: @unchecked Sendable {
             if count == lastCallbackCount {
                 stallTicks += 1
                 if stallTicks >= 3 {
-                    CappyLog.shared.warning("IOProc が 6 秒間呼ばれていません。集約デバイスを作り直します")
+                    CappyLog.shared.warning(tr("IOProc has not been called for 6 seconds. Recreating the aggregate device", ja: "IOProc が 6 秒間呼ばれていません。集約デバイスを作り直します"))
                     rebuildEngine(reason: "device_stalled")
                 }
             } else {
@@ -466,7 +466,7 @@ public final class Recorder: @unchecked Sendable {
     public func addMarker(label: String?) {
         let at = Int64(((writer?.elapsedSeconds ?? 0) * 1000).rounded())
         _ = try? session.update { m in m.markers.append(SessionMarker(atMs: at, label: label)) }
-        CappyLog.shared.info("マーカーを記録しました at=\(at)ms")
+        CappyLog.shared.info(tr("Marker added at=\(at)ms", ja: "マーカーを記録しました at=\(at)ms"))
     }
 
     // MARK: 停止
@@ -505,11 +505,11 @@ public final class Recorder: @unchecked Sendable {
                 }
             }
         }
-        CappyLog.shared.info("録音を停止しました reason=\(reason) dropped=\(dropped)")
+        CappyLog.shared.info(tr("Recording stopped reason=\(reason) dropped=\(dropped)", ja: "録音を停止しました reason=\(reason) dropped=\(dropped)"))
         let peaks = writer?.overallPeaks ?? [:]
         silentTracks = session.metadata.tracks.map(\.id).filter { (peaks[$0] ?? 0) == 0 }
         if !silentTracks.isEmpty {
-            CappyLog.shared.warning("完全に無音のトラック: \(silentTracks.map(\.rawValue))")
+            CappyLog.shared.warning(tr("Completely silent tracks: \(silentTracks.map(\.rawValue))", ja: "完全に無音のトラック: \(silentTracks.map(\.rawValue))"))
         }
         if let firstError { throw firstError }
     }

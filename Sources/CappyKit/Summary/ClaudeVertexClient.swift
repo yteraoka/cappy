@@ -89,7 +89,7 @@ public struct ClaudeVertexClient: SummaryModelClient {
     }
 
     func makeRequest(url: String, body: Data) async throws -> URLRequest {
-        guard let u = URL(string: url) else { throw CappyError.transcription("URL が不正です: \(url)") }
+        guard let u = URL(string: url) else { throw CappyError.transcription(tr("Invalid URL: \(url)", ja: "URL が不正です: \(url)")) }
         var req = URLRequest(url: u)
         req.httpMethod = "POST"
         // 思考中はイベントが途切れることがあるため、無通信タイムアウトを長めにする
@@ -116,7 +116,7 @@ public struct ClaudeVertexClient: SummaryModelClient {
     public func generate(_ request: SummaryRequest, model: String) async throws -> SummaryResponse {
         let url = endpoint(model: model, method: "streamRawPredict")
         let body = try JSONSerialization.data(withJSONObject: Self.messagesBody(request), options: [.sortedKeys])
-        return try await retry.run("要約（\(model)）") {
+        return try await retry.run(tr("Summary (\(model))", ja: "要約（\(model)）")) {
             let req = try await makeRequest(url: url, body: body)
             var parser = ClaudeStreamParser(model: model)
             // エラー応答（JSON）を読むために先頭だけ保持する
@@ -140,14 +140,14 @@ public struct ClaudeVertexClient: SummaryModelClient {
             "system": request.system,
             "messages": [["role": "user", "content": request.userText]],
         ] as [String: Any], options: [.sortedKeys])
-        let resp = try await retry.run("トークン数の確認") {
+        let resp = try await retry.run(tr("Counting tokens", ja: "トークン数の確認")) {
             let r = try await transport.send(try await makeRequest(url: url, body: body))
             guard r.status == 200 else { throw GoogleAPIError.from(r) }
             return r
         }
         guard let obj = try JSONSerialization.jsonObject(with: resp.body) as? [String: Any],
               let n = obj["input_tokens"] as? Int else {
-            throw CappyError.transcription("トークン数の応答が不正です")
+            throw CappyError.transcription(tr("Invalid token count response", ja: "トークン数の応答が不正です"))
         }
         return n
     }
@@ -210,7 +210,7 @@ public struct ClaudeStreamParser {
         case "error":
             let err = obj["error"] as? [String: Any]
             let errType = err?["type"] as? String ?? "error"
-            let message = err?["message"] as? String ?? "不明なエラー"
+            let message = err?["message"] as? String ?? tr("unknown error", ja: "不明なエラー")
             let status: Int
             switch errType {
             case "overloaded_error": status = 529
@@ -227,11 +227,11 @@ public struct ClaudeStreamParser {
 
     public func finish() throws -> SummaryResponse {
         guard sawEvent else {
-            throw CappyError.transcription("要約の応答が空です")
+            throw CappyError.transcription(tr("The summary response is empty", ja: "要約の応答が空です"))
         }
         guard stopped || stopReason != nil else {
             // 途中で接続が切れた（一時的なエラーとして再試行させる）
-            throw GoogleAPIError(httpStatus: 503, status: "incomplete_stream", message: "応答が途中で切れました")
+            throw GoogleAPIError(httpStatus: 503, status: "incomplete_stream", message: tr("The response was cut off", ja: "応答が途中で切れました"))
         }
         return SummaryResponse(text: text.trimmingCharacters(in: .whitespacesAndNewlines), model: model,
                                stopReason: stopReason, refusalCategory: refusalCategory,

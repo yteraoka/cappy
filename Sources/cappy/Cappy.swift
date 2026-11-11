@@ -5,24 +5,32 @@ import Foundation
 struct Cappy: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "cappy",
-        abstract: "会議アプリの音声とマイク音声を別トラックで録音し、外部サービスで文字起こし・要約する",
-        discussion: """
+        abstract: tr("Record meeting app audio and your microphone as separate tracks, then transcribe and summarize them with cloud services", ja: "会議アプリの音声とマイク音声を別トラックで録音し、外部サービスで文字起こし・要約する"),
+        discussion: tr("""
+        Config file: ~/.config/cappy/config.toml (override with CAPPY_CONFIG)
+        Language: English by default. Set CAPPY_LANG=ja (or a ja_* locale in LC_ALL / LC_MESSAGES / LANG) for Japanese.
+
+        Exit codes:
+          0 success  1 invalid arguments or config  2 missing permission  3 recording target not found
+          4 I/O error while recording  5 transcription or summary service error
+        """, ja: """
         設定ファイル: ~/.config/cappy/config.toml（CAPPY_CONFIG で変更可）
+        表示言語: 既定は英語。CAPPY_LANG=ja（または LC_ALL / LC_MESSAGES / LANG が ja_*）で日本語になります。
 
         終了コード:
           0 正常終了  1 引数・設定の誤り  2 権限不足  3 録音対象が見つからない
           4 録音中の I/O エラー  5 文字起こし・要約サービスのエラー
-        """,
+        """),
         version: CappyVersion.current,
         subcommands: [Record.self, Transcribe.self, Summarize.self, Apps.self, Devices.self, Doctor.self, Recover.self, Completion.self]
     )
 }
 
 struct CommonOptions: ParsableArguments {
-    @Option(help: "設定プロファイル名（既定: default）", completion: .custom { _, _, _ in CompletionCandidates.profiles() })
+    @Option(help: ArgumentHelp(tr("Config profile name (default: default)", ja: "設定プロファイル名（既定: default）")), completion: .custom { _, _, _ in CompletionCandidates.profiles() })
     var profile: String?
 
-    @Flag(name: .shortAndLong, help: "詳細ログ（バッファ欠落数・リングバッファ使用率など）を出力する")
+    @Flag(name: .shortAndLong, help: ArgumentHelp(tr("Verbose logging (dropped buffers, ring buffer usage, etc.)", ja: "詳細ログ（バッファ欠落数・リングバッファ使用率など）を出力する")))
     var verbose = false
 
     func loadProfile(fallback: String? = nil) throws -> Profile {
@@ -45,7 +53,7 @@ enum CappyMain {
             exit(0)
         } catch let e as CappyError {
             Console.clearStatus()
-            Console.print("エラー: \(e.message)")
+            Console.print(tr("Error: \(e.message)", ja: "エラー: \(e.message)"))
             if let hint = e.hint { Console.print(hint) }
             CappyLog.shared.error(e.message)
             exit(e.status.rawValue)

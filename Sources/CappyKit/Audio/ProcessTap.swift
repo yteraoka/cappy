@@ -30,7 +30,7 @@ final class ProcessTap: @unchecked Sendable {
             AudioHardwareDestroyProcessTap(tapID)
             throw error
         }
-        CappyLog.shared.info("タップを作成しました id=\(tapID) mode=\(mode.logDescription)")
+        CappyLog.shared.info(tr("Created the process tap id=\(tapID) mode=\(mode.logDescription)", ja: "タップを作成しました id=\(tapID) mode=\(mode.logDescription)"))
     }
 
     deinit { destroy() }
@@ -65,10 +65,10 @@ final class ProcessTap: @unchecked Sendable {
         withExtendedLifetime(desc) {}
         if st == noErr {
             mode = newMode
-            CappyLog.shared.info("タップの対象を更新しました mode=\(newMode.logDescription)")
+            CappyLog.shared.info(tr("Updated the tap targets mode=\(newMode.logDescription)", ja: "タップの対象を更新しました mode=\(newMode.logDescription)"))
             return true
         }
-        CappyLog.shared.warning("タップの対象を更新できませんでした: \(osStatusString(st))")
+        CappyLog.shared.warning(tr("Could not update the tap targets: \(osStatusString(st))", ja: "タップの対象を更新できませんでした: \(osStatusString(st))"))
         return false
     }
 
@@ -77,7 +77,7 @@ final class ProcessTap: @unchecked Sendable {
         destroyed = true
         let st = AudioHardwareDestroyProcessTap(id)
         if st != noErr {
-            CappyLog.shared.warning("タップの破棄に失敗しました: \(osStatusString(st))")
+            CappyLog.shared.warning(tr("Failed to destroy the tap: \(osStatusString(st))", ja: "タップの破棄に失敗しました: \(osStatusString(st))"))
         }
     }
 }

@@ -36,7 +36,7 @@ public indirect enum TOMLValue: Equatable, Sendable {
 public struct TOMLError: Error, CustomStringConvertible {
     public let line: Int
     public let message: String
-    public var description: String { "TOML の \(line) 行目: \(message)" }
+    public var description: String { tr("TOML line \(line): \(message)", ja: "TOML の \(line) 行目: \(message)") }
 }
 
 public enum TOML {
@@ -51,10 +51,10 @@ public enum TOML {
             if scanner.atEnd || scanner.peek == "#" { continue }
             if scanner.peek == "[" {
                 scanner.advance()
-                if scanner.peek == "[" { throw TOMLError(line: lineNo, message: "テーブル配列 [[...]] には対応していません") }
+                if scanner.peek == "[" { throw TOMLError(line: lineNo, message: tr("Arrays of tables [[...]] are not supported", ja: "テーブル配列 [[...]] には対応していません")) }
                 let path = try scanner.parseKeyPath()
                 scanner.skipWhitespace()
-                guard scanner.peek == "]" else { throw TOMLError(line: lineNo, message: "] がありません") }
+                guard scanner.peek == "]" else { throw TOMLError(line: lineNo, message: tr("Missing ]", ja: "] がありません")) }
                 scanner.advance()
                 try scanner.expectLineEnd()
                 currentPath = path
@@ -63,7 +63,7 @@ public enum TOML {
             }
             let keyPath = try scanner.parseKeyPath()
             scanner.skipWhitespace()
-            guard scanner.peek == "=" else { throw TOMLError(line: lineNo, message: "= がありません") }
+            guard scanner.peek == "=" else { throw TOMLError(line: lineNo, message: tr("Missing =", ja: "= がありません")) }
             scanner.advance()
             scanner.skipWhitespace()
             let value = try scanner.parseValue()
@@ -77,7 +77,7 @@ public enum TOML {
         guard let first = path.first else { return }
         var child = root[first]?.table ?? [:]
         if let existing = root[first], existing.table == nil {
-            throw TOMLError(line: line, message: "\(first) はテーブルではありません")
+            throw TOMLError(line: line, message: tr("\(first) is not a table", ja: "\(first) はテーブルではありません"))
         }
         try ensureTable(&child, Array(path.dropFirst()), line: line)
         root[first] = .table(child)
@@ -86,12 +86,12 @@ public enum TOML {
     private static func setValue(_ root: inout [String: TOMLValue], _ path: [String], _ value: TOMLValue, line: Int) throws {
         guard let first = path.first else { return }
         if path.count == 1 {
-            if root[first] != nil { throw TOMLError(line: line, message: "キー \(first) が重複しています") }
+            if root[first] != nil { throw TOMLError(line: line, message: tr("Duplicate key \(first)", ja: "キー \(first) が重複しています")) }
             root[first] = value
             return
         }
         if let existing = root[first], existing.table == nil {
-            throw TOMLError(line: line, message: "\(first) はテーブルではありません")
+            throw TOMLError(line: line, message: tr("\(first) is not a table", ja: "\(first) はテーブルではありません"))
         }
         var child = root[first]?.table ?? [:]
         try setValue(&child, Array(path.dropFirst()), value, line: line)
@@ -119,7 +119,7 @@ public enum TOML {
         mutating func expectLineEnd() throws {
             skipWhitespace()
             if atEnd || peek == "#" { return }
-            throw TOMLError(line: line, message: "行末に余分な文字があります")
+            throw TOMLError(line: line, message: tr("Unexpected characters at the end of the line", ja: "行末に余分な文字があります"))
         }
 
         mutating func parseKeyPath() throws -> [String] {
@@ -141,17 +141,17 @@ public enum TOML {
                 key.append(c)
                 advance()
             }
-            guard !key.isEmpty else { throw TOMLError(line: line, message: "キーがありません") }
+            guard !key.isEmpty else { throw TOMLError(line: line, message: tr("Missing key", ja: "キーがありません")) }
             return key
         }
 
         mutating func parseValue() throws -> TOMLValue {
-            guard let c = peek else { throw TOMLError(line: line, message: "値がありません") }
+            guard let c = peek else { throw TOMLError(line: line, message: tr("Missing value", ja: "値がありません")) }
             switch c {
             case "\"": return .string(try parseBasicString())
             case "'": return .string(try parseLiteralString())
             case "[": return try parseArray()
-            case "{": throw TOMLError(line: line, message: "インラインテーブルには対応していません")
+            case "{": throw TOMLError(line: line, message: tr("Inline tables are not supported", ja: "インラインテーブルには対応していません"))
             default: return try parseScalar()
             }
         }
@@ -166,7 +166,7 @@ public enum TOML {
                 skipWhitespace()
                 if peek == "," { advance(); continue }
                 if peek == "]" { advance(); return .array(items) }
-                throw TOMLError(line: line, message: "配列の区切りが不正です（複数行の配列には対応していません）")
+                throw TOMLError(line: line, message: tr("Invalid array separator (multi-line arrays are not supported)", ja: "配列の区切りが不正です（複数行の配列には対応していません）"))
             }
         }
 
@@ -184,7 +184,7 @@ public enum TOML {
             let cleaned = token.replacingOccurrences(of: "_", with: "")
             if let i = Int64(cleaned) { return .integer(i) }
             if let d = Double(cleaned) { return .float(d) }
-            throw TOMLError(line: line, message: "値を解釈できません: \(token)")
+            throw TOMLError(line: line, message: tr("Cannot parse the value: \(token)", ja: "値を解釈できません: \(token)"))
         }
 
         mutating func parseBasicString() throws -> String {
@@ -211,17 +211,17 @@ public enum TOML {
                             advance()
                         }
                         guard let code = UInt32(hex, radix: 16), let scalar = Unicode.Scalar(code) else {
-                            throw TOMLError(line: line, message: "不正なエスケープ \\\(e)\(hex)")
+                            throw TOMLError(line: line, message: tr("Invalid escape \\\(e)\(hex)", ja: "不正なエスケープ \\\(e)\(hex)"))
                         }
                         out.unicodeScalars.append(scalar)
                     default:
-                        throw TOMLError(line: line, message: "不正なエスケープ \\\(e)")
+                        throw TOMLError(line: line, message: tr("Invalid escape \\\(e)", ja: "不正なエスケープ \\\(e)"))
                     }
                     continue
                 }
                 out.append(c)
             }
-            throw TOMLError(line: line, message: "文字列が閉じていません")
+            throw TOMLError(line: line, message: tr("Unterminated string", ja: "文字列が閉じていません"))
         }
 
         mutating func parseLiteralString() throws -> String {
@@ -232,7 +232,7 @@ public enum TOML {
                 if c == "'" { return out }
                 out.append(c)
             }
-            throw TOMLError(line: line, message: "文字列が閉じていません")
+            throw TOMLError(line: line, message: tr("Unterminated string", ja: "文字列が閉じていません"))
         }
     }
 }
