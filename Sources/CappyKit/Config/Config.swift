@@ -277,7 +277,7 @@ public struct CappyConfig: Sendable {
                 }
             } else {
                 for (key, value) in [("model", p.summary.model), ("fallback_model", p.summary.fallbackModel ?? "")]
-                where value.contains("anthropic.") {
+                where value.contains("anthropic.") || SummaryModelFamily.of(value) == .bedrockChat {
                     throw CappyError.usage("\(sctx).\(key) が不正です: \(value)（Bedrock のモデル ID は provider = \"bedrock\" のときだけ使えます）")
                 }
             }
@@ -286,7 +286,7 @@ public struct CappyConfig: Sendable {
             }
             for (key, value) in [("model", p.summary.model), ("fallback_model", p.summary.fallbackModel ?? "")]
             where !value.isEmpty && SummaryModelFamily.of(value) == nil {
-                throw CappyError.usage("\(sctx).\(key) が不正です: \(value)（claude- または gemini- で始まるモデル ID、Bedrock なら anthropic. を含む ID も可）")
+                throw CappyError.usage("\(sctx).\(key) が不正です: \(value)（claude- または gemini- で始まるモデル ID。Bedrock なら moonshotai.kimi-k3.1 のような Bedrock のモデル ID も可）")
             }
             if p.summary.maxTokens < 1024 {
                 throw CappyError.usage("\(sctx).max_tokens は 1024 以上にしてください")

@@ -297,9 +297,9 @@ struct Doctor: AsyncParsableCommand {
     func checkBedrockSummary(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
         let s = profile.summary
         let title = "要約（Bedrock）"
-        let client: BedrockClaudeClient
+        let client: BedrockSummaryClient
         do {
-            guard let c = try SummaryClientFactory.make(profile: profile) as? BedrockClaudeClient else { return }
+            guard let c = try SummaryClientFactory.make(profile: profile) as? BedrockSummaryClient else { return }
             client = c
         } catch let e as CappyError {
             add(.fail, title, e.message + (e.hint.map { "\n" + $0 } ?? ""), e.status)
@@ -313,7 +313,7 @@ struct Doctor: AsyncParsableCommand {
             + (fallback.map { " fallback=\($0)" } ?? "") + (s.auto ? " auto" : ""), .usage)
         checkInstructions(profile, add)
         for (model, isFallback) in [(s.model, false)] + (fallback.map { [($0, true)] } ?? []) {
-            let id = BedrockClaudeClient.modelID(model, routing: s.region)
+            let id = BedrockModels.modelID(model, routing: s.region)
             let label = isFallback ? "要約の再試行先（Bedrock）" : title
             do {
                 try await client.checkAccess(model: model, effort: s.effort)

@@ -36,9 +36,7 @@ public struct BedrockClaudeClient: SummaryModelClient {
 
     /// cappy のモデル名（claude-opus-5-5）を Bedrock のモデル ID にする。すでに Bedrock の ID ならそのまま
     public static func modelID(_ model: String, routing: String) -> String {
-        if model.contains("anthropic.") { return model }
-        if isAWSRegion(routing) { return "anthropic.\(model)" }
-        return "\(routing).anthropic.\(model)"
+        BedrockModels.modelID(model, routing: routing)
     }
 
     public var endpoint: URL {

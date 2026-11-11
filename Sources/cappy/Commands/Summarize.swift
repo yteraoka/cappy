@@ -16,7 +16,7 @@ struct Summarize: AsyncParsableCommand {
     @Argument(help: "セッションディレクトリ")
     var sessionDir: String
 
-    @Option(help: "モデル（既定はプロファイルの summary.model。例: gemini-4-argon, claude-opus-5-5）")
+    @Option(help: "モデル（既定はプロファイルの summary.model。例: gemini-4-argon, claude-opus-5-5、Bedrock なら global.moonshotai.kimi-k3.1）")
     var model: String?
 
     @Option(help: "思考の深さ（low / medium / high / xhigh / max。既定はプロファイルの summary.effort）")
