@@ -1,6 +1,6 @@
 # cappy
 
-会議アプリの音声（相手）とマイク音声（自分）を、仮想オーディオデバイスなしで別トラックとして録音し、外部サービス（Google Cloud Speech-to-Text v2）で文字起こしして、Claude（Vertex AI）で会議の要約まで作る macOS 用 CLI です。
+会議アプリの音声（相手）とマイク音声（自分）を、仮想オーディオデバイスなしで別トラックとして録音し、外部サービス（Google Cloud Speech-to-Text v2）で文字起こしして、Vertex AI の Claude または Gemini で会議の要約まで作る macOS 用 CLI です。
 
 - 相手側は Core Audio の Process Tap API で特定プロセスから直接取得し、自分の声はマイクから取得します。
 - タップとマイクを 1 つのプライベート機器セット（集約デバイス）にまとめ、単一の IOProc で受け取ります。クロックが 1 本なので、トラック間の時刻合わせは不要です。
@@ -94,18 +94,19 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
 ### summarize
 
-`transcript.json` を Claude（Vertex AI）に送り、`summary.md` に次の構成で書き出します: 概要 / 決定事項 / アクションアイテム（担当・内容・期限・時刻の表）/ 議論の要点 / 未解決事項・持ち越し。決定事項などには根拠となる発言の時刻 `[HH:MM:SS]` が付くので、`transcript.md` で前後を確認できます。
+`transcript.json` を Vertex AI の Claude または Gemini に送り、`summary.md` に次の構成で書き出します: 概要 / 決定事項 / アクションアイテム（担当・内容・期限・時刻の表）/ 議論の要点 / 未解決事項・持ち越し。決定事項などには根拠となる発言の時刻 `[HH:MM:SS]` が付くので、`transcript.md` で前後を確認できます。
 
 | オプション | 説明 |
 | --- | --- |
-| `--model <id>` | 既定はプロファイルの `summary.model`（`claude-opus-5-5`） |
-| `--effort low\|medium\|high\|xhigh\|max` | 思考の深さ。既定はプロファイルの `summary.effort`（`high`） |
+| `--model <id>` | 既定はプロファイルの `summary.model`（`gemini-4-argon`）。`gemini-` で始まれば Gemini、`claude-` で始まれば Claude（例: `gemini-3.5-flash`、`claude-opus-5-5`） |
+| `--effort low\|medium\|high\|xhigh\|max` | 思考の深さ。既定はプロファイルの `summary.effort`（`high`）。Gemini 3 以降では `thinkingLevel` の LOW / MEDIUM / HIGH（`xhigh` と `max` は HIGH）に対応させ、Gemini 2.5 以前では指定せずモデルの動的な思考に任せます |
 | `--force` | 同じ文字起こしから作った要約があっても作り直す |
 
 - 文字起こしをやり直した場合（`transcript.json` が変わった場合）は、`--force` なしでも作り直します。
 - 録音中に付けたマーカーは「本人が重要だと考えた箇所」として要約に反映されます。録音の欠落区間も伝えます。
 - 要約の本文は `cappy.log` や `session.json` には書きません（`session.json` の `summary` にはモデル・トークン数・状態だけを記録します）。
-- モデルが要約を拒否（`stop_reason: refusal`）した場合は、`summary.fallback_model`（既定 `claude-opus-4-8`）で 1 回だけ再試行し、その旨を `summary.md` に書きます。Vertex AI ではサーバー側の自動フォールバックが使えないため、cappy 側で行っています。
+- モデルが要約を拒否した場合（Claude の `stop_reason: refusal`、Gemini の安全性による停止）は、`summary.fallback_model` で 1 回だけ再試行し、その旨を `summary.md` に書きます。既定は Claude なら `claude-opus-4-8`、Gemini なら再試行しません（Claude と Gemini をまたいだ指定も可）。Vertex AI ではサーバー側の自動フォールバックが使えないため、cappy 側で行っています。
+- Gemini で、指定した思考レベルにモデルが対応していない（400）場合は、思考の設定を外して再試行します。
 
 ### 終了コード
 
@@ -147,7 +148,7 @@ gcloud storage buckets update gs://my-cappy-bucket --lifecycle-file lifecycle.js
 - Speech-to-Text のサービスエージェントがバケットを読み書きできる必要があります（同じプロジェクトのバケットなら通常は不要）。
 - `cappy doctor` で、認証の有効性、API へのアクセス、バケットの権限・均一アクセス制御・ライフサイクルを確認できます。
 
-### 要約（Claude on Vertex AI）の準備
+### 要約（Vertex AI の Claude / Gemini）の準備
 
 文字起こしと同じプロジェクト・同じ ADC を使います。追加の API キーは不要です。
 
@@ -157,10 +158,11 @@ gcloud projects add-iam-policy-binding my-project \
   --member="user:you@example.com" --role="roles/aiplatform.user"
 ```
 
-- Google Cloud コンソールの Model Garden で「Claude Opus 5.5」を開き、利用を有効にしてください（初回のみ。利用規約への同意が必要です）。
-- 既定はグローバルエンドポイント（`region = "global"`）です。データの処理地域を限定したい場合は `us` / `eu`（マルチリージョン、約 10% 高い）を指定します。新しいモデルは単一リージョンのエンドポイントでは提供されていません。
+- 既定のモデル（`gemini-4-argon`）は、Vertex AI API の有効化と上の権限だけで使えます。
+- Claude（`model = "claude-opus-5-5"` など）を使う場合は、Google Cloud コンソールの Model Garden で「Claude Opus 5.5」を開き、利用を有効にしてください（初回のみ。利用規約への同意が必要です）。
+- 既定はグローバルエンドポイント（`region = "global"`）です。データの処理地域を限定したい場合は `us` / `eu`（マルチリージョン）を指定します。使えるエンドポイントはモデルごとに異なるので、Model Garden のモデルの説明で確認してください（新しい Claude モデルは単一リージョンのエンドポイントでは提供されていません）。
 - 課金は Google Cloud から請求されます（[料金](https://cloud.google.com/vertex-ai/generative-ai/pricing#claude-models)）。使ったトークン数は `session.json` の `summary.input_tokens` / `output_tokens` で確認できます。
-- `cappy doctor` は、課金されないトークン数の確認 API でモデルへのアクセスを確認します。
+- `cappy doctor` は、課金されないトークン数の確認 API（Claude は `count-tokens:rawPredict`、Gemini は `countTokens`）でモデルへのアクセスを確認します。
 - 外部に送信したくない案件では、プロファイルで `[profiles.<name>.summary] provider = "none"` にしてください（`provider = "none"` のプロファイルでは要約も既定で none になります）。
 
 ## 出力
@@ -189,7 +191,7 @@ gcloud projects add-iam-policy-binding my-project \
 - **録音中の変化への追従**: 対象アプリの音声プロセスが増えたら、まず `kAudioTapPropertyDescription` でタップの対象を差し替えます。差し替えられない場合（実機では `'!hog'` になることがある）は作り直し、欠落区間を `gaps` に記録します。プロセスが減っただけのときは何もしません。既定の出力・入力デバイスが変わったら機器セットを作り直します。IOProc が 6 秒以上止まった場合も作り直します。欠落区間は両トラックとも無音で埋めるため、トラック同士と実時間とのずれは生じません。
 - **chirp_3 の制限**: 公式ドキュメントでは、BatchRecognize は「概ね 1 時間まで、単語タイムスタンプ有効時は約 20 分まで」です。そのため、送信用ファイルを既定 19 分ごとに分割して 1 リクエストで送り、結果を時刻オフセット付きでマージします（`chunk_minutes` で変更可）。分割した場合、話者分離のラベルはチャンクをまたいで一致しない可能性があります。
 - **話者分離**: chirp_3 は日本語の話者分離に対応しています（BatchRecognize のみ）。remote トラックで有効にし、モデルが拒否した場合（投入時・実行時のいずれも）は話者分離なしで再投入し、その旨を `session.json` の `transcription.jobs[].note` に記録します。
-- **要約**: 仕様書では対象外（transcript を別ツールに渡す運用）でしたが、要望により `cappy summarize` として追加しました。Claude on Vertex AI の Messages API（`streamRawPredict`、`anthropic_version = 2026-10-21`）をストリーミングで呼び出し、適応的思考（adaptive thinking）と `effort` で深さを調整します。文字起こし本文は `<transcript>` で囲み、その中の指示には従わないようモデルに指示しています。
+- **要約**: 仕様書では対象外（transcript を別ツールに渡す運用）でしたが、要望により `cappy summarize` として追加しました。モデル名で呼び出し先を切り替えます。Claude は Vertex AI の Messages API（`streamRawPredict`、`anthropic_version = 2026-10-21`）を、適応的思考（adaptive thinking）と `effort` で呼び出します。Gemini は `streamGenerateContent?alt=sse` を `thinkingConfig.thinkingLevel` で呼び出し、思考の部分（`thought: true`）は出力に含めません。どちらもストリーミングで受け取ります。文字起こし本文は `<transcript>` で囲み、その中の指示には従わないようモデルに指示しています。
 - **システムオーディオ録音の許可状態**: 公開 API がないため、TCC.framework の `TCCAccessPreflight` / `TCCAccessRequest` を動的に呼び出して確認しています。
 
 ## テスト

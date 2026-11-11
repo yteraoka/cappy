@@ -20,14 +20,14 @@ delete_remote_after = true   # 文字起こし後にバケット上の音声と�
 # min_speakers = 1
 # max_speakers = 6
 
-# 会議の要約（Claude on Vertex AI）。認証は上と同じ ADC を使う
+# 会議の要約（Vertex AI の Claude / Gemini）。認証は上と同じ ADC を使う
 [profiles.default.summary]
 # provider = "vertex"        # vertex / none（省略時は、上の provider が none なら none、それ以外は vertex）
 # project_id = "my-project"  # 省略時は google.project_id
 region = "global"            # global / us / eu（us・eu はデータの処理地域を限定できるが約 10% 高い）
-model = "claude-opus-5-5"
-# fallback_model = "claude-opus-4-8"  # モデルが要約を拒否したときに再試行するモデル（"" で再試行しない）
-effort = "high"              # low / medium / high / xhigh / max（深いほど丁寧だが遅く高い）
+model = "gemini-4-argon"     # gemini- で始まれば Gemini、claude- で始まれば Claude（例: "claude-opus-5-5"）
+# fallback_model = "claude-opus-4-8"  # 要約を拒否されたときに再試行するモデル（省略時: Claude なら claude-opus-4-8、Gemini なら再試行しない。"" で再試行しない）
+effort = "high"              # low / medium / high / xhigh / max（深いほど丁寧だが遅く高い。Gemini 3 以降は thinkingLevel の LOW / MEDIUM / HIGH に対応）
 # max_tokens = 32000
 auto = false                 # true なら transcribe の後に自動で要約する（--no-summarize で抑止）
 # instructions_file = "~/.config/cappy/summary-instructions.md"  # 要約の書き方の追加指示

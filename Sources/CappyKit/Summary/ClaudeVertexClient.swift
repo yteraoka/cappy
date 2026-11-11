@@ -73,14 +73,7 @@ public struct ClaudeVertexClient: SummaryModelClient {
         self.userProject = userProject ?? projectID
     }
 
-    /// global → aiplatform.googleapis.com、us / eu → マルチリージョン、それ以外 → リージョン
-    public static func host(region: String) -> String {
-        switch region {
-        case "global": return "aiplatform.googleapis.com"
-        case "us", "eu": return "aiplatform.\(region).rep.googleapis.com"
-        default: return "\(region)-aiplatform.googleapis.com"
-        }
-    }
+    public static func host(region: String) -> String { VertexAI.host(region: region) }
 
     public func endpoint(model: String, method: String) -> String {
         "https://\(Self.host(region: location))/v1/projects/\(projectID)/locations/\(location)/publishers/anthropic/models/\(model):\(method)"
