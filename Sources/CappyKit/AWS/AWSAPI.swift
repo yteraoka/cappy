@@ -17,8 +17,8 @@ public struct AWSAPIError: RetryableError, CustomStringConvertible, Sendable {
     }
 
     public var isTransient: Bool {
-        if [408, 429, 500, 502, 503, 504].contains(httpStatus) { return true }
-        let throttling: Set<String> = ["Throttling", "ThrottlingException", "ThrottledException", "RequestLimitExceeded",
+        if [408, 429, 500, 502, 503, 504, 529].contains(httpStatus) { return true }
+        let throttling: Set<String> = ["overloaded_error", "rate_limit_error", "Throttling", "ThrottlingException", "ThrottledException", "RequestLimitExceeded",
                                        "TooManyRequestsException", "RequestThrottled", "SlowDown"]
         return code.map(throttling.contains) ?? false
     }
@@ -26,6 +26,11 @@ public struct AWSAPIError: RetryableError, CustomStringConvertible, Sendable {
     public static func from(_ resp: HTTPResponse) -> AWSAPIError {
         // JSON: {"__type": "...#Code", "message": "..."} / {"code": ..., "Message": ...}
         if let obj = try? JSONSerialization.jsonObject(with: resp.body) as? [String: Any] {
+            // Anthropic 形式（Bedrock の Messages API）: {"type": "error", "error": {"type": "...", "message": "..."}}
+            if let inner = obj["error"] as? [String: Any] {
+                return AWSAPIError(httpStatus: resp.status, code: inner["type"] as? String,
+                                   message: inner["message"] as? String ?? String(resp.text.prefix(500)))
+            }
             let rawCode = (obj["__type"] as? String) ?? (obj["code"] as? String) ?? (obj["error"] as? String)
                 ?? resp.headers["x-amzn-errortype"]
             let code = rawCode.map { c in

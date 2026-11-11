@@ -126,7 +126,8 @@ public struct Summarizer: Sendable {
             }
             CappyLog.shared.error("要約に失敗しました: \(message)")
             if let e = error as? CappyError { throw e }
-            throw CappyError.transcription("要約に失敗しました: \(message)", hint: Self.hint(for: error, model: options.model, region: client.region))
+            throw CappyError.transcription("要約に失敗しました: \(message)", hint: Self.hint(for: error, model: options.model, region: client.region,
+                                                                                               provider: client.providerName))
         }
 
         guard !response.text.isEmpty else {
@@ -172,7 +173,7 @@ public struct Summarizer: Sendable {
         if let length = meta.tracks.compactMap(\.durationMs).max() ?? doc.segments.map(\.endMs).max() {
             lines.append("- 長さ: \(TimeFormat.hms(ms: length))")
         }
-        let via = providerName == "vertex" ? "Vertex AI" : providerName
+        let via = ["vertex": "Vertex AI", "bedrock": "Amazon Bedrock"][providerName] ?? providerName
         lines.append("- 要約: \(response.model)（\(via)）による自動生成です。重要な内容は transcript.md で確認してください")
         for n in notes { lines.append("- 注意: \(n)") }
         lines.append("")
@@ -181,7 +182,12 @@ public struct Summarizer: Sendable {
         return lines.joined(separator: "\n")
     }
 
-    static func hint(for error: Error, model: String, region: String?) -> String? {
+    static func hint(for error: Error, model: String, region: String?, provider: String = "vertex") -> String? {
+        if let a = error as? AWSAPIError { return bedrockHint(a, model: model, routing: region) }
+        // ストリームの途中のエラー（ClaudeStreamParser）は GoogleAPIError で届く
+        if provider == "bedrock", let g = error as? GoogleAPIError {
+            return bedrockHint(AWSAPIError(httpStatus: g.httpStatus, code: g.status, message: g.message), model: model, routing: region)
+        }
         guard let g = error as? GoogleAPIError else { return nil }
         switch g.httpStatus {
         case 401:
@@ -201,6 +207,26 @@ public struct Summarizer: Sendable {
     }
 }
 
+extension Summarizer {
+    public static func bedrockHint(_ e: AWSAPIError, model: String, routing: String?) -> String? {
+        switch e.httpStatus {
+        case 401:
+            return "AWS の認証情報を確認してください（SSO なら `aws sso login`）。`cappy doctor` で確認できます"
+        case 403:
+            if e.code == "permission_error" {
+                return "Amazon Bedrock コンソールの「モデルアクセス」で \(model) を有効にしてください（Anthropic のモデルは初回に利用目的の申請が必要です）"
+            }
+            return "IAM で bedrock:InvokeModel と bedrock:InvokeModelWithResponseStream が、推論プロファイルと各リージョンの基盤モデルに許可されているか確認してください"
+        case 400 where BedrockClaudeClient.isModelIdentifierError(e):
+            return "\(BedrockClaudeClient.modelID(model, routing: routing ?? "global")) は使えません。summary.model と summary.region（推論プロファイルの範囲）、AWS のリージョンを確認してください"
+        case 429:
+            return "Bedrock のクォータを超えています。時間をおいて `cappy summarize` を再実行してください"
+        default:
+            return nil
+        }
+    }
+}
+
 /// プロファイルから要約クライアントを作る
 public enum SummaryClientFactory {
     public static func make(profile: Profile, transport: HTTPTransport = URLSessionTransport()) throws -> SummaryModelClient {
@@ -213,10 +239,20 @@ public enum SummaryClientFactory {
             }
             let auth = try ApplicationDefaultCredentials.load(transport: transport)
             return VertexSummaryClient(projectID: project, region: profile.summary.region, auth: auth, transport: transport)
+        case "bedrock":
+            let aws = profile.aws ?? AWSSettings()
+            let credentials = try AWSCredentialsProvider.resolve(profile: aws.profile, region: aws.region, transport: transport)
+            let routing = profile.summary.region
+            guard let region = BedrockClaudeClient.isAWSRegion(routing) ? routing : credentials.region else {
+                throw CappyError.usage(
+                    "Bedrock を呼び出す AWS のリージョンが設定されていません",
+                    hint: "[profiles.\(profile.name).aws] の region、AWS_REGION、AWS のプロファイルの region のいずれかを設定してください")
+            }
+            return BedrockClaudeClient(region: region, routing: routing, credentials: credentials, transport: transport)
         case "none":
             throw CappyError.usage("要約のプロバイダが none のため、要約は行いません")
         default:
-            throw CappyError.usage("未対応の要約プロバイダです: \(profile.summaryProvider)（vertex / none）")
+            throw CappyError.usage("未対応の要約プロバイダです: \(profile.summaryProvider)（vertex / bedrock / none）")
         }
     }
 

@@ -105,14 +105,15 @@ struct Doctor: AsyncParsableCommand {
         } else {
             add(.ok, "文字起こし", "provider = none（録音のみ）")
         }
-        await checkSummary(profile, add)
         await checkAWS(profile, add)
+        await checkSummary(profile, add)
         finish(checks)
     }
 
     /// [profiles.<name>.aws] があるとき、認証情報を取得して STS の GetCallerIdentity で確かめる
     func checkAWS(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
-        guard let settings = profile.aws else { return }
+        guard profile.aws != nil || profile.summaryProvider == "bedrock" else { return }
+        let settings = profile.aws ?? AWSSettings()
         let provider: AWSCredentialsProvider
         do {
             provider = try AWSCredentialsProvider.resolve(profile: settings.profile, region: settings.region)
@@ -152,6 +153,10 @@ struct Doctor: AsyncParsableCommand {
 
     func checkSummary(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
         let s = profile.summary
+        if profile.summaryProvider == "bedrock" {
+            await checkBedrockSummary(profile, add)
+            return
+        }
         guard profile.summaryProvider == "vertex" else {
             add(.ok, "要約", "provider = none（要約しない）", .usage)
             return
@@ -162,13 +167,7 @@ struct Doctor: AsyncParsableCommand {
         }
         add(.ok, "要約の設定", "Vertex AI project=\(project) region=\(s.region) model=\(s.model) effort=\(s.effort)"
             + (s.effectiveFallback(for: s.model).map { " fallback=\($0)" } ?? "") + (s.auto ? " auto" : ""), .usage)
-        if s.instructionsFile != nil {
-            do {
-                _ = try SummaryClientFactory.instructions(profile: profile)
-            } catch let e as CappyError {
-                add(.fail, "要約の追加指示", e.message, .usage)
-            } catch {}
-        }
+        checkInstructions(profile, add)
         let family = SummaryModelFamily.of(s.model)
         let title = family == .gemini ? "要約（Gemini）" : "要約（Claude）"
         let client: SummaryModelClient
@@ -182,9 +181,8 @@ struct Doctor: AsyncParsableCommand {
             return
         }
         // トークン数の確認は課金されないので、アクセス確認に使う
-        let probe = SummaryRequest(system: "ping", userText: "ping", maxTokens: 1024, effort: s.effort)
         do {
-            _ = try await client.countTokens(probe, model: s.model)
+            try await client.checkAccess(model: s.model, effort: s.effort)
             add(.ok, title, "\(s.model)（\(s.region)）にアクセスできます", .transcription)
         } catch let e as GoogleAPIError where e.httpStatus == 403 {
             add(.fail, title, "権限がありません: \(e.message)\nVertex AI API の有効化と roles/aiplatform.user の付与を確認してください", .transcription)
@@ -193,6 +191,53 @@ struct Doctor: AsyncParsableCommand {
             add(.fail, title, "\(s.model) が \(s.region) で使えません: \(e.message)\n\(hint)", .transcription)
         } catch {
             add(.warn, title, "確認できません: \(error)", .transcription)
+        }
+    }
+
+    func checkInstructions(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) {
+        guard profile.summary.instructionsFile != nil else { return }
+        do {
+            _ = try SummaryClientFactory.instructions(profile: profile)
+        } catch let e as CappyError {
+            add(.fail, "要約の追加指示", e.message, .usage)
+        } catch {}
+    }
+
+    /// Bedrock の Claude。課金されないリクエストで、要約のモデルと再試行先のモデルを使えるか確かめる
+    func checkBedrockSummary(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let s = profile.summary
+        let title = "要約（Bedrock）"
+        let client: BedrockClaudeClient
+        do {
+            guard let c = try SummaryClientFactory.make(profile: profile) as? BedrockClaudeClient else { return }
+            client = c
+        } catch let e as CappyError {
+            add(.fail, title, e.message + (e.hint.map { "\n" + $0 } ?? ""), e.status)
+            return
+        } catch {
+            add(.fail, title, "\(error)", .transcription)
+            return
+        }
+        let fallback = s.effectiveFallback(for: s.model)
+        add(.ok, "要約の設定", "Amazon Bedrock region=\(client.endpointRegion) routing=\(s.region) model=\(s.model) effort=\(s.effort)"
+            + (fallback.map { " fallback=\($0)" } ?? "") + (s.auto ? " auto" : ""), .usage)
+        checkInstructions(profile, add)
+        for (model, isFallback) in [(s.model, false)] + (fallback.map { [($0, true)] } ?? []) {
+            let id = BedrockClaudeClient.modelID(model, routing: s.region)
+            let label = isFallback ? "要約の再試行先（Bedrock）" : title
+            do {
+                try await client.checkAccess(model: model, effort: s.effort)
+                add(.ok, label, "\(id)（\(client.endpointRegion)）にアクセスできます", .transcription)
+            } catch let e as AWSAPIError {
+                let hint = Summarizer.bedrockHint(e, model: model, routing: s.region).map { "\n" + $0 } ?? ""
+                // 再試行先は拒否されたときだけ使うので警告にとどめる
+                add(isFallback ? .warn : .fail, label, "\(id): \(e.message)" + hint, .transcription)
+            } catch let e as CappyError {
+                add(.fail, label, e.message + (e.hint.map { "\n" + $0 } ?? ""), .transcription)
+                return
+            } catch {
+                add(.warn, label, "確認できません: \(error)", .transcription)
+            }
         }
     }
 

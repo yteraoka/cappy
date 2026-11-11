@@ -63,8 +63,14 @@ enum SummarizeRunner {
         }
         let s = profile.summary
         let model = request.model ?? s.model
-        guard SummaryModelFamily.of(model) != nil else {
-            throw CappyError.usage("--model が不正です: \(model)（claude- または gemini- で始まる Vertex AI のモデル ID）")
+        guard let family = SummaryModelFamily.of(model) else {
+            throw CappyError.usage("--model が不正です: \(model)（claude- または gemini- で始まるモデル ID）")
+        }
+        if profile.summaryProvider == "bedrock" && family == .gemini {
+            throw CappyError.usage("--model が不正です: \(model)（Bedrock では Claude のモデルだけを使えます）")
+        }
+        if profile.summaryProvider == "vertex" && model.contains("anthropic.") {
+            throw CappyError.usage("--model が不正です: \(model)（Bedrock のモデル ID は summary.provider = \"bedrock\" のときだけ使えます）")
         }
         let client = try SummaryClientFactory.make(profile: profile)
         let options = Summarizer.Options(

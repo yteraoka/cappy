@@ -47,16 +47,17 @@ public struct GeminiSettings: Sendable, Equatable {
     public var chunkSeconds: TimeInterval { TimeInterval(max(1, chunkMinutes) * 60) }
 }
 
-/// 会議の要約（Vertex AI の Claude / Gemini）
+/// 会議の要約（Vertex AI の Claude / Gemini、Amazon Bedrock の Claude）
 public struct SummarySettings: Sendable, Equatable {
-    /// vertex / none。nil ならプロファイルの provider から決める（none なら none、それ以外は vertex）
+    /// vertex / bedrock / none。nil ならプロファイルの provider から決める（none なら none、それ以外は vertex）
     public var provider: String?
     /// 既定は google.project_id
     public var projectID: String?
-    /// global / us / eu / リージョン名
+    /// Vertex AI: global / us / eu / リージョン名。
+    /// Bedrock: 推論プロファイルの範囲（global / jp / us / eu / au / apac など）、またはリージョン名（そのリージョンだけで処理）
     public var region: String = "global"
-    /// claude- で始まれば Claude、gemini- で始まれば Gemini を使う
-    public var model: String = "gemini-4-argon"
+    /// claude- で始まれば Claude、gemini- で始まれば Gemini を使う（Bedrock は Claude のみ）
+    public var model: String = SummarySettings.defaultModel
     /// 拒否（refusal）されたときに再試行するモデル。nil ならモデルの系統で決める
     /// （Claude は claude-opus-4-8、Gemini は再試行しない）。空文字なら再試行しない
     public var fallbackModel: String?
@@ -70,7 +71,12 @@ public struct SummarySettings: Sendable, Equatable {
 
     public init() {}
 
-    public static let knownProviders: Set<String> = ["vertex", "none"]
+    public static let defaultModel = "gemini-4-argon"
+    /// provider = bedrock で model を省略したときのモデル
+    public static let defaultBedrockModel = "claude-opus-5-5"
+    public static let knownProviders: Set<String> = ["vertex", "bedrock", "none"]
+    /// Bedrock の推論プロファイルの範囲として知られているもの（これ以外は警告だけ出す）
+    public static let knownBedrockRoutings: Set<String> = ["global", "us", "eu", "jp", "au", "apac", "ca", "us-gov"]
 
     /// 実際に使う再試行先。model が設定の model と違う（--model で上書きした）場合は系統の既定を使う
     public func effectiveFallback(for model: String) -> String? {
@@ -249,14 +255,30 @@ public struct CappyConfig: Sendable {
             if let v = try bool("auto", m, sctx) { p.summary.auto = v }
             p.summary.instructionsFile = try str("instructions_file", m, sctx)
             if let v = p.summary.provider, !SummarySettings.knownProviders.contains(v) {
-                throw CappyError.usage("\(sctx).provider が不正です: \(v)（vertex / none）")
+                throw CappyError.usage("\(sctx).provider が不正です: \(v)（vertex / bedrock / none）")
+            }
+            if p.summary.provider == "bedrock" {
+                if m["model"] == nil { p.summary.model = SummarySettings.defaultBedrockModel }
+                for (key, value) in [("model", p.summary.model), ("fallback_model", p.summary.fallbackModel ?? "")]
+                where SummaryModelFamily.of(value) == .gemini {
+                    throw CappyError.usage("\(sctx).\(key) が不正です: \(value)（Bedrock では Claude のモデルだけを使えます）")
+                }
+                let r = p.summary.region
+                if !SummarySettings.knownBedrockRoutings.contains(r) && !BedrockClaudeClient.isAWSRegion(r) {
+                    CappyLog.shared.warning("\(sctx).region = \(r) は Bedrock の推論プロファイルの範囲として不明です（global / jp / us / eu / au / apac、またはリージョン名）")
+                }
+            } else {
+                for (key, value) in [("model", p.summary.model), ("fallback_model", p.summary.fallbackModel ?? "")]
+                where value.contains("anthropic.") {
+                    throw CappyError.usage("\(sctx).\(key) が不正です: \(value)（Bedrock のモデル ID は provider = \"bedrock\" のときだけ使えます）")
+                }
             }
             if !SummarySettings.knownEfforts.contains(p.summary.effort) {
                 throw CappyError.usage("\(sctx).effort が不正です: \(p.summary.effort)（low / medium / high / xhigh / max）")
             }
             for (key, value) in [("model", p.summary.model), ("fallback_model", p.summary.fallbackModel ?? "")]
             where !value.isEmpty && SummaryModelFamily.of(value) == nil {
-                throw CappyError.usage("\(sctx).\(key) が不正です: \(value)（claude- または gemini- で始まるモデル ID）")
+                throw CappyError.usage("\(sctx).\(key) が不正です: \(value)（claude- または gemini- で始まるモデル ID、Bedrock なら anthropic. を含む ID も可）")
             }
             if p.summary.maxTokens < 1024 {
                 throw CappyError.usage("\(sctx).max_tokens は 1024 以上にしてください")
