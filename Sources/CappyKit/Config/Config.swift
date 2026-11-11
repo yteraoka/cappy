@@ -24,6 +24,31 @@ public struct GoogleSettings: Sendable, Equatable {
     }
 }
 
+/// 会議の要約（Claude on Vertex AI）
+public struct SummarySettings: Sendable, Equatable {
+    /// vertex / none。nil ならプロファイルの provider から決める（none なら none、それ以外は vertex）
+    public var provider: String?
+    /// 既定は google.project_id
+    public var projectID: String?
+    /// global / us / eu / リージョン名
+    public var region: String = "global"
+    public var model: String = "claude-opus-5-5"
+    /// 拒否（refusal）されたときに再試行するモデル。空文字なら再試行しない
+    public var fallbackModel: String = "claude-opus-4-8"
+    /// low / medium / high / xhigh / max
+    public var effort: String = "high"
+    public var maxTokens: Int = 32000
+    /// true なら transcribe の完了後に自動で要約する
+    public var auto: Bool = false
+    /// 要約の書き方を追加で指示するファイル（任意）
+    public var instructionsFile: String?
+
+    public init() {}
+
+    public static let knownProviders: Set<String> = ["vertex", "none"]
+    public static let knownEfforts: Set<String> = ["low", "medium", "high", "xhigh", "max"]
+}
+
 public struct Profile: Sendable, Equatable {
     public var name: String
     public var provider: String = "google"
@@ -34,8 +59,18 @@ public struct Profile: Sendable, Equatable {
     /// 空き容量がこれを下回ったら録音を停止（MB）
     public var diskStopMB: Int = 300
     public var google = GoogleSettings()
+    public var summary = SummarySettings()
 
     public init(name: String) { self.name = name }
+
+    /// 実際に使う要約プロバイダ
+    public var summaryProvider: String {
+        if let p = summary.provider { return p }
+        return provider == "none" ? "none" : "vertex"
+    }
+
+    /// 要約に使う Google Cloud プロジェクト
+    public var summaryProjectID: String? { summary.projectID ?? google.projectID }
 
     public var outputDirectoryURL: URL {
         URL(fileURLWithPath: FileSecurity.expandTilde(outputDir), isDirectory: true)
@@ -126,7 +161,33 @@ public struct CappyConfig: Sendable {
             p.google.minSpeakers = try int("min_speakers", g, gctx)
             p.google.maxSpeakers = try int("max_speakers", g, gctx)
         }
-        let known: Set<String> = ["provider", "language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google"]
+        if let m = t["summary"]?.table {
+            let sctx = ctx + ".summary"
+            p.summary.provider = try str("provider", m, sctx)
+            p.summary.projectID = try str("project_id", m, sctx)
+            if let v = try str("region", m, sctx) { p.summary.region = v }
+            if let v = try str("model", m, sctx) { p.summary.model = v }
+            if let v = try str("fallback_model", m, sctx) { p.summary.fallbackModel = v }
+            if let v = try str("effort", m, sctx) { p.summary.effort = v }
+            if let v = try int("max_tokens", m, sctx) { p.summary.maxTokens = v }
+            if let v = try bool("auto", m, sctx) { p.summary.auto = v }
+            p.summary.instructionsFile = try str("instructions_file", m, sctx)
+            if let v = p.summary.provider, !SummarySettings.knownProviders.contains(v) {
+                throw CappyError.usage("\(sctx).provider が不正です: \(v)（vertex / none）")
+            }
+            if !SummarySettings.knownEfforts.contains(p.summary.effort) {
+                throw CappyError.usage("\(sctx).effort が不正です: \(p.summary.effort)（low / medium / high / xhigh / max）")
+            }
+            if p.summary.maxTokens < 1024 {
+                throw CappyError.usage("\(sctx).max_tokens は 1024 以上にしてください")
+            }
+            let knownSummary: Set<String> = ["provider", "project_id", "region", "model", "fallback_model", "effort",
+                                             "max_tokens", "auto", "instructions_file"]
+            for key in m.keys where !knownSummary.contains(key) {
+                CappyLog.shared.warning("設定 \(sctx).\(key) は不明なキーのため無視します")
+            }
+        }
+        let known: Set<String> = ["provider", "language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "summary"]
         for key in t.keys where !known.contains(key) {
             CappyLog.shared.warning("設定 \(ctx).\(key) は不明なキーのため無視します")
         }

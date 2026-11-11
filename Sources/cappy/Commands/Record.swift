@@ -8,7 +8,7 @@ struct Record: AsyncParsableCommand {
         discussion: """
         例:
           cappy record --app us.zoom.xos --name weekly-sync
-          cappy record --app com.google.Chrome --duration 90m --transcribe
+          cappy record --app com.google.Chrome --duration 90m --transcribe --summarize
           cappy record --system --no-mic
 
         録音中に Enter を押すとマーカー（目印）を記録します。文字を入力してから Enter でラベル付きになります。
@@ -49,6 +49,9 @@ struct Record: AsyncParsableCommand {
     @Option(help: "--transcribe 時の出力形式（md,json,srt）")
     var format: String = "md,json,srt"
 
+    @Flag(inversion: .prefixedNo, help: "--transcribe 時に続けて会議の要約を作る（既定はプロファイルの summary.auto）")
+    var summarize: Bool?
+
     @Flag(help: "対象が音声を出し始めるまで待つ")
     var wait = false
 
@@ -69,6 +72,9 @@ struct Record: AsyncParsableCommand {
         }
         if mix && !transcribe {
             throw ValidationError("--mix は --transcribe と一緒に指定してください（録音後なら `cappy transcribe --mix`）")
+        }
+        if summarize == true && !transcribe {
+            throw ValidationError("--summarize は --transcribe と一緒に指定してください（録音後なら `cappy transcribe --summarize`）")
         }
     }
 
@@ -204,6 +210,10 @@ struct Record: AsyncParsableCommand {
             interrupts.setPhase(.transcribing)
             try await TranscribeRunner.run(store: store, profile: profile, request: .init(
                 providerName: nil, language: nil, mix: mix, formats: formats, force: false, keepRemote: false))
+            if (summarize ?? profile.summary.auto) && profile.provider != "none" {
+                interrupts.setPhase(.summarizing)
+                try await SummarizeRunner.run(store: store, profile: profile, request: .init(explicit: summarize == true))
+            }
         } else {
             Console.print("文字起こし: cappy transcribe \(dir.path)")
         }
