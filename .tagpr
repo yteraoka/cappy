@@ -1,0 +1,7 @@
+# tagpr の設定（git config 形式）。main への push でリリース用の PR を作り、マージされたらタグを付ける
+# 詳しい設定は https://github.com/Songmu/tagpr を参照
+[tagpr]
+	vPrefix = true
+	releaseBranch = main
+	# タグと同期するバージョン（cappy --version に出る値）
+	versionFile = Sources/CappyKit/Core/Version.swift
