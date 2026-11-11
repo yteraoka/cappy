@@ -44,6 +44,15 @@ public protocol SummaryModelClient: Sendable {
     func generate(_ request: SummaryRequest, model: String) async throws -> SummaryResponse
     /// 入力トークン数を数える（課金されない。doctor でアクセス確認に使う）
     func countTokens(_ request: SummaryRequest, model: String) async throws -> Int
+    /// モデルにアクセスできるかを、課金されない方法で確かめる（doctor 用）
+    func checkAccess(model: String, effort: String) async throws
+}
+
+extension SummaryModelClient {
+    /// 既定: トークン数の確認で代用する
+    public func checkAccess(model: String, effort: String) async throws {
+        _ = try await countTokens(SummaryRequest(system: "ping", userText: "ping", maxTokens: 1024, effort: effort), model: model)
+    }
 }
 
 /// Claude on Vertex AI（Claude Models on Google Cloud, Google managed）を REST で呼ぶ。

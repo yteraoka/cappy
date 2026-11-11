@@ -204,7 +204,11 @@ public enum SummaryModelFamily: String, Sendable {
     case claude, gemini
 
     public static func of(_ model: String) -> SummaryModelFamily? {
-        let m = model.lowercased()
+        var m = model.lowercased()
+        // Bedrock のモデル ID（anthropic.claude-… / jp.anthropic.claude-…）も Claude として扱う
+        if let r = m.range(of: #"^([a-z-]+\.)?anthropic\."#, options: .regularExpression) {
+            m = String(m[r.upperBound...])
+        }
         if m.hasPrefix("claude-") { return .claude }
         if m.hasPrefix("gemini-") { return .gemini }
         return nil

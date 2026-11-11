@@ -108,11 +108,11 @@ cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
 ### summarize
 
-`transcript.json` を Vertex AI の Claude または Gemini に送り、`summary.md` に次の構成で書き出します: 概要 / 決定事項 / アクションアイテム（担当・内容・期限・時刻の表）/ 議論の要点 / 未解決事項・持ち越し。決定事項などには根拠となる発言の時刻 `[HH:MM:SS]` が付くので、`transcript.md` で前後を確認できます。
+`transcript.json` を Vertex AI の Claude / Gemini、または Amazon Bedrock の Claude（`summary.provider = "bedrock"`）に送り、`summary.md` に次の構成で書き出します: 概要 / 決定事項 / アクションアイテム（担当・内容・期限・時刻の表）/ 議論の要点 / 未解決事項・持ち越し。決定事項などには根拠となる発言の時刻 `[HH:MM:SS]` が付くので、`transcript.md` で前後を確認できます。
 
 | オプション | 説明 |
 | --- | --- |
-| `--model <id>` | 既定はプロファイルの `summary.model`（`gemini-4-argon`）。`gemini-` で始まれば Gemini、`claude-` で始まれば Claude（例: `gemini-3.5-flash`、`claude-opus-5-5`） |
+| `--model <id>` | 既定はプロファイルの `summary.model`（`gemini-4-argon`、Bedrock なら `claude-opus-5-5`）。`gemini-` で始まれば Gemini、`claude-` で始まれば Claude（例: `gemini-3.5-flash`、`claude-opus-5-5`）。Bedrock では `jp.anthropic.claude-opus-5-5` のような Bedrock のモデル ID も指定できます |
 | `--effort low\|medium\|high\|xhigh\|max` | 思考の深さ。既定はプロファイルの `summary.effort`（`high`）。Gemini 3 以降では `thinkingLevel` の LOW / MEDIUM / HIGH（`xhigh` と `max` は HIGH）に対応させ、Gemini 2.5 以前では指定せずモデルの動的な思考に任せます |
 | `--force` | 同じ文字起こしから作った要約があっても作り直す |
 
@@ -180,9 +180,33 @@ gcloud projects add-iam-policy-binding my-project \
 - `cappy doctor` は、課金されないトークン数の確認 API（Claude は `count-tokens:rawPredict`、Gemini は `countTokens`）でモデルへのアクセスを確認します。
 - 外部に送信したくない案件では、プロファイルで `[profiles.<name>.summary] provider = "none"` にしてください（`provider = "none"` のプロファイルでは要約も既定で none になります）。
 
+### 要約（Amazon Bedrock の Claude）の準備
+
+```toml
+[profiles.default.aws]
+region = "ap-northeast-1"     # 呼び出すリージョン（省略時は AWS_REGION → プロファイルの region）
+
+[profiles.default.summary]
+provider = "bedrock"
+region = "jp"                 # 推論プロファイルの範囲: global / jp / us / eu / au / apac、またはリージョン名
+model = "claude-opus-5-5"     # 省略時は claude-opus-5-5（Bedrock では Claude だけ）
+```
+
+- 認証は上の「AWS の認証」と同じです（`AWS_PROFILE`・SSO・アクセスキーなど）。
+- bedrock-runtime の Anthropic 形式の Messages API（`https://bedrock-runtime.<region>.amazonaws.com/anthropic/v1/messages`）を呼びます。リクエストは Vertex AI の Claude と同じ形（適応的思考・`effort`・ストリーミング）です。Claude Opus 4.7 以降のモデルに対応します。
+- `summary.region` で処理する地域を選びます。モデル名の前に付けて推論プロファイルの ID にします（`jp` なら `jp.anthropic.claude-opus-5-5`）。
+  - `jp`: 日本国内（東京・大阪）だけで処理します。呼び出すリージョン（`aws.region`）は `ap-northeast-1` か `ap-northeast-3` にしてください。global より約 10% 高くなります。
+  - `global`（既定）: 処理する地域を限定しません。
+  - リージョン名（例: `eu-west-2`）: そのリージョンだけで処理します（モデル ID に範囲を付けず、そのリージョンを呼びます）。使えるリージョンはモデルごとに異なります（Claude Opus 5.5 は現在 London のみ）。
+- 初回は Amazon Bedrock コンソールの「モデルアクセス」で Claude を有効にしてください（Anthropic のモデルは利用目的の申請が必要です）。
+- IAM では、推論プロファイルと、振り分け先の各リージョンの基盤モデルに対する `bedrock:InvokeModel` / `bedrock:InvokeModelWithResponseStream` が必要です。
+- 拒否されたときの再試行（`summary.fallback_model`、既定は `claude-opus-4-8`）は Vertex AI と同じく cappy 側で行います（Bedrock ではサーバー側の自動フォールバックが使えません）。
+- `cappy doctor` は、課金されないリクエスト（`max_tokens = 0` の不正なリクエスト。モデルの利用権限は本文の検証より先に確かめられる）で、要約のモデルと再試行先のモデルを使えるか確認します。新しい Claude は bedrock-runtime のトークン数の確認に対応していないためです。
+- 課金は AWS から請求されます。使ったトークン数は `session.json` の `summary.input_tokens` / `output_tokens` で確認できます。
+
 ### AWS の認証
 
-AWS のサービス（Amazon Transcribe・Amazon Bedrock、対応予定）を使うための認証です。現時点では `cappy doctor` での確認だけに使います。認証情報は設定ファイルに書かず、AWS CLI と同じ `~/.aws/config` / `~/.aws/credentials` のプロファイルを使います。
+AWS のサービスを使うための認証です（現在は Amazon Bedrock での要約に使います。Amazon Transcribe は対応予定）。認証情報は設定ファイルに書かず、AWS CLI と同じ `~/.aws/config` / `~/.aws/credentials` のプロファイルを使います。
 
 ```toml
 [profiles.default.aws]

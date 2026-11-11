@@ -6,9 +6,9 @@ struct Summarize: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "文字起こし済みのセッションから会議の要約（summary.md）を作る",
         discussion: """
-        transcript.json を Vertex AI の Claude または Gemini に送り、概要・決定事項・アクションアイテム・議論の要点・未解決事項をまとめます。
+        transcript.json を Vertex AI の Claude / Gemini、または Amazon Bedrock の Claude に送り、概要・決定事項・アクションアイテム・議論の要点・未解決事項をまとめます。
         モデルは claude- で始まれば Claude、gemini- で始まれば Gemini を使います。
-        認証は文字起こしと同じ Google のアプリケーションデフォルト認証情報（ADC）を使います。
+        認証は、Vertex AI なら Google のアプリケーションデフォルト認証情報（ADC）、Bedrock なら AWS のプロファイル（AWS_PROFILE・SSO など）を使います。
         同じ文字起こしから作った要約がある場合は作り直しません（--force で作り直す）。
         """
     )
@@ -52,7 +52,7 @@ struct Summarize: AsyncParsableCommand {
 
         if profile.summaryProvider == "none" {
             throw CappyError.usage("プロファイル \(profile.name) の要約プロバイダが none です",
-                                   hint: "[profiles.\(profile.name).summary] の provider を vertex にしてください")
+                                   hint: "[profiles.\(profile.name).summary] の provider を vertex か bedrock にしてください")
         }
         try await SummarizeRunner.run(store: store, profile: profile, request: .init(
             force: force, model: model, effort: effort, explicit: true))
