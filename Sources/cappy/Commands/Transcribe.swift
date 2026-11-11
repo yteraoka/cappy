@@ -7,19 +7,20 @@ struct Transcribe: AsyncParsableCommand {
         abstract: "録音済みセッションを外部サービスで文字起こしする（中断しても同じコマンドで再開できる）"
     )
 
-    @Argument(help: "セッションディレクトリ")
+    @Argument(help: "セッションディレクトリ", completion: .directory)
     var sessionDir: String
 
-    @Option(help: "文字起こしプロバイダ（gemini / google / transcribe / none。既定はプロファイルの provider）")
+    @Option(help: "文字起こしプロバイダ（gemini / google / transcribe / none。既定はプロファイルの provider）",
+            completion: .list(CompletionCandidates.providers))
     var provider: String?
 
-    @Option(help: "言語コード（既定はプロファイルの language。例: ja-JP）")
+    @Option(help: "言語コード（既定はプロファイルの language。例: ja-JP）", completion: .list(CompletionCandidates.languages))
     var language: String?
 
     @Flag(help: "2 トラックをミックスした 1 本で送る（課金対象は約半分になるが、自分と相手の区別は失われる）")
     var mix = false
 
-    @Option(help: "出力形式（md,json,srt のカンマ区切り）")
+    @Option(help: "出力形式（md,json,srt のカンマ区切り）", completion: .list(CompletionCandidates.formats))
     var format: String = "md,json,srt"
 
     @Flag(help: "完了済み・実行中のジョブを破棄してやり直す")

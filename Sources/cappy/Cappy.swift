@@ -14,12 +14,12 @@ struct Cappy: AsyncParsableCommand {
           4 録音中の I/O エラー  5 文字起こし・要約サービスのエラー
         """,
         version: CappyVersion.current,
-        subcommands: [Record.self, Transcribe.self, Summarize.self, Apps.self, Devices.self, Doctor.self, Recover.self]
+        subcommands: [Record.self, Transcribe.self, Summarize.self, Apps.self, Devices.self, Doctor.self, Recover.self, Completion.self]
     )
 }
 
 struct CommonOptions: ParsableArguments {
-    @Option(help: "設定プロファイル名（既定: default）")
+    @Option(help: "設定プロファイル名（既定: default）", completion: .custom { _, _, _ in CompletionCandidates.profiles() })
     var profile: String?
 
     @Flag(name: .shortAndLong, help: "詳細ログ（バッファ欠落数・リングバッファ使用率など）を出力する")

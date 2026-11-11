@@ -13,6 +13,8 @@ class Cappy < Formula
 
   def install
     bin.install "cappy"
+    # `cappy completion bash` / `cappy completion zsh` の出力を補完スクリプトとして置く
+    generate_completions_from_executable(bin/"cappy", "completion", shells: [:bash, :zsh])
   end
 
   def caveats
