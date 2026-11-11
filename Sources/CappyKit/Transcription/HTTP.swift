@@ -68,8 +68,13 @@ public struct URLSessionTransport: HTTPTransport {
     }
 }
 
+/// 再試行してよいかを判断できるエラー（RetryPolicy が使う）
+public protocol RetryableError: Error {
+    var isTransient: Bool { get }
+}
+
 /// Google API のエラー応答
-public struct GoogleAPIError: Error, CustomStringConvertible, Sendable {
+public struct GoogleAPIError: RetryableError, CustomStringConvertible, Sendable {
     public var httpStatus: Int
     public var status: String?
     public var message: String
@@ -127,8 +132,8 @@ public struct RetryPolicy: Sendable {
                 return try await body()
             } catch {
                 let transient: Bool
-                if let g = error as? GoogleAPIError {
-                    transient = g.isTransient
+                if let r = error as? RetryableError {
+                    transient = r.isTransient
                 } else if let u = error as? URLError {
                     transient = [.timedOut, .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,
                                  .dnsLookupFailed, .cannotFindHost, .secureConnectionFailed].contains(u.code)

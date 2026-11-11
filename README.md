@@ -180,6 +180,31 @@ gcloud projects add-iam-policy-binding my-project \
 - `cappy doctor` は、課金されないトークン数の確認 API（Claude は `count-tokens:rawPredict`、Gemini は `countTokens`）でモデルへのアクセスを確認します。
 - 外部に送信したくない案件では、プロファイルで `[profiles.<name>.summary] provider = "none"` にしてください（`provider = "none"` のプロファイルでは要約も既定で none になります）。
 
+### AWS の認証
+
+AWS のサービス（Amazon Transcribe・Amazon Bedrock、対応予定）を使うための認証です。現時点では `cappy doctor` での確認だけに使います。認証情報は設定ファイルに書かず、AWS CLI と同じ `~/.aws/config` / `~/.aws/credentials` のプロファイルを使います。
+
+```toml
+[profiles.default.aws]
+# profile = "my-sso-profile"  # 省略時は AWS_PROFILE → AWS_DEFAULT_PROFILE → default
+region = "ap-northeast-1"     # 省略時は AWS_REGION → AWS_DEFAULT_REGION → プロファイルの region
+```
+
+```bash
+aws configure sso                 # SSO のプロファイルを作る（初回のみ）
+aws sso login --sso-session corp  # ログイン（トークンの期限が切れたら再実行）
+AWS_PROFILE=my-sso-profile cappy doctor
+```
+
+- `[profiles.<name>.aws]` で `profile` を指定しなければ、環境変数のアクセスキー（`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`）を優先します。設定ファイルの場所は `AWS_CONFIG_FILE` / `AWS_SHARED_CREDENTIALS_FILE` で変えられます。
+- 対応しているプロファイルの種類:
+  - `sso_session`（IAM Identity Center）: `aws sso login` が `~/.aws/sso/cache` に保存したトークンでロールの一時的な認証情報を取得します。トークンの期限が近ければリフレッシュトークンで更新し、キャッシュに書き戻します（AWS CLI と同じ動作）。
+  - 旧形式の SSO（プロファイルに `sso_start_url`）: トークンの更新はできないため、期限切れなら `aws sso login --profile <name>` が必要です。
+  - アクセスキー（`aws_access_key_id` / `aws_secret_access_key`）、`credential_process`
+  - それ以外（`role_arn`、`web_identity_token_file`、`login_session` など）: `aws configure export-credentials --profile <name>` で取得します（AWS CLI v2 が必要）。
+- 一時的な認証情報は期限の 5 分前に取り直します。認証情報やトークンはログや `session.json` に書きません。
+- `cappy doctor` は STS の `GetCallerIdentity`（権限不要）で、使ったプロファイルの種類・ARN・認証情報の期限を表示します。
+
 ## 出力
 
 ```text

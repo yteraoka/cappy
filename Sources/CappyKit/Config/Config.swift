@@ -80,6 +80,19 @@ public struct SummarySettings: Sendable, Equatable {
     public static let knownEfforts: Set<String> = ["low", "medium", "high", "xhigh", "max"]
 }
 
+/// AWS の共通設定（[profiles.<name>.aws]）。認証情報そのものは書かず、~/.aws/config のプロファイルを使う
+public struct AWSSettings: Sendable, Equatable {
+    /// ~/.aws/config のプロファイル名。nil なら AWS_PROFILE → AWS_DEFAULT_PROFILE → default
+    public var profile: String?
+    /// nil なら AWS_REGION → AWS_DEFAULT_REGION → プロファイルの region
+    public var region: String?
+
+    public init(profile: String? = nil, region: String? = nil) {
+        self.profile = profile
+        self.region = region
+    }
+}
+
 public struct Profile: Sendable, Equatable {
     public var name: String
     /// gemini（Vertex AI の Gemini）/ google（Speech-to-Text v2）/ none
@@ -93,6 +106,8 @@ public struct Profile: Sendable, Equatable {
     public var google = GoogleSettings()
     public var gemini = GeminiSettings()
     public var summary = SummarySettings()
+    /// [profiles.<name>.aws] があるときだけ設定される
+    public var aws: AWSSettings?
 
     public init(name: String) { self.name = name }
 
@@ -252,7 +267,14 @@ public struct CappyConfig: Sendable {
                 CappyLog.shared.warning("設定 \(sctx).\(key) は不明なキーのため無視します")
             }
         }
-        let known: Set<String> = ["provider", "language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "gemini", "summary"]
+        if let a = t["aws"]?.table {
+            let actx = ctx + ".aws"
+            p.aws = AWSSettings(profile: try str("profile", a, actx), region: try str("region", a, actx))
+            for key in a.keys where !["profile", "region"].contains(key) {
+                CappyLog.shared.warning("設定 \(actx).\(key) は不明なキーのため無視します")
+            }
+        }
+        let known: Set<String> = ["provider", "language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "gemini", "summary", "aws"]
         for key in t.keys where !known.contains(key) {
             CappyLog.shared.warning("設定 \(ctx).\(key) は不明なキーのため無視します")
         }
