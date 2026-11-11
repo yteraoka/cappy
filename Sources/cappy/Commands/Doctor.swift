@@ -1,0 +1,184 @@
+import ArgumentParser
+import CappyKit
+import Foundation
+
+struct Doctor: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "権限・認証・設定の診断"
+    )
+
+    @Flag(name: .customLong("request-permissions"), help: "未確認の権限について許可ダイアログを出す")
+    var requestPermissions = false
+
+    @OptionGroup var common: CommonOptions
+
+    enum Level { case ok, warn, fail }
+
+    struct Check {
+        var level: Level
+        var title: String
+        var detail: String
+        var category: ExitStatus
+    }
+
+    func run() async throws {
+        var checks: [Check] = []
+        func add(_ level: Level, _ title: String, _ detail: String, _ category: ExitStatus = .usage) {
+            checks.append(Check(level: level, title: title, detail: detail, category: category))
+            let mark: String
+            switch level {
+            case .ok: mark = "✅"
+            case .warn: mark = "⚠️ "
+            case .fail: mark = "❌"
+            }
+            print("\(mark) \(title): \(detail)")
+        }
+
+        // OS
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        let osOK = v.majorVersion >= 15
+        add(osOK ? .ok : .fail, "macOS", "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)\(osOK ? "" : "（15 以降が必要）")")
+        add(Permissions.hasEmbeddedUsageDescriptions ? .ok : .warn, "Info.plist",
+            Permissions.hasEmbeddedUsageDescriptions ? "利用目的の文字列が埋め込まれています" : "埋め込まれていません（swift build で作った場合は Package.swift のリンカ設定を確認）")
+
+        // 権限
+        var audio = Permissions.audioCaptureStatus()
+        if audio == .notDetermined && requestPermissions { audio = await Permissions.requestAudioCapture() }
+        switch audio {
+        case .authorized: add(.ok, "システムオーディオ録音", audio.rawValue)
+        case .denied: add(.fail, "システムオーディオ録音", "拒否されています\n" + Permissions.audioCaptureHint, .permission)
+        case .notDetermined: add(.warn, "システムオーディオ録音", "未確認（初回の録音時、または --request-permissions で許可を求めます）")
+        case .unknown: add(.warn, "システムオーディオ録音", "状態を取得できません")
+        }
+        var mic = Permissions.microphoneStatus()
+        if mic == .notDetermined && requestPermissions { mic = await Permissions.requestMicrophone() }
+        switch mic {
+        case .authorized: add(.ok, "マイク", mic.rawValue)
+        case .denied: add(.fail, "マイク", "拒否されています\n" + Permissions.microphoneHint, .permission)
+        case .notDetermined: add(.warn, "マイク", "未確認（初回の録音時、または --request-permissions で許可を求めます）")
+        case .unknown: add(.warn, "マイク", "状態を取得できません")
+        }
+
+        // デバイス
+        if let out = try? AudioDevices.defaultOutputDevice(), let info = try? AudioDevices.info(for: out) {
+            add(.ok, "既定の出力", "\(info.name)（\(Int(info.sampleRate)) Hz）")
+        } else {
+            add(.fail, "既定の出力", "ありません", .io)
+        }
+        if let inp = try? AudioDevices.defaultInputDevice(), let info = try? AudioDevices.info(for: inp) {
+            add(.ok, "既定の入力", "\(info.name)（\(Int(info.sampleRate)) Hz）")
+        } else {
+            add(.warn, "既定の入力", "ありません（--no-mic で録音できます）")
+        }
+
+        // 設定
+        let config: CappyConfig
+        do {
+            config = try CappyConfig.load()
+            add(config.fileExists ? .ok : .warn, "設定ファイル",
+                config.fileExists ? config.path.path : "\(config.path.path) がありません（既定値を使います）")
+        } catch let e as CappyError {
+            add(.fail, "設定ファイル", e.message)
+            finish(checks)
+            return
+        }
+        let profile: Profile
+        do {
+            profile = try config.profile(named: common.profile)
+            add(.ok, "プロファイル", "\(profile.name)（provider=\(profile.provider), language=\(profile.language)）")
+        } catch let e as CappyError {
+            add(.fail, "プロファイル", e.message)
+            finish(checks)
+            return
+        }
+        let outDir = profile.outputDirectoryURL
+        if let free = FileSecurity.availableBytes(at: FileManager.default.fileExists(atPath: outDir.path) ? outDir : outDir.deletingLastPathComponent()) {
+            add(free > Int64(profile.diskWarnMB) << 20 ? .ok : .warn, "保存先", "\(outDir.path)（空き \(free >> 30) GB）")
+        } else {
+            add(.ok, "保存先", outDir.path)
+        }
+
+        if profile.provider == "google" {
+            await checkGoogle(profile, add)
+        } else {
+            add(.ok, "文字起こし", "provider = none（録音のみ）")
+        }
+        finish(checks)
+    }
+
+    func checkGoogle(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let g = profile.google
+        guard g.projectID != nil, g.bucket != nil else {
+            add(.fail, "Google 設定", "project_id と bucket を [profiles.\(profile.name).google] に設定してください", .usage)
+            return
+        }
+        add(.ok, "Google 設定", "project=\(g.projectID!) location=\(g.location) model=\(g.model) bucket=\(g.bucket!)", .usage)
+        if g.wordTimestamps && g.effectiveChunkSeconds > 20 * 60 {
+            add(.warn, "分割長", "単語タイムスタンプ有効時、chirp_3 の BatchRecognize は 1 ファイル約 20 分までです（chunk_minutes を 19 以下に）", .usage)
+        }
+        let auth: ApplicationDefaultCredentials
+        do {
+            auth = try ApplicationDefaultCredentials.load()
+        } catch let e as CappyError {
+            add(.fail, "Google 認証", e.message + (e.hint.map { "\n" + $0 } ?? ""), .transcription)
+            return
+        } catch {
+            add(.fail, "Google 認証", "\(error)", .transcription)
+            return
+        }
+        do {
+            _ = try await auth.accessToken()
+            add(.ok, "Google 認証", await auth.summary, .transcription)
+        } catch {
+            add(.fail, "Google 認証", "\(error)", .transcription)
+            return
+        }
+        guard let provider = try? GoogleSpeechProvider(settings: g, auth: auth) else { return }
+        do {
+            try await provider.checkAPI()
+            add(.ok, "Speech-to-Text API", "projects/\(g.projectID!)/locations/\(g.location) にアクセスできます", .transcription)
+        } catch {
+            add(.fail, "Speech-to-Text API", "\(error)", .transcription)
+        }
+        let need = ["storage.objects.create", "storage.objects.get", "storage.objects.delete", "storage.objects.list"]
+        do {
+            let granted = try await provider.storage.testPermissions(bucket: g.bucket!, permissions: need)
+            let missing = need.filter { !granted.contains($0) }
+            add(missing.isEmpty ? .ok : .fail, "バケットの権限",
+                missing.isEmpty ? "書き込み・読み取り・削除できます" : "不足: \(missing.joined(separator: ", "))", .transcription)
+        } catch {
+            add(.fail, "バケットの権限", "\(error)", .transcription)
+        }
+        do {
+            let info = try await provider.storage.bucketInfo(g.bucket!)
+            add(info.uniformAccess ? .ok : .warn, "バケットのアクセス制御",
+                info.uniformAccess ? "均一なアクセス制御が有効です" : "均一なアクセス制御が無効です（有効化を推奨）", .transcription)
+            if let age = info.deleteAgeDays, age <= 1 {
+                add(.ok, "ライフサイクル", "\(age) 日後に自動削除されます", .transcription)
+            } else {
+                add(.warn, "ライフサイクル",
+                    info.deleteAgeDays.map { "自動削除が \($0) 日後です（1 日を推奨）" } ?? "自動削除ルールがありません（1 日後に削除するルールを推奨）", .transcription)
+            }
+            if let loc = info.location {
+                add(.ok, "バケットの場所", loc, .transcription)
+            }
+        } catch let e as GoogleAPIError where e.httpStatus == 404 {
+            add(.fail, "バケット", "\(g.bucket!) が見つかりません", .transcription)
+        } catch {
+            add(.warn, "バケットの設定", "確認できません（storage.buckets.get 権限が必要）: \(error)", .transcription)
+        }
+    }
+
+    func finish(_ checks: [Check]) {
+        let failures = checks.filter { $0.level == .fail }
+        if failures.isEmpty {
+            print("\n問題は見つかりませんでした")
+            return
+        }
+        print("\n\(failures.count) 件の問題があります")
+        // 権限 → 設定 → その他の順で終了コードを決める
+        if failures.contains(where: { $0.category == .permission }) { Foundation.exit(ExitStatus.permission.rawValue) }
+        if failures.contains(where: { $0.category == .usage }) { Foundation.exit(ExitStatus.usage.rawValue) }
+        Foundation.exit(failures[0].category.rawValue)
+    }
+}

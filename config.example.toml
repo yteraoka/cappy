@@ -1,0 +1,36 @@
+# ~/.config/cappy/config.toml の例
+# 認証情報そのものは書かない（Google はアプリケーションデフォルト認証情報を使う）
+
+[profiles.default]
+provider = "google"          # google / none（none なら録音だけ行い、外部へ送信しない）
+language = "ja-JP"
+output_dir = "~/Recordings/cappy"
+# disk_warn_mb = 1024        # 空き容量がこれを下回ったら警告
+# disk_stop_mb = 300         # さらに下回ったら録音を安全に停止（終了コード 4）
+
+[profiles.default.google]
+project_id = "my-project"
+location = "us"
+bucket = "my-cappy-bucket"
+model = "chirp_3"
+delete_remote_after = true   # 文字起こし後にバケット上の音声と結果を削除
+# word_timestamps = true     # 単語タイムスタンプ（有効時は 1 ファイル約 20 分の制限があるため自動分割）
+# chunk_minutes = 19         # 分割長（分）。省略時は word_timestamps に応じて 19 / 59
+# diarization = true         # remote トラックで話者分離を試みる
+# min_speakers = 1
+# max_speakers = 6
+
+# クライアントごとに送信先や保存先を分ける例
+[profiles.client-a]
+provider = "google"
+output_dir = "~/Recordings/client-a"
+
+[profiles.client-a.google]
+project_id = "client-a-project"
+location = "eu"
+bucket = "client-a-cappy"
+
+# 外部送信が許されない案件
+[profiles.local-only]
+provider = "none"
+output_dir = "~/Recordings/local-only"

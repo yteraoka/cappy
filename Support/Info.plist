@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>dev.cappy.cli</string>
+	<key>CFBundleName</key>
+	<string>cappy</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>cappy は会議アプリの音声を録音するためにシステムオーディオ録音を使用します。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>cappy は自分の声を録音するためにマイクを使用します。</string>
+</dict>
+</plist>
