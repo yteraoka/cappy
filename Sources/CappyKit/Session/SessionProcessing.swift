@@ -10,13 +10,13 @@ public enum SessionProcessing {
         for track in meta.tracks where track.id != .mix {
             let caf = store.url(for: track.file)
             guard FileManager.default.fileExists(atPath: caf.path) else {
-                CappyLog.shared.warning("\(track.file) がないため変換を省略します")
+                CappyLog.shared.warning(tr("Skipping the conversion because \(track.file) is missing", ja: "\(track.file) がないため変換を省略します"))
                 continue
             }
             let base = store.url(for: track.id.rawValue)
             let r = try SendFileConverter.convert(input: caf, outputBase: base)
             results[track.id] = r
-            CappyLog.shared.info("送信用ファイルを作成しました \(r.url.lastPathComponent) duration=\(r.durationMs)ms")
+            CappyLog.shared.info(tr("Created the file to send \(r.url.lastPathComponent) duration=\(r.durationMs)ms", ja: "送信用ファイルを作成しました \(r.url.lastPathComponent) duration=\(r.durationMs)ms"))
         }
         try store.update { m in
             for i in m.tracks.indices {
@@ -55,7 +55,7 @@ public enum SessionProcessing {
             }
         }
         guard !tracks.isEmpty else {
-            throw CappyError.usage("\(directory.path) に録音ファイル（remote.caf / mic.caf）がありません")
+            throw CappyError.usage(tr("No recordings (remote.caf / mic.caf) in \(directory.path)", ja: "\(directory.path) に録音ファイル（remote.caf / mic.caf）がありません"))
         }
         let wasRecording = store.metadata.recording.state == .recording
         for i in tracks.indices {
@@ -68,7 +68,7 @@ public enum SessionProcessing {
                 file = try? AVAudioFile(forReading: url)
             }
             guard let file else {
-                throw CappyError.io("\(tracks[i].file) を修復できませんでした")
+                throw CappyError.io(tr("Could not repair \(tracks[i].file)", ja: "\(tracks[i].file) を修復できませんでした"))
             }
             tracks[i].sampleRate = file.fileFormat.sampleRate
             tracks[i].channels = Int(file.fileFormat.channelCount)

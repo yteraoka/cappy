@@ -27,7 +27,7 @@ public enum FileSecurity {
         if rename(tmp.path, url.path) != 0 {
             let err = String(cString: strerror(errno))
             try? FileManager.default.removeItem(at: tmp)
-            throw CappyError.io("ファイルを書き込めません: \(url.path): \(err)")
+            throw CappyError.io(tr("Cannot write the file: \(url.path): \(err)", ja: "ファイルを書き込めません: \(url.path): \(err)"))
         }
         makePrivate(url)
     }

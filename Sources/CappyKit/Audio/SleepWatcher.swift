@@ -24,7 +24,7 @@ public final class SleepWatcher: @unchecked Sendable {
             me.handle(messageType: messageType, argument: messageArgument)
         }, &notifier)
         if rootPort == 0 {
-            CappyLog.shared.warning("スリープ通知を登録できませんでした")
+            CappyLog.shared.warning(tr("Could not register for sleep notifications", ja: "スリープ通知を登録できませんでした"))
         } else if let notifyPort {
             IONotificationPortSetDispatchQueue(notifyPort, queue)
         }
@@ -53,7 +53,7 @@ public final class SleepWatcher: @unchecked Sendable {
         case Self.canSystemSleep:
             IOAllowPowerChange(rootPort, id)
         case Self.systemWillSleep:
-            CappyLog.shared.info("スリープを検知しました")
+            CappyLog.shared.info(tr("Detected sleep", ja: "スリープを検知しました"))
             onWillSleep()
             IOAllowPowerChange(rootPort, id)
         default:

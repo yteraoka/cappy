@@ -51,11 +51,11 @@ public enum TranscriptFormat: String, CaseIterable, Sendable {
         var out: [TranscriptFormat] = []
         for part in s.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces).lowercased() }) where !part.isEmpty {
             guard let f = TranscriptFormat(rawValue: part == "markdown" ? "md" : part) else {
-                throw CappyError.usage("出力形式が不正です: \(part)（md, json, srt）")
+                throw CappyError.usage(tr("Invalid output format: \(part) (md, json, srt)", ja: "出力形式が不正です: \(part)（md, json, srt）"))
             }
             if !out.contains(f) { out.append(f) }
         }
-        guard !out.isEmpty else { throw CappyError.usage("出力形式を 1 つ以上指定してください（md, json, srt）") }
+        guard !out.isEmpty else { throw CappyError.usage(tr("Specify at least one output format (md, json, srt)", ja: "出力形式を 1 つ以上指定してください（md, json, srt）")) }
         return out
     }
 }
@@ -73,11 +73,14 @@ public enum TranscriptMerger {
     }
 }
 
-/// 表示用の話者名（mic は「自分」、remote は「相手」／話者分離があれば「相手 1」「相手 2」）
+/// 表示用の話者名（mic は「自分」、remote は「相手」／話者分離があれば「相手 1」「相手 2」）。
+/// 英語では Me / Remote / Remote 1
 public struct SpeakerNaming: Sendable {
     private var numbers: [TrackID: [String: Int]] = [:]
+    public let language: UILanguage
 
-    public init(segments: [Segment]) {
+    public init(segments: [Segment], language: UILanguage) {
+        self.language = language
         for s in segments {
             guard let sp = s.speaker else { continue }
             var map = numbers[s.track] ?? [:]
@@ -87,7 +90,7 @@ public struct SpeakerNaming: Sendable {
     }
 
     public func label(for s: Segment) -> String {
-        let base = s.track.displayName
+        let base = s.track.label(language)
         guard s.track != .mic, let sp = s.speaker, let map = numbers[s.track], map.count > 1, let n = map[sp] else {
             return base
         }
@@ -102,22 +105,26 @@ public enum TranscriptRenderer {
         return try enc.encode(doc)
     }
 
+    /// transcript.md。見出しや話者名は会議の言語（doc.language）で書く
     public static func markdown(_ doc: TranscriptDocument, timeZone: TimeZone = .current) -> String {
-        let naming = SpeakerNaming(segments: doc.segments)
+        let L = UILanguage.forDocument(doc.language)
+        let naming = SpeakerNaming(segments: doc.segments, language: L)
         var lines: [String] = []
         lines.append("# \(doc.name?.isEmpty == false ? doc.name! : doc.sessionID)")
         lines.append("")
         if let s = doc.startedAt, let d = TimeFormat.parseISO8601(s) {
             let f = DateFormatter()
-            f.locale = Locale(identifier: "ja_JP")
+            f.locale = Locale(identifier: "en_US_POSIX")
             f.timeZone = timeZone
             f.dateFormat = "yyyy-MM-dd HH:mm"
-            lines.append("- 録音開始: \(f.string(from: d))")
+            lines.append(tr(L, "- Recording started: ", ja: "- 録音開始: ") + f.string(from: d))
         }
         if let last = doc.segments.map(\.endMs).max() {
-            lines.append("- 長さ: \(TimeFormat.hms(ms: last))")
+            lines.append(tr(L, "- Length: ", ja: "- 長さ: ") + TimeFormat.hms(ms: last))
         }
-        lines.append("- 文字起こし: \(doc.provider)\(doc.model.map { " / \($0)" } ?? "") / \(doc.language)\(doc.mix ? "（ミックス）" : "")")
+        lines.append(tr(L, "- Transcription: ", ja: "- 文字起こし: ")
+            + "\(doc.provider)\(doc.model.map { " / \($0)" } ?? "") / \(doc.language)"
+            + (doc.mix ? tr(L, " (mixed)", ja: "（ミックス）") : ""))
         lines.append("")
         for s in doc.segments {
             lines.append("**[\(TimeFormat.hms(ms: s.startMs))] \(naming.label(for: s))**: \(s.text)")
@@ -127,7 +134,7 @@ public enum TranscriptRenderer {
     }
 
     public static func srt(_ doc: TranscriptDocument) -> String {
-        let naming = SpeakerNaming(segments: doc.segments)
+        let naming = SpeakerNaming(segments: doc.segments, language: UILanguage.forDocument(doc.language))
         var out = ""
         for (i, s) in doc.segments.enumerated() {
             let end = max(s.endMs, s.startMs + 500)

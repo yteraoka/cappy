@@ -33,7 +33,7 @@ public struct AWSConfigFile: Sendable, Equatable {
         do {
             return try String(contentsOfFile: path, encoding: .utf8)
         } catch {
-            throw CappyError.usage("AWS の設定ファイルを読めません: \(path): \(error.localizedDescription)")
+            throw CappyError.usage(tr("Cannot read the AWS config file: \(path): \(error.localizedDescription)", ja: "AWS の設定ファイルを読めません: \(path): \(error.localizedDescription)"))
         }
     }
 

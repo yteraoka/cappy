@@ -265,7 +265,8 @@ final class StubRunner: CommandRunner, @unchecked Sendable {
         #expect(p.profileName == nil)
         let c = try await p.credentials()
         #expect(c == AWSCredentials(accessKeyID: "ENVKEY", secretAccessKey: "ENVSECRET", sessionToken: "ENVTOKEN"))
-        #expect(p.summary.contains("環境変数"))
+        L10n.$override.withValue(.en) { #expect(p.summary.contains("environment variables")) }
+        L10n.$override.withValue(.ja) { #expect(p.summary.contains("環境変数")) }
         #expect(try resolve(f, profile: "static").profileName == "static")
     }
 

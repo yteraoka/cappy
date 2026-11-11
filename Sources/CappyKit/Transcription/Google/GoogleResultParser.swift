@@ -40,7 +40,7 @@ public enum GoogleResultParser {
 
     public static func segments(fromJSON data: Data, track: TrackID, offsetMs: Int64, language: String) throws -> [Segment] {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw CappyError.transcription("認識結果の JSON が不正です")
+            throw CappyError.transcription(tr("Invalid recognition result JSON", ja: "認識結果の JSON が不正です"))
         }
         let results = field(root, "results") as? [[String: Any]] ?? []
         return segments(fromResults: results, track: track, offsetMs: offsetMs, language: language)

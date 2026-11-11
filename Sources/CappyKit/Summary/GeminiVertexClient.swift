@@ -57,7 +57,7 @@ public struct GeminiVertexClient: SummaryModelClient {
     }
 
     func makeRequest(url: String, body: Data) async throws -> URLRequest {
-        guard let u = URL(string: url) else { throw CappyError.transcription("URL が不正です: \(url)") }
+        guard let u = URL(string: url) else { throw CappyError.transcription(tr("Invalid URL: \(url)", ja: "URL が不正です: \(url)")) }
         var req = URLRequest(url: u)
         req.httpMethod = "POST"
         req.timeoutInterval = 600
@@ -73,7 +73,7 @@ public struct GeminiVertexClient: SummaryModelClient {
             return try await generate(request, model: model, thinking: true)
         } catch let e as GoogleAPIError where e.httpStatus == 400 && e.message.lowercased().contains("thinking") {
             // モデルが指定した thinkingLevel に対応していない場合は、既定の思考設定でやり直す
-            CappyLog.shared.warning("\(model) が思考の設定を受け付けませんでした。既定の設定で再試行します: \(e.message)")
+            CappyLog.shared.warning(tr("\(model) rejected the thinking settings. Retrying with the defaults: \(e.message)", ja: "\(model) が思考の設定を受け付けませんでした。既定の設定で再試行します: \(e.message)"))
             return try await generate(request, model: model, thinking: false)
         }
     }
@@ -82,7 +82,7 @@ public struct GeminiVertexClient: SummaryModelClient {
         let url = endpoint(model: model, method: "streamGenerateContent") + "?alt=sse"
         let body = try JSONSerialization.data(withJSONObject: Self.body(request, model: model, thinking: thinking),
                                               options: [.sortedKeys])
-        return try await retry.run("要約（\(model)）") {
+        return try await retry.run(tr("Summary (\(model))", ja: "要約（\(model)）")) {
             let req = try await makeRequest(url: url, body: body)
             var parser = GeminiStreamParser(model: model)
             var head = ""
@@ -102,14 +102,14 @@ public struct GeminiVertexClient: SummaryModelClient {
         let body = try JSONSerialization.data(withJSONObject: [
             "contents": [["role": "user", "parts": [["text": request.userText]]]],
         ] as [String: Any], options: [.sortedKeys])
-        let resp = try await retry.run("トークン数の確認") {
+        let resp = try await retry.run(tr("Counting tokens", ja: "トークン数の確認")) {
             let r = try await transport.send(try await makeRequest(url: url, body: body))
             guard r.status == 200 else { throw GoogleAPIError.from(r) }
             return r
         }
         guard let obj = try JSONSerialization.jsonObject(with: resp.body) as? [String: Any],
               let n = obj["totalTokens"] as? Int else {
-            throw CappyError.transcription("トークン数の応答が不正です")
+            throw CappyError.transcription(tr("Invalid token count response", ja: "トークン数の応答が不正です"))
         }
         return n
     }
@@ -139,7 +139,7 @@ public struct GeminiStreamParser {
         }
         if let err = obj["error"] as? [String: Any] {
             throw GoogleAPIError(httpStatus: err["code"] as? Int ?? 500, status: err["status"] as? String,
-                                 message: err["message"] as? String ?? "不明なエラー")
+                                 message: err["message"] as? String ?? tr("unknown error", ja: "不明なエラー"))
         }
         sawEvent = true
         if let v = obj["modelVersion"] as? String, !v.isEmpty { model = v }
@@ -162,7 +162,7 @@ public struct GeminiStreamParser {
     }
 
     public func finish() throws -> SummaryResponse {
-        guard sawEvent else { throw CappyError.transcription("要約の応答が空です") }
+        guard sawEvent else { throw CappyError.transcription(tr("The summary response is empty", ja: "要約の応答が空です")) }
         // Claude と同じ stop_reason の語彙にそろえる（refusal / max_tokens / end_turn）
         let stop: String
         var category: String?
@@ -179,7 +179,7 @@ public struct GeminiStreamParser {
             default: stop = r.lowercased()
             }
         } else {
-            throw GoogleAPIError(httpStatus: 503, status: "incomplete_stream", message: "応答が途中で切れました")
+            throw GoogleAPIError(httpStatus: 503, status: "incomplete_stream", message: tr("The response was cut off", ja: "応答が途中で切れました"))
         }
         return SummaryResponse(text: text.trimmingCharacters(in: .whitespacesAndNewlines), model: model,
                                stopReason: stop, refusalCategory: category,
@@ -246,7 +246,7 @@ public struct VertexSummaryClient: SummaryModelClient {
         case .claude: return claude
         case .gemini: return gemini
         case .bedrockChat, nil:
-            throw CappyError.usage("要約のモデル名が不正です: \(model)（claude- または gemini- で始まる Vertex AI のモデル ID）")
+            throw CappyError.usage(tr("Invalid summary model name: \(model) (a Vertex AI model ID starting with claude- or gemini-)", ja: "要約のモデル名が不正です: \(model)（claude- または gemini- で始まる Vertex AI のモデル ID）"))
         }
     }
 

@@ -224,14 +224,14 @@ public final class LiveTranscription: @unchecked Sendable {
         case .interim(let track, let text):
             onInterim?(track, text)
         case .connected(let track, let n):
-            CappyLog.shared.info("live \(track.rawValue): セッション \(n) を開始しました")
-            if n == 1 { onNotice?("\(track.displayName)（\(track.rawValue)）のリアルタイム文字起こしを開始しました") }
+            CappyLog.shared.info(tr("live \(track.rawValue): session \(n) started", ja: "live \(track.rawValue): セッション \(n) を開始しました"))
+            if n == 1 { onNotice?(tr("Live transcription of \(track.displayName) (\(track.rawValue)) started", ja: "\(track.displayName)（\(track.rawValue)）のリアルタイム文字起こしを開始しました")) }
         case .disconnected(let track, let reason):
-            CappyLog.shared.warning("live \(track.rawValue): \(reason)（再接続します）")
-            onNotice?("\(track.displayName)（\(track.rawValue)）のリアルタイム文字起こしが切断されました。再接続します: \(reason)")
+            CappyLog.shared.warning(tr("live \(track.rawValue): \(reason) (reconnecting)", ja: "live \(track.rawValue): \(reason)（再接続します）"))
+            onNotice?(tr("Live transcription of \(track.displayName) (\(track.rawValue)) was disconnected. Reconnecting: \(reason)", ja: "\(track.displayName)（\(track.rawValue)）のリアルタイム文字起こしが切断されました。再接続します: \(reason)"))
         case .failed(let track, let reason):
             CappyLog.shared.error("live \(track.rawValue): \(reason)")
-            onNotice?("\(track.displayName)（\(track.rawValue)）のリアルタイム文字起こしを中止しました（録音は続けます）: \(reason)")
+            onNotice?(tr("Stopped live transcription of \(track.displayName) (\(track.rawValue)) (recording continues): \(reason)", ja: "\(track.displayName)（\(track.rawValue)）のリアルタイム文字起こしを中止しました（録音は続けます）: \(reason)"))
         }
     }
 

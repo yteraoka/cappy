@@ -133,18 +133,18 @@ final class URLSessionLiveSocket: LiveSocket, LiveDataSocket, @unchecked Sendabl
         if let http = task.response as? HTTPURLResponse, http.statusCode != 101 {
             let code = http.statusCode
             let permanent = [400, 401, 403, 404].contains(code)
-            return LiveConnectionError(message: "リアルタイム文字起こしの接続に失敗しました（HTTP \(code)\(code == 403 ? "。認証情報か権限を確認してください" : "")）",
+            return LiveConnectionError(message: tr("Live transcription connection failed (HTTP \(code)\(code == 403 ? ". Check the credentials or permissions" : ""))", ja: "リアルタイム文字起こしの接続に失敗しました（HTTP \(code)\(code == 403 ? "。認証情報か権限を確認してください" : "")）"),
                                        permanent: permanent)
         }
         let reason = task.closeReason.map { String(decoding: $0, as: UTF8.self) } ?? ""
         switch task.closeCode {
         case .invalid:
-            return LiveConnectionError(message: "Live API との接続が切れました: \(error.localizedDescription)", permanent: false)
+            return LiveConnectionError(message: tr("The connection to the live API was lost: \(error.localizedDescription)", ja: "Live API との接続が切れました: \(error.localizedDescription)"), permanent: false)
         case .policyViolation, .unsupportedData, .invalidFramePayloadData:
             // 設定の誤り（モデル名・権限など）はサーバーが 1007 / 1008 で閉じる
-            return LiveConnectionError(message: "Live API が接続を閉じました（\(task.closeCode.rawValue)）: \(reason)", permanent: true)
+            return LiveConnectionError(message: tr("The live API closed the connection (\(task.closeCode.rawValue)): \(reason)", ja: "Live API が接続を閉じました（\(task.closeCode.rawValue)）: \(reason)"), permanent: true)
         default:
-            return LiveConnectionError(message: "Live API が接続を閉じました（\(task.closeCode.rawValue)）\(reason.isEmpty ? "" : ": \(reason)")",
+            return LiveConnectionError(message: tr("The live API closed the connection (\(task.closeCode.rawValue))\(reason.isEmpty ? "" : ": \(reason)")", ja: "Live API が接続を閉じました（\(task.closeCode.rawValue)）\(reason.isEmpty ? "" : ": \(reason)")"),
                                        permanent: false)
         }
     }

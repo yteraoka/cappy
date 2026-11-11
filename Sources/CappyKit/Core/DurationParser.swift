@@ -4,9 +4,9 @@ import Foundation
 public enum DurationParser {
     public static func parse(_ text: String) throws -> TimeInterval {
         let s = text.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !s.isEmpty else { throw CappyError.usage("時間指定が空です") }
+        guard !s.isEmpty else { throw CappyError.usage(tr("The duration is empty", ja: "時間指定が空です")) }
         if let plain = Double(s) {
-            guard plain > 0 else { throw CappyError.usage("時間指定は正の値にしてください: \(text)") }
+            guard plain > 0 else { throw CappyError.usage(tr("The duration must be positive: \(text)", ja: "時間指定は正の値にしてください: \(text)")) }
             return plain
         }
         var total: Double = 0
@@ -18,24 +18,24 @@ public enum DurationParser {
                 continue
             }
             guard let value = Double(number) else {
-                throw CappyError.usage("時間指定を解釈できません: \(text)（例: 90m, 1h30m, 45s）")
+                throw CappyError.usage(tr("Cannot parse the duration: \(text) (e.g. 90m, 1h30m, 45s)", ja: "時間指定を解釈できません: \(text)（例: 90m, 1h30m, 45s）"))
             }
             switch ch {
             case "h": total += value * 3600
             case "m": total += value * 60
             case "s": total += value
             default:
-                throw CappyError.usage("時間指定の単位が不正です: \(text)（h, m, s を使用）")
+                throw CappyError.usage(tr("Invalid duration unit: \(text) (use h, m, s)", ja: "時間指定の単位が不正です: \(text)（h, m, s を使用）"))
             }
             number = ""
             sawUnit = true
         }
         if !number.isEmpty {
             // 単位なしの末尾は秒とみなす（"1h30" → 1h + 30s ではなく誤りにする）
-            throw CappyError.usage("時間指定の末尾に単位がありません: \(text)")
+            throw CappyError.usage(tr("The duration has no unit at the end: \(text)", ja: "時間指定の末尾に単位がありません: \(text)"))
         }
         guard sawUnit, total > 0 else {
-            throw CappyError.usage("時間指定を解釈できません: \(text)")
+            throw CappyError.usage(tr("Cannot parse the duration: \(text)", ja: "時間指定を解釈できません: \(text)"))
         }
         return total
     }

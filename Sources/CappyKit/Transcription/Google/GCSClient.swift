@@ -41,7 +41,7 @@ public struct GCSClient: Sendable {
     }
 
     private func request(_ url: String, method: String = "GET") async throws -> URLRequest {
-        guard let u = URL(string: url) else { throw CappyError.transcription("URL が不正です: \(url)") }
+        guard let u = URL(string: url) else { throw CappyError.transcription(tr("Invalid URL: \(url)", ja: "URL が不正です: \(url)")) }
         var req = URLRequest(url: u)
         req.httpMethod = method
         req.setValue("Bearer \(try await auth.accessToken())", forHTTPHeaderField: "Authorization")
@@ -56,7 +56,7 @@ public struct GCSClient: Sendable {
 
     public func upload(file: URL, to object: GCSObjectRef, contentType: String) async throws {
         let url = "https://storage.googleapis.com/upload/storage/v1/b/\(Self.encodeObject(object.bucket))/o?uploadType=media&name=\(Self.encodeObject(object.name))"
-        _ = try await retry.run("アップロード \(object.name)") {
+        _ = try await retry.run(tr("Upload \(object.name)", ja: "アップロード \(object.name)")) {
             var req = try await request(url, method: "POST")
             req.setValue(contentType, forHTTPHeaderField: "Content-Type")
             req.timeoutInterval = 600
@@ -66,7 +66,7 @@ public struct GCSClient: Sendable {
 
     public func download(_ object: GCSObjectRef) async throws -> Data {
         let url = "https://storage.googleapis.com/storage/v1/b/\(Self.encodeObject(object.bucket))/o/\(Self.encodeObject(object.name))?alt=media"
-        return try await retry.run("ダウンロード \(object.name)") {
+        return try await retry.run(tr("Download \(object.name)", ja: "ダウンロード \(object.name)")) {
             try check(try await transport.send(try await request(url))).body
         }
     }
@@ -74,7 +74,7 @@ public struct GCSClient: Sendable {
     /// 削除（存在しなければ何もしない）
     public func delete(_ object: GCSObjectRef) async throws {
         let url = "https://storage.googleapis.com/storage/v1/b/\(Self.encodeObject(object.bucket))/o/\(Self.encodeObject(object.name))"
-        _ = try await retry.run("削除 \(object.name)") {
+        _ = try await retry.run(tr("Delete \(object.name)", ja: "削除 \(object.name)")) {
             try check(try await transport.send(try await request(url, method: "DELETE")), allow: [200, 204, 404])
         }
     }
@@ -86,7 +86,7 @@ public struct GCSClient: Sendable {
             var url = "https://storage.googleapis.com/storage/v1/b/\(Self.encodeObject(bucket))/o?prefix=\(Self.encodeObject(prefix))&fields=items(name),nextPageToken"
             if let pageToken { url += "&pageToken=\(Self.encodeObject(pageToken))" }
             let pageURL = url
-            let resp = try await retry.run("一覧 \(prefix)") {
+            let resp = try await retry.run(tr("List \(prefix)", ja: "一覧 \(prefix)")) {
                 try check(try await transport.send(try await request(pageURL)))
             }
             struct Page: Decodable {

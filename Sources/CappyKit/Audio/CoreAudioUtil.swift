@@ -72,7 +72,7 @@ enum CA {
 public struct CoreAudioError: Error, CustomStringConvertible, Sendable {
     public let status: OSStatus
     public let what: String
-    public var description: String { "Core Audio エラー \(osStatusString(status)): \(what)" }
+    public var description: String { tr("Core Audio error \(osStatusString(status)): \(what)", ja: "Core Audio エラー \(osStatusString(status)): \(what)") }
 }
 
 // MARK: - デバイス

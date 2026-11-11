@@ -162,16 +162,16 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
         let p = profileName.map { "profile \($0)" } ?? ""
         switch source {
         case .environment:
-            return "環境変数のアクセスキー（AWS_ACCESS_KEY_ID）"
+            return tr("access key from environment variables (AWS_ACCESS_KEY_ID)", ja: "環境変数のアクセスキー（AWS_ACCESS_KEY_ID）")
         case .staticKeys:
-            return "アクセスキー（\(p)）"
+            return tr("access key (\(p))", ja: "アクセスキー（\(p)）")
         case .sso(let s):
             let origin = s.session.map { "sso-session \($0)" } ?? "sso_start_url"
-            return "SSO（\(origin)、\(p)、アカウント \(s.accountID) / ロール \(s.roleName)）"
+            return tr("SSO (\(origin), \(p), account \(s.accountID) / role \(s.roleName))", ja: "SSO（\(origin)、\(p)、アカウント \(s.accountID) / ロール \(s.roleName)）")
         case .process:
-            return "credential_process（\(p)）"
+            return tr("credential_process (\(p))", ja: "credential_process（\(p)）")
         case .awsCLI(let reason):
-            return "aws configure export-credentials（\(p)、\(reason)）"
+            return tr("aws configure export-credentials (\(p), \(reason))", ja: "aws configure export-credentials（\(p)、\(reason)）")
         }
     }
 
@@ -198,14 +198,14 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
         guard let values else {
             if explicitProfile == nil && envProfile == nil {
                 throw CappyError.usage(
-                    "AWS の認証情報が見つかりません（\(env.configPath) に default プロファイルがなく、AWS_PROFILE も未設定です）",
-                    hint: "`aws configure sso` でプロファイルを作り、AWS_PROFILE か [profiles.<name>.aws] の profile で指定してください")
+                    tr("No AWS credentials found (\(env.configPath) has no default profile and AWS_PROFILE is not set)", ja: "AWS の認証情報が見つかりません（\(env.configPath) に default プロファイルがなく、AWS_PROFILE も未設定です）"),
+                    hint: tr("Create a profile with `aws configure sso` and select it with AWS_PROFILE or profile in [profiles.<name>.aws]", ja: "`aws configure sso` でプロファイルを作り、AWS_PROFILE か [profiles.<name>.aws] の profile で指定してください"))
             }
             let available = files.profiles.keys.sorted().joined(separator: ", ")
-            let origin = explicitProfile != nil ? "cappy の設定" : "AWS_PROFILE"
+            let origin = explicitProfile != nil ? tr("cappy config", ja: "cappy の設定") : "AWS_PROFILE"
             throw CappyError.usage(
-                "AWS のプロファイル \(name)（\(origin)）が \(env.configPath) にも \(env.credentialsPath) にもありません",
-                hint: available.isEmpty ? nil : "利用可能なプロファイル: \(available)")
+                tr("AWS profile \(name) (\(origin)) is in neither \(env.configPath) nor \(env.credentialsPath)", ja: "AWS のプロファイル \(name)（\(origin)）が \(env.configPath) にも \(env.credentialsPath) にもありません"),
+                hint: available.isEmpty ? nil : tr("Available profiles: \(available)", ja: "利用可能なプロファイル: \(available)"))
         }
         let source = try source(profile: name, values: values, files: files, configPath: env.configPath)
         return AWSCredentialsProvider(source: source, profileName: name, region: region, environment: env,
@@ -222,19 +222,19 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
         if v("web_identity_token_file") != nil { return .awsCLI(reason: "web_identity_token_file") }
         if let session = v("sso_session") {
             guard let s = files.ssoSessions[session] else {
-                throw CappyError.usage("プロファイル \(profile) の sso_session \(session) に対応する [sso-session \(session)] が \(configPath) にありません")
+                throw CappyError.usage(tr("[sso-session \(session)] for sso_session \(session) of profile \(profile) is not in \(configPath)", ja: "プロファイル \(profile) の sso_session \(session) に対応する [sso-session \(session)] が \(configPath) にありません"))
             }
             guard let start = v("sso_start_url", s), let ssoRegion = v("sso_region", s) else {
-                throw CappyError.usage("[sso-session \(session)] に sso_start_url と sso_region が必要です（\(configPath)）")
+                throw CappyError.usage(tr("[sso-session \(session)] needs sso_start_url and sso_region (\(configPath))", ja: "[sso-session \(session)] に sso_start_url と sso_region が必要です（\(configPath)）"))
             }
             guard let account = v("sso_account_id"), let role = v("sso_role_name") else {
-                throw CappyError.usage("プロファイル \(profile) に sso_account_id と sso_role_name が必要です（\(configPath)）")
+                throw CappyError.usage(tr("Profile \(profile) needs sso_account_id and sso_role_name (\(configPath))", ja: "プロファイル \(profile) に sso_account_id と sso_role_name が必要です（\(configPath)）"))
             }
             return .sso(SSOConfig(session: session, startURL: start, ssoRegion: ssoRegion, accountID: account, roleName: role))
         }
         if let start = v("sso_start_url") {
             guard let ssoRegion = v("sso_region"), let account = v("sso_account_id"), let role = v("sso_role_name") else {
-                throw CappyError.usage("プロファイル \(profile) に sso_region・sso_account_id・sso_role_name が必要です（\(configPath)）")
+                throw CappyError.usage(tr("Profile \(profile) needs sso_region, sso_account_id and sso_role_name (\(configPath))", ja: "プロファイル \(profile) に sso_region・sso_account_id・sso_role_name が必要です（\(configPath)）"))
             }
             return .sso(SSOConfig(session: nil, startURL: start, ssoRegion: ssoRegion, accountID: account, roleName: role))
         }
@@ -245,8 +245,8 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
         for key in ["login_session", "credential_source"] where v(key) != nil {
             return .awsCLI(reason: key)
         }
-        throw CappyError.usage("プロファイル \(profile) に認証情報の設定がありません（\(configPath)）",
-                               hint: "sso_session、aws_access_key_id、credential_process のいずれかを設定してください")
+        throw CappyError.usage(tr("Profile \(profile) has no credential settings (\(configPath))", ja: "プロファイル \(profile) に認証情報の設定がありません（\(configPath)）"),
+                               hint: tr("Set one of sso_session, aws_access_key_id or credential_process", ja: "sso_session、aws_access_key_id、credential_process のいずれかを設定してください"))
     }
 
     // MARK: 取得
@@ -273,7 +273,7 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
         case .process(let command):
             let r = try await runner.run(["/bin/sh", "-c", command])
             guard r.status == 0 else {
-                throw CappyError.transcription("credential_process が失敗しました（終了コード \(r.status)、profile \(profileName ?? "-")）: \(Self.stderrText(r))")
+                throw CappyError.transcription(tr("credential_process failed (exit code \(r.status), profile \(profileName ?? "-")): \(Self.stderrText(r))", ja: "credential_process が失敗しました（終了コード \(r.status)、profile \(profileName ?? "-")）: \(Self.stderrText(r))"))
             }
             return try Self.parseProcessOutput(r.stdout, what: "credential_process")
         case .awsCLI(let reason):
@@ -282,11 +282,11 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
                                           "--profile", profile, "--format", "process"])
             if r.status == 127 {
                 throw CappyError.usage(
-                    "プロファイル \(profile) は \(reason) を使うため AWS CLI が必要ですが、aws コマンドが見つかりません",
-                    hint: "AWS CLI v2 を入れるか、sso_session・アクセスキー・credential_process のプロファイルを使ってください")
+                    tr("Profile \(profile) uses \(reason), which requires the AWS CLI, but the aws command was not found", ja: "プロファイル \(profile) は \(reason) を使うため AWS CLI が必要ですが、aws コマンドが見つかりません"),
+                    hint: tr("Install AWS CLI v2, or use a profile with sso_session, an access key or credential_process", ja: "AWS CLI v2 を入れるか、sso_session・アクセスキー・credential_process のプロファイルを使ってください"))
             }
             guard r.status == 0 else {
-                throw CappyError.transcription("`aws configure export-credentials --profile \(profile)` が失敗しました（終了コード \(r.status)）: \(Self.stderrText(r))")
+                throw CappyError.transcription(tr("`aws configure export-credentials --profile \(profile)` failed (exit code \(r.status)): \(Self.stderrText(r))", ja: "`aws configure export-credentials --profile \(profile)` が失敗しました（終了コード \(r.status)）: \(Self.stderrText(r))"))
             }
             return try Self.parseProcessOutput(r.stdout, what: "aws configure export-credentials")
         }
@@ -294,7 +294,7 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
 
     static func stderrText(_ r: CommandResult) -> String {
         let s = String(decoding: r.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        return s.isEmpty ? "（出力なし）" : String(s.prefix(500))
+        return s.isEmpty ? tr("(no output)", ja: "（出力なし）") : String(s.prefix(500))
     }
 
     /// credential_process の出力（Version 1 の JSON）
@@ -307,15 +307,15 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
             var Expiration: String?
         }
         guard let o = try? JSONDecoder().decode(Output.self, from: data) else {
-            throw CappyError.transcription("\(what) の出力を解釈できません（Version・AccessKeyId・SecretAccessKey を含む JSON が必要です）")
+            throw CappyError.transcription(tr("Cannot parse the output of \(what) (JSON with Version, AccessKeyId and SecretAccessKey is required)", ja: "\(what) の出力を解釈できません（Version・AccessKeyId・SecretAccessKey を含む JSON が必要です）"))
         }
         guard o.Version == 1 else {
-            throw CappyError.transcription("\(what) の出力の Version が未対応です: \(o.Version)")
+            throw CappyError.transcription(tr("Unsupported Version in the output of \(what): \(o.Version)", ja: "\(what) の出力の Version が未対応です: \(o.Version)"))
         }
         var expiration: Date?
         if let e = o.Expiration {
             guard let d = TimeFormat.parseISO8601(e) else {
-                throw CappyError.transcription("\(what) の出力の Expiration を解釈できません: \(e)")
+                throw CappyError.transcription(tr("Cannot parse Expiration in the output of \(what): \(e)", ja: "\(what) の出力の Expiration を解釈できません: \(e)"))
             }
             expiration = d
         }
@@ -345,7 +345,7 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let token = obj["accessToken"] as? String,
               let expiresAt = (obj["expiresAt"] as? String).flatMap(TimeFormat.parseISO8601) else {
-            throw CappyError.transcription("SSO のログイン情報がありません（\(path)）", hint: "`\(login)` を実行してください")
+            throw CappyError.transcription(tr("No SSO login found (\(path))", ja: "SSO のログイン情報がありません（\(path)）"), hint: tr("Run `\(login)`", ja: "`\(login)` を実行してください"))
         }
         let remaining = expiresAt.timeIntervalSince(now())
         if remaining > Self.refreshMargin { return token }
@@ -353,22 +353,22 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
             do {
                 return try await refreshSSOToken(obj, path: path, sso: s)
             } catch {
-                CappyLog.shared.warning("SSO のトークンを更新できませんでした: \((error as? CappyError)?.message ?? "\(error)")")
+                CappyLog.shared.warning(tr("Could not refresh the SSO token: \((error as? CappyError)?.message ?? "\(error)")", ja: "SSO のトークンを更新できませんでした: \((error as? CappyError)?.message ?? "\(error)")"))
             }
         }
         if remaining > 0 { return token }
-        throw CappyError.transcription("SSO のログインの期限が切れています（\(s.session.map { "sso-session \($0)" } ?? s.startURL)）",
-                                       hint: "`\(login)` を実行してください")
+        throw CappyError.transcription(tr("The SSO login has expired (\(s.session.map { "sso-session \($0)" } ?? s.startURL))", ja: "SSO のログインの期限が切れています（\(s.session.map { "sso-session \($0)" } ?? s.startURL)）"),
+                                       hint: tr("Run `\(login)`", ja: "`\(login)` を実行してください"))
     }
 
     /// SSO OIDC の CreateToken（grant_type=refresh_token）
     func refreshSSOToken(_ cache: [String: Any], path: String, sso s: SSOConfig) async throws -> String {
         guard let clientID = cache["clientId"] as? String, let clientSecret = cache["clientSecret"] as? String,
               let refreshToken = cache["refreshToken"] as? String else {
-            throw CappyError.transcription("キャッシュにリフレッシュトークンがありません")
+            throw CappyError.transcription(tr("No refresh token in the cache", ja: "キャッシュにリフレッシュトークンがありません"))
         }
         if let reg = (cache["registrationExpiresAt"] as? String).flatMap(TimeFormat.parseISO8601), reg <= now() {
-            throw CappyError.transcription("SSO のクライアント登録の期限が切れています")
+            throw CappyError.transcription(tr("The SSO client registration has expired", ja: "SSO のクライアント登録の期限が切れています"))
         }
         var req = URLRequest(url: URL(string: "https://oidc.\(s.ssoRegion).amazonaws.com/token")!)
         req.httpMethod = "POST"
@@ -377,14 +377,14 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
             "clientId": clientID, "clientSecret": clientSecret, "grantType": "refresh_token", "refreshToken": refreshToken,
         ])
         let request = req
-        let resp = try await RetryPolicy().run("SSO トークンの更新") { [transport] in
+        let resp = try await RetryPolicy().run(tr("SSO token refresh", ja: "SSO トークンの更新")) { [transport] in
             let r = try await transport.send(request)
             if r.status != 200 { throw AWSAPIError.from(r) }
             return r
         }
         struct R: Decodable { var accessToken: String; var expiresIn: Double; var refreshToken: String? }
         guard let r = try? JSONDecoder().decode(R.self, from: resp.body) else {
-            throw CappyError.transcription("SSO トークンの更新の応答を解釈できません")
+            throw CappyError.transcription(tr("Cannot parse the SSO token refresh response", ja: "SSO トークンの更新の応答を解釈できません"))
         }
         var updated = cache
         updated["accessToken"] = r.accessToken
@@ -395,9 +395,9 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
             try FileSecurity.writeAtomically(data, to: URL(fileURLWithPath: path))
         } catch {
             // 書き戻せなくても、今回は更新したトークンを使える
-            CappyLog.shared.warning("SSO のトークンのキャッシュを書き込めません: \(path)")
+            CappyLog.shared.warning(tr("Cannot write the SSO token cache: \(path)", ja: "SSO のトークンのキャッシュを書き込めません: \(path)"))
         }
-        CappyLog.shared.info("SSO のトークンを更新しました（\(s.session ?? s.startURL)）")
+        CappyLog.shared.info(tr("Refreshed the SSO token (\(s.session ?? s.startURL))", ja: "SSO のトークンを更新しました（\(s.session ?? s.startURL)）"))
         return r.accessToken
     }
 
@@ -419,18 +419,18 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
         let request = req
         let resp: HTTPResponse
         do {
-            resp = try await RetryPolicy().run("SSO の認証情報の取得") { [transport] in
+            resp = try await RetryPolicy().run(tr("Getting SSO credentials", ja: "SSO の認証情報の取得")) { [transport] in
                 let r = try await transport.send(request)
                 if r.status != 200 { throw AWSAPIError.from(r) }
                 return r
             }
         } catch let e as AWSAPIError where e.httpStatus == 401 {
-            throw CappyError.transcription("SSO のログインが無効です: \(e)", hint: "`\(loginCommand(s))` を実行してください")
+            throw CappyError.transcription(tr("The SSO login is invalid: \(e)", ja: "SSO のログインが無効です: \(e)"), hint: tr("Run `\(loginCommand(s))`", ja: "`\(loginCommand(s))` を実行してください"))
         } catch let e as AWSAPIError where e.httpStatus == 403 {
-            throw CappyError.transcription("SSO でアカウント \(s.accountID) のロール \(s.roleName) を使えません: \(e)",
-                                           hint: "sso_account_id と sso_role_name、IAM Identity Center の割り当てを確認してください")
+            throw CappyError.transcription(tr("Cannot use role \(s.roleName) in account \(s.accountID) through SSO: \(e)", ja: "SSO でアカウント \(s.accountID) のロール \(s.roleName) を使えません: \(e)"),
+                                           hint: tr("Check sso_account_id, sso_role_name and the IAM Identity Center assignments", ja: "sso_account_id と sso_role_name、IAM Identity Center の割り当てを確認してください"))
         } catch let e as AWSAPIError {
-            throw CappyError.transcription("SSO の認証情報を取得できません: \(e)")
+            throw CappyError.transcription(tr("Cannot get SSO credentials: \(e)", ja: "SSO の認証情報を取得できません: \(e)"))
         }
         struct R: Decodable {
             struct C: Decodable {
@@ -443,7 +443,7 @@ public actor AWSCredentialsProvider: AWSCredentialsSource {
             var roleCredentials: C
         }
         guard let r = try? JSONDecoder().decode(R.self, from: resp.body) else {
-            throw CappyError.transcription("SSO の認証情報の応答を解釈できません")
+            throw CappyError.transcription(tr("Cannot parse the SSO credentials response", ja: "SSO の認証情報の応答を解釈できません"))
         }
         let c = r.roleCredentials
         return AWSCredentials(accessKeyID: c.accessKeyId, secretAccessKey: c.secretAccessKey, sessionToken: c.sessionToken,

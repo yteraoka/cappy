@@ -121,7 +121,12 @@ import Testing
                 .checkAccess(model: "moonshotai.kimi-k3.1", effort: "high")
         }
         let denied = AWSAPIError(httpStatus: 403, code: "permission_denied_error", message: "no")
-        #expect(Summarizer.bedrockHint(denied, model: "zai.glm-5.3", routing: "global")?.contains("モデルアクセス") == true)
+        L10n.$override.withValue(.en) {
+            #expect(Summarizer.bedrockHint(denied, model: "zai.glm-5.3", routing: "global")?.contains("Model access") == true)
+        }
+        L10n.$override.withValue(.ja) {
+            #expect(Summarizer.bedrockHint(denied, model: "zai.glm-5.3", routing: "global")?.contains("モデルアクセス") == true)
+        }
         let badID = AWSAPIError(httpStatus: 400, code: "invalid_request_error", message: "The provided model identifier is invalid.")
         #expect(Summarizer.bedrockHint(badID, model: "moonshotai.kimi-k3.1", routing: "jp")?.contains("global") == true)
     }

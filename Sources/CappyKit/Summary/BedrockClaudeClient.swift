@@ -67,7 +67,7 @@ public struct BedrockClaudeClient: SummaryModelClient {
     public func generate(_ request: SummaryRequest, model: String) async throws -> SummaryResponse {
         let id = Self.modelID(model, routing: routing)
         let body = try JSONSerialization.data(withJSONObject: Self.messagesBody(request, modelID: id), options: [.sortedKeys])
-        return try await retry.run("要約（\(id)）") {
+        return try await retry.run(tr("Summary (\(id))", ja: "要約（\(id)）")) {
             // 認証情報が更新されることがあるため、試行ごとに署名する
             let req = try await makeRequest(url: endpoint, body: body, stream: true)
             var parser = ClaudeStreamParser(model: model)
@@ -94,7 +94,7 @@ public struct BedrockClaudeClient: SummaryModelClient {
             "system": request.system,
             "messages": [["role": "user", "content": request.userText]],
         ] as [String: Any], options: [.sortedKeys])
-        let resp = try await retry.run("トークン数の確認") {
+        let resp = try await retry.run(tr("Counting tokens", ja: "トークン数の確認")) {
             var req = URLRequest(url: url)
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -107,7 +107,7 @@ public struct BedrockClaudeClient: SummaryModelClient {
         }
         guard let obj = try JSONSerialization.jsonObject(with: resp.body) as? [String: Any],
               let n = obj["input_tokens"] as? Int else {
-            throw CappyError.transcription("トークン数の応答が不正です")
+            throw CappyError.transcription(tr("Invalid token count response", ja: "トークン数の応答が不正です"))
         }
         return n
     }
@@ -120,7 +120,7 @@ public struct BedrockClaudeClient: SummaryModelClient {
         let body = try JSONSerialization.data(withJSONObject: [
             "model": id, "max_tokens": 0, "messages": [["role": "user", "content": "ping"]],
         ] as [String: Any], options: [.sortedKeys])
-        let resp = try await retry.run("モデルの確認") {
+        let resp = try await retry.run(tr("Checking the model", ja: "モデルの確認")) {
             let r = try await transport.send(try await makeRequest(url: endpoint, body: body, stream: false))
             if r.status >= 500 || r.status == 429 { throw AWSAPIError.from(r) }
             return r

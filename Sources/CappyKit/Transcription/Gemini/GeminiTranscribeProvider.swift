@@ -23,12 +23,12 @@ public struct GeminiTranscribeProvider: TranscriptionProvider {
                 transport: HTTPTransport = URLSessionTransport(), retry: RetryPolicy = RetryPolicy(),
                 concurrency: Int = 3) throws {
         guard let projectID, !projectID.isEmpty else {
-            throw CappyError.usage("Gemini の文字起こしに使う project_id が設定されていません",
-                                   hint: "~/.config/cappy/config.toml の [profiles.<name>.google] か [profiles.<name>.gemini] に project_id を書いてください")
+            throw CappyError.usage(tr("project_id for Gemini transcription is not set", ja: "Gemini の文字起こしに使う project_id が設定されていません"),
+                                   hint: tr("Set project_id in [profiles.<name>.google] or [profiles.<name>.gemini] of ~/.config/cappy/config.toml", ja: "~/.config/cappy/config.toml の [profiles.<name>.google] か [profiles.<name>.gemini] に project_id を書いてください"))
         }
         guard let bucket, !bucket.isEmpty else {
-            throw CappyError.usage("音声を置く bucket が設定されていません",
-                                   hint: "~/.config/cappy/config.toml の [profiles.<name>.google] に bucket を書いてください")
+            throw CappyError.usage(tr("The bucket for the audio is not set", ja: "音声を置く bucket が設定されていません"),
+                                   hint: tr("Set bucket in [profiles.<name>.google] of ~/.config/cappy/config.toml", ja: "~/.config/cappy/config.toml の [profiles.<name>.google] に bucket を書いてください"))
         }
         self.settings = settings
         self.projectID = projectID
@@ -98,8 +98,8 @@ public struct GeminiTranscribeProvider: TranscriptionProvider {
                     do {
                         try await gcs.upload(file: chunk.url, to: ref, contentType: mime)
                     } catch let e as GoogleAPIError {
-                        throw CappyError.transcription("Cloud Storage へのアップロードに失敗しました: \(e)",
-                                                       hint: e.httpStatus == 403 ? "バケット \(bucket) への書き込み権限を確認してください（`cappy doctor`）" : nil)
+                        throw CappyError.transcription(tr("Upload to Cloud Storage failed: \(e)", ja: "Cloud Storage へのアップロードに失敗しました: \(e)"),
+                                                       hint: e.httpStatus == 403 ? tr("Check the write permission on bucket \(bucket) (`cappy doctor`)", ja: "バケット \(bucket) への書き込み権限を確認してください（`cappy doctor`）") : nil)
                     }
                     let r = try await recognize(uri: ref.uri, mime: mime, chunk: chunk, track: track, options: options)
                     try FileSecurity.writeAtomically(try JSONEncoder().encode(r), to: cacheFile)
@@ -110,7 +110,7 @@ public struct GeminiTranscribeProvider: TranscriptionProvider {
             for try await (i, r) in group {
                 out[i] = r
                 let done = progress.increment()
-                Console.status("\(track.id.displayName)（\(track.id.rawValue)）を認識しています \(done)/\(total)")
+                Console.status(tr("Recognizing \(track.id.displayName) (\(track.id.rawValue)) \(done)/\(total)", ja: "\(track.id.displayName)（\(track.id.rawValue)）を認識しています \(done)/\(total)"))
                 if next < total { launch(next); next += 1 }
             }
             return out.compactMap { $0 }
@@ -126,10 +126,10 @@ public struct GeminiTranscribeProvider: TranscriptionProvider {
             "language": options.language,
         ]
         if options.diarization && !diarization {
-            info["diarization_note"] = "モデルが話者分離を受け付けなかったため、話者分離なしで実行しました"
+            info["diarization_note"] = tr("Ran without speaker diarization because the model rejected it", ja: "モデルが話者分離を受け付けなかったため、話者分離なしで実行しました")
         }
         try? FileManager.default.removeItem(at: cacheDir)
-        CappyLog.shared.info("Gemini で認識しました track=\(track.id.rawValue) chunks=\(total) segments=\(segments.count)")
+        CappyLog.shared.info(tr("Recognized with Gemini track=\(track.id.rawValue) chunks=\(total) segments=\(segments.count)", ja: "Gemini で認識しました track=\(track.id.rawValue) chunks=\(total) segments=\(segments.count)"))
         return JobHandle(provider: name, track: track.id, id: "gemini:\(track.sessionID):\(track.id.rawValue)", info: info)
     }
 
@@ -144,7 +144,7 @@ public struct GeminiTranscribeProvider: TranscriptionProvider {
                                segments: try parse(resp, chunk: chunk, track: track, options: options),
                                diarization: diarization)
         } catch let e as GoogleAPIError where diarization && GoogleSpeechProvider.isDiarizationUnsupported(e) {
-            CappyLog.shared.warning("\(track.id.rawValue): 話者分離に対応していないため無効にしました: \(e.message)")
+            CappyLog.shared.warning(tr("\(track.id.rawValue): disabled speaker diarization because it is not supported: \(e.message)", ja: "\(track.id.rawValue): 話者分離に対応していないため無効にしました: \(e.message)"))
             diarization = false
             let resp = try await call(try requestBody(uri: uri, mime: mime, options: options, diarization: false))
             return ChunkResult(uri: uri, offsetMs: chunk.offsetMs,
@@ -156,7 +156,7 @@ public struct GeminiTranscribeProvider: TranscriptionProvider {
     func parse(_ resp: HTTPResponse, chunk: SendFileConverter.Chunk, track: AudioTrack,
                options: TranscriptionOptions) throws -> [Segment] {
         guard let obj = try JSONSerialization.jsonObject(with: resp.body) as? [String: Any] else {
-            throw CappyError.transcription("Gemini の応答が不正です")
+            throw CappyError.transcription(tr("Invalid Gemini response", ja: "Gemini の応答が不正です"))
         }
         return try GeminiTranscriptParser.segments(response: obj, track: track.id,
                                                    offsetMs: track.offsetMs + chunk.offsetMs,
@@ -177,8 +177,8 @@ public struct GeminiTranscribeProvider: TranscriptionProvider {
 
     func call(_ body: Data) async throws -> HTTPResponse {
         let url = endpoint(method: "generateContent")
-        return try await retry.run("Gemini による文字起こし") {
-            guard let u = URL(string: url) else { throw CappyError.transcription("URL が不正です: \(url)") }
+        return try await retry.run(tr("Transcription with Gemini", ja: "Gemini による文字起こし")) {
+            guard let u = URL(string: url) else { throw CappyError.transcription(tr("Invalid URL: \(url)", ja: "URL が不正です: \(url)")) }
             var req = URLRequest(url: u)
             req.httpMethod = "POST"
             // 15 分の音声の認識には時間がかかる
@@ -196,12 +196,12 @@ public struct GeminiTranscribeProvider: TranscriptionProvider {
     // MARK: status / result / cleanup
 
     public func status(of job: JobHandle) async throws -> JobStatus {
-        job.info["segments"] == nil ? .failed("認識結果がありません（--force でやり直してください）") : .done
+        job.info["segments"] == nil ? .failed(tr("No recognition result (start over with --force)", ja: "認識結果がありません（--force でやり直してください）")) : .done
     }
 
     public func result(of job: JobHandle) async throws -> [Segment] {
         guard let s = job.info["segments"] else {
-            throw CappyError.transcription("認識結果がありません", hint: "`cappy transcribe --force` でやり直してください")
+            throw CappyError.transcription(tr("No recognition result", ja: "認識結果がありません"), hint: tr("Start over with `cappy transcribe --force`", ja: "`cappy transcribe --force` でやり直してください"))
         }
         return try JSONDecoder().decode([Segment].self, from: Data(s.utf8))
     }
@@ -211,7 +211,7 @@ public struct GeminiTranscribeProvider: TranscriptionProvider {
         for ref in uris.compactMap(GCSObjectRef.init(uri:)) {
             try await gcs.delete(ref)
         }
-        CappyLog.shared.info("バケット上の音声を削除しました track=\(job.track.rawValue) objects=\(uris.count)")
+        CappyLog.shared.info(tr("Deleted the audio in the bucket track=\(job.track.rawValue) objects=\(uris.count)", ja: "バケット上の音声を削除しました track=\(job.track.rawValue) objects=\(uris.count)"))
     }
 
     // MARK: doctor
@@ -250,14 +250,14 @@ public enum GeminiTranscriptParser {
     public static func segments(response obj: [String: Any], track: TrackID, offsetMs: Int64,
                                 chunkDurationMs: Int64, language: String) throws -> [Segment] {
         if let fb = obj["promptFeedback"] as? [String: Any], let reason = fb["blockReason"] as? String {
-            throw CappyError.transcription("Gemini が音声の処理を拒否しました（\(reason)）")
+            throw CappyError.transcription(tr("Gemini refused to process the audio (\(reason))", ja: "Gemini が音声の処理を拒否しました（\(reason)）"))
         }
         guard let candidate = (obj["candidates"] as? [[String: Any]])?.first else {
             return []
         }
         if let reason = candidate["finishReason"] as? String,
            !["STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED"].contains(reason) {
-            throw CappyError.transcription("Gemini の文字起こしが止まりました（\(reason)）")
+            throw CappyError.transcription(tr("Gemini transcription stopped (\(reason))", ja: "Gemini の文字起こしが止まりました（\(reason)）"))
         }
         let parts = ((candidate["content"] as? [String: Any])?["parts"] as? [[String: Any]]) ?? []
         let sep = GoogleResultParser.joiner(for: language)

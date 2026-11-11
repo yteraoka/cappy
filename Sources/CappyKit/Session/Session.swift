@@ -10,12 +10,15 @@ public enum TrackID: String, Codable, Sendable, CaseIterable, Comparable {
         return order.firstIndex(of: a)! < order.firstIndex(of: b)!
     }
 
-    /// transcript.md などで使う表示名
-    public var displayName: String {
+    /// 画面に出す表示名（表示言語に合わせる）
+    public var displayName: String { label(L10n.current) }
+
+    /// 言語を指定した表示名（transcript.md などは会議の言語で書く）
+    public func label(_ lang: UILanguage) -> String {
         switch self {
-        case .mic: return "自分"
-        case .remote: return "相手"
-        case .mix: return "話者"
+        case .mic: return tr(lang, "Me", ja: "自分")
+        case .remote: return tr(lang, "Remote", ja: "相手")
+        case .mix: return tr(lang, "Speaker", ja: "話者")
         }
     }
 }
@@ -310,16 +313,16 @@ public final class SessionStore: @unchecked Sendable {
     public static func open(_ directory: URL) throws -> SessionStore {
         let url = directory.appendingPathComponent(fileName)
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw CappyError.usage("session.json がありません: \(directory.path)",
-                                   hint: "異常終了したセッションなら `cappy recover \(directory.path)` を実行してください")
+            throw CappyError.usage(tr("session.json not found: \(directory.path)", ja: "session.json がありません: \(directory.path)"),
+                                   hint: tr("If the session ended abnormally, run `cappy recover \(directory.path)`", ja: "異常終了したセッションなら `cappy recover \(directory.path)` を実行してください"))
         }
         let data = try Data(contentsOf: url)
         do {
             let meta = try decode(data)
             return SessionStore(directory: directory, metadata: meta)
         } catch {
-            throw CappyError.usage("session.json を読めません: \(url.path): \(error)",
-                                   hint: "`cappy recover \(directory.path)` で再生成できます")
+            throw CappyError.usage(tr("Cannot read session.json: \(url.path): \(error)", ja: "session.json を読めません: \(url.path): \(error)"),
+                                   hint: tr("Recreate it with `cappy recover \(directory.path)`", ja: "`cappy recover \(directory.path)` で再生成できます"))
         }
     }
 

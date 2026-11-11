@@ -37,8 +37,8 @@ public struct AmazonTranscribeProvider: TranscriptionProvider {
                 transport: HTTPTransport = URLSessionTransport(), retry: RetryPolicy = RetryPolicy(),
                 makeSuffix: @escaping @Sendable () -> String = { String(UUID().uuidString.lowercased().prefix(8)) }) throws {
         guard let bucket, !bucket.isEmpty else {
-            throw CappyError.usage("音声を置く S3 の bucket が設定されていません",
-                                   hint: "~/.config/cappy/config.toml の [profiles.<name>.aws] に bucket を書いてください")
+            throw CappyError.usage(tr("The S3 bucket for the audio is not set", ja: "音声を置く S3 の bucket が設定されていません"),
+                                   hint: tr("Set bucket in [profiles.<name>.aws] of ~/.config/cappy/config.toml", ja: "~/.config/cappy/config.toml の [profiles.<name>.aws] に bucket を書いてください"))
         }
         self.settings = settings
         self.region = region
@@ -88,17 +88,17 @@ public struct AmazonTranscribeProvider: TranscriptionProvider {
 
     public func submit(_ track: AudioTrack, options: TranscriptionOptions) async throws -> JobHandle {
         if let d = track.durationMs, d > Self.maxDurationMs {
-            throw CappyError.transcription("音声が長すぎます（Amazon Transcribe は 1 ファイル 8 時間まで）")
+            throw CappyError.transcription(tr("The audio is too long (Amazon Transcribe accepts up to 8 hours per file)", ja: "音声が長すぎます（Amazon Transcribe は 1 ファイル 8 時間まで）"))
         }
         let ext = track.url.pathExtension.lowercased()
         let format = ext == "flac" ? "flac" : "wav"
         let object = S3ObjectRef(bucket: bucket, key: objectKey(track, ext: ext))
-        CappyLog.shared.info("アップロード開始 \(object.uri)")
+        CappyLog.shared.info(tr("Upload started \(object.uri)", ja: "アップロード開始 \(object.uri)"))
         do {
             try await s3.upload(file: track.url, to: object, contentType: ext == "flac" ? "audio/flac" : "audio/wav")
         } catch let e as AWSAPIError {
-            throw CappyError.transcription("S3 へのアップロードに失敗しました: \(e)",
-                                           hint: e.httpStatus == 403 ? "バケット \(bucket) への書き込み権限（s3:PutObject）を確認してください（`cappy doctor`）" : nil)
+            throw CappyError.transcription(tr("Upload to S3 failed: \(e)", ja: "S3 へのアップロードに失敗しました: \(e)"),
+                                           hint: e.httpStatus == 403 ? tr("Check the write permission (s3:PutObject) on bucket \(bucket) (`cappy doctor`)", ja: "バケット \(bucket) への書き込み権限（s3:PutObject）を確認してください（`cappy doctor`）") : nil)
         }
         var diarization = options.diarization
         var note: String?
@@ -106,12 +106,12 @@ public struct AmazonTranscribeProvider: TranscriptionProvider {
         do {
             job = try await start(track, object: object, format: format, options: options, diarization: diarization)
         } catch let e as AWSAPIError where diarization && Self.isDiarizationUnsupported(e) {
-            note = "話者分離に対応していないため無効にしました: \(e.message)"
+            note = tr("Disabled speaker diarization because it is not supported: \(e.message)", ja: "話者分離に対応していないため無効にしました: \(e.message)")
             CappyLog.shared.warning("\(track.id.rawValue): \(note!)")
             diarization = false
             job = try await start(track, object: object, format: format, options: options, diarization: false)
         } catch let e as AWSAPIError {
-            throw CappyError.transcription("Amazon Transcribe のジョブを開始できません: \(e)", hint: Self.hint(e, settings: settings))
+            throw CappyError.transcription(tr("Cannot start the Amazon Transcribe job: \(e)", ja: "Amazon Transcribe のジョブを開始できません: \(e)"), hint: Self.hint(e, settings: settings))
         }
         var info: [String: String] = [
             "object": object.uri,
@@ -148,7 +148,7 @@ public struct AmazonTranscribeProvider: TranscriptionProvider {
         let job = jobName(track)
         _ = try await call("StartTranscriptionJob",
                            startBody(track, job: job, object: object, format: format, options: options, diarization: diarization))
-        CappyLog.shared.info("Amazon Transcribe のジョブを開始しました job=\(job) diarization=\(diarization)")
+        CappyLog.shared.info(tr("Amazon Transcribe job started job=\(job) diarization=\(diarization)", ja: "Amazon Transcribe のジョブを開始しました job=\(job) diarization=\(diarization)"))
         return job
     }
 
@@ -161,11 +161,11 @@ public struct AmazonTranscribeProvider: TranscriptionProvider {
     static func hint(_ e: AWSAPIError, settings: TranscribeSettings) -> String? {
         switch (e.httpStatus, e.code) {
         case (400, "BadRequestException") where e.message.lowercased().contains("vocabulary"):
-            return "カスタム語彙 \(settings.vocabularyName ?? "") が文字起こしと同じリージョン・言語にあり、READY になっているか確認してください"
+            return tr("Check that custom vocabulary \(settings.vocabularyName ?? "") is in the same Region and language as the transcription and is READY", ja: "カスタム語彙 \(settings.vocabularyName ?? "") が文字起こしと同じリージョン・言語にあり、READY になっているか確認してください")
         case (403, _), (400, "AccessDeniedException"):
-            return "IAM で transcribe:StartTranscriptionJob などと、音声への s3:GetObject が許可されているか確認してください（`cappy doctor`）"
+            return tr("Check that IAM allows transcribe:StartTranscriptionJob and others, and s3:GetObject on the audio (`cappy doctor`)", ja: "IAM で transcribe:StartTranscriptionJob などと、音声への s3:GetObject が許可されているか確認してください（`cappy doctor`）")
         case (_, "LimitExceededException"):
-            return "同時に実行できるジョブ数などの上限を超えています。時間をおいて再実行してください"
+            return tr("A limit such as the number of concurrent jobs is exceeded. Run again later", ja: "同時に実行できるジョブ数などの上限を超えています。時間をおいて再実行してください")
         default:
             return nil
         }
@@ -176,7 +176,7 @@ public struct AmazonTranscribeProvider: TranscriptionProvider {
     func getJob(_ job: JobHandle) async throws -> [String: Any] {
         let r = try await call("GetTranscriptionJob", ["TranscriptionJobName": job.id])
         guard let j = r["TranscriptionJob"] as? [String: Any] else {
-            throw CappyError.transcription("GetTranscriptionJob の応答が不正です")
+            throw CappyError.transcription(tr("Invalid GetTranscriptionJob response", ja: "GetTranscriptionJob の応答が不正です"))
         }
         return j
     }
@@ -186,11 +186,11 @@ public struct AmazonTranscribeProvider: TranscriptionProvider {
         do {
             j = try await getJob(job)
         } catch let e as AWSAPIError where e.httpStatus == 400 && e.code == "BadRequestException" && e.message.lowercased().contains("couldn't be found") {
-            return .failed("ジョブ \(job.id) が見つかりません（--force でやり直してください）")
+            return .failed(tr("Job \(job.id) not found (start over with --force)", ja: "ジョブ \(job.id) が見つかりません（--force でやり直してください）"))
         }
         switch j["TranscriptionJobStatus"] as? String {
         case "COMPLETED": return .done
-        case "FAILED": return .failed(j["FailureReason"] as? String ?? "不明なエラー")
+        case "FAILED": return .failed(j["FailureReason"] as? String ?? tr("unknown error", ja: "不明なエラー"))
         case "QUEUED": return .pending
         default: return .running(progress: nil)
         }
@@ -199,19 +199,19 @@ public struct AmazonTranscribeProvider: TranscriptionProvider {
     public func result(of job: JobHandle) async throws -> [Segment] {
         let j = try await getJob(job)
         guard j["TranscriptionJobStatus"] as? String == "COMPLETED" else {
-            throw CappyError.transcription("ジョブがまだ完了していません: \(job.id)")
+            throw CappyError.transcription(tr("The job has not finished yet: \(job.id)", ja: "ジョブがまだ完了していません: \(job.id)"))
         }
         guard let uri = (j["Transcript"] as? [String: Any])?["TranscriptFileUri"] as? String, let url = URL(string: uri) else {
-            throw CappyError.transcription("\(job.id) の結果ファイルの場所がわかりません")
+            throw CappyError.transcription(tr("The result file location of \(job.id) is unknown", ja: "\(job.id) の結果ファイルの場所がわかりません"))
         }
         // Transcribe が管理する場所の署名付き URL（認証ヘッダーは付けない）
-        let resp = try await retry.run("結果の取得") {
+        let resp = try await retry.run(tr("Getting the result", ja: "結果の取得")) {
             let r = try await transport.send(URLRequest(url: url))
             if r.status >= 500 || r.status == 429 { throw AWSAPIError.from(r) }
             return r
         }
         guard resp.status == 200 else {
-            throw CappyError.transcription("\(job.id) の結果を取得できません: \(AWSAPIError.from(resp))")
+            throw CappyError.transcription(tr("Cannot get the result of \(job.id): \(AWSAPIError.from(resp))", ja: "\(job.id) の結果を取得できません: \(AWSAPIError.from(resp))"))
         }
         let offset = Int64(job.info["track_offset_ms"] ?? "0") ?? 0
         return try AmazonTranscribeResultParser.segments(fromJSON: resp.body, track: job.track, offsetMs: offset,
@@ -228,7 +228,7 @@ public struct AmazonTranscribeProvider: TranscriptionProvider {
         } catch let e as AWSAPIError where e.httpStatus == 400 && e.message.lowercased().contains("couldn't be found") {
             // すでに削除済み
         }
-        CappyLog.shared.info("S3 上の音声と Transcribe のジョブを削除しました track=\(job.track.rawValue)")
+        CappyLog.shared.info(tr("Deleted the audio in S3 and the Transcribe job track=\(job.track.rawValue)", ja: "S3 上の音声と Transcribe のジョブを削除しました track=\(job.track.rawValue)"))
     }
 
     // MARK: doctor
@@ -258,7 +258,7 @@ public enum AmazonTranscribeResultParser {
     public static func segments(fromJSON data: Data, track: TrackID, offsetMs: Int64, language: String) throws -> [Segment] {
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let results = obj["results"] as? [String: Any] else {
-            throw CappyError.transcription("Amazon Transcribe の結果が不正です")
+            throw CappyError.transcription(tr("Invalid Amazon Transcribe result", ja: "Amazon Transcribe の結果が不正です"))
         }
         let items = results["items"] as? [[String: Any]] ?? []
         let speakerAt = speakerTimeline(results)

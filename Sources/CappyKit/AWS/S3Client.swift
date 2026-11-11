@@ -82,18 +82,18 @@ public struct S3Client: Sendable {
     public func upload(file: URL, to object: S3ObjectRef, contentType: String) async throws {
         let hash = try Self.sha256Hex(file: file)
         let r = try await send("PUT", url(bucket: object.bucket, key: object.key), payloadHash: hash,
-                               headers: ["Content-Type": contentType], file: file, what: "アップロード \(object.key)")
+                               headers: ["Content-Type": contentType], file: file, what: tr("Upload \(object.key)", ja: "アップロード \(object.key)"))
         guard r.status == 200 else { throw AWSAPIError.from(r) }
     }
 
     public func delete(_ object: S3ObjectRef) async throws {
-        let r = try await send("DELETE", url(bucket: object.bucket, key: object.key), what: "削除 \(object.key)")
+        let r = try await send("DELETE", url(bucket: object.bucket, key: object.key), what: tr("Delete \(object.key)", ja: "削除 \(object.key)"))
         guard r.status == 204 || r.status == 200 || r.status == 404 else { throw AWSAPIError.from(r) }
     }
 
     /// オブジェクトがあるか（HEAD）
     public func exists(_ object: S3ObjectRef) async throws -> Bool {
-        let r = try await send("HEAD", url(bucket: object.bucket, key: object.key), what: "確認 \(object.key)")
+        let r = try await send("HEAD", url(bucket: object.bucket, key: object.key), what: tr("Check \(object.key)", ja: "確認 \(object.key)"))
         if r.status == 404 { return false }
         guard r.status == 200 else { throw AWSAPIError(httpStatus: r.status, code: nil, message: "HEAD \(object.key)") }
         return true

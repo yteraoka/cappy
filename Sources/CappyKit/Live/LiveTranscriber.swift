@@ -149,11 +149,11 @@ public final class LiveTranscriber: @unchecked Sendable {
                 end(s)
                 current = nil
                 if s.deathIsPermanent {
-                    handleConnectError(LiveConnectionError(message: s.deathReason ?? "切断されました", permanent: true))
+                    handleConnectError(LiveConnectionError(message: s.deathReason ?? tr("Disconnected", ja: "切断されました"), permanent: true))
                     addDropped(chunk.durationMs)
                     continue
                 }
-                onEvent(.disconnected(options.track, s.deathReason ?? "切断されました"))
+                onEvent(.disconnected(options.track, s.deathReason ?? tr("Disconnected", ja: "切断されました")))
             }
             if current == nil {
                 guard Date() >= nextRetry else {
@@ -300,20 +300,20 @@ final class LiveSessionHandle: LiveSession, @unchecked Sendable {
             first = try await socket.receive()
         } catch {
             if timedOut.value {
-                throw LiveConnectionError(message: "Live API の準備が \(Int(timeout)) 秒以内に終わりませんでした", permanent: false)
+                throw LiveConnectionError(message: tr("The live API setup did not finish within \(Int(timeout)) seconds", ja: "Live API の準備が \(Int(timeout)) 秒以内に終わりませんでした"), permanent: false)
             }
             throw error
         }
         guard let obj = Self.json(first) else {
-            throw LiveConnectionError(message: "Live API の応答が不正です", permanent: false)
+            throw LiveConnectionError(message: tr("Invalid live API response", ja: "Live API の応答が不正です"), permanent: false)
         }
         if obj["setupComplete"] != nil { return }
         if let err = obj["error"] as? [String: Any] {
             let code = err["code"] as? Int ?? 0
-            throw LiveConnectionError(message: "Live API のエラー: \(err["message"] as? String ?? "不明")",
+            throw LiveConnectionError(message: tr("Live API error: \(err["message"] as? String ?? "unknown")", ja: "Live API のエラー: \(err["message"] as? String ?? "不明")"),
                                       permanent: [400, 401, 403, 404].contains(code))
         }
-        throw LiveConnectionError(message: "Live API が setupComplete を返しませんでした", permanent: false)
+        throw LiveConnectionError(message: tr("The live API did not return setupComplete", ja: "Live API が setupComplete を返しませんでした"), permanent: false)
     }
 
     func startReceiving() {
@@ -378,7 +378,7 @@ final class LiveSessionHandle: LiveSession, @unchecked Sendable {
         guard let obj = Self.json(text) else { return }
         if obj["goAway"] != nil {
             lock.withLock { goAway = true }
-            CappyLog.shared.info("live \(track.rawValue): サーバーから goAway を受け取りました")
+            CappyLog.shared.info(tr("live \(track.rawValue): received goAway from the server", ja: "live \(track.rawValue): サーバーから goAway を受け取りました"))
         }
         guard let content = obj["serverContent"] as? [String: Any] else { return }
         if let interim = GoogleResultParser.field(content, "interimInputTranscription") as? [String: Any],

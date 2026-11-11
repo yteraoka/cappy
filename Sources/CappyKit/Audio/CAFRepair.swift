@@ -16,7 +16,7 @@ public enum CAFRepair {
         try fh.seek(toOffset: 0)
         guard let header = try fh.read(upToCount: 8), header.count == 8,
               String(decoding: header.prefix(4), as: UTF8.self) == "caff" else {
-            throw CappyError.io("\(url.lastPathComponent) は CAF ファイルではありません")
+            throw CappyError.io(tr("\(url.lastPathComponent) is not a CAF file", ja: "\(url.lastPathComponent) は CAF ファイルではありません"))
         }
         var offset: Int64 = 8
         var bytesPerPacket: Int64 = 0
@@ -58,6 +58,6 @@ public enum CAFRepair {
             if size < 0 { break }
             offset = bodyStart + size
         }
-        throw CappyError.io("\(url.lastPathComponent) に data チャンクがありません")
+        throw CappyError.io(tr("\(url.lastPathComponent) has no data chunk", ja: "\(url.lastPathComponent) に data チャンクがありません"))
     }
 }

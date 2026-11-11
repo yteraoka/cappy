@@ -141,7 +141,7 @@ public struct RetryPolicy: Sendable {
                     transient = false
                 }
                 guard transient, attempt < maxAttempts else { throw error }
-                CappyLog.shared.warning("\(what) が一時的に失敗しました（\(attempt)/\(maxAttempts)、\(Int(delay)) 秒後に再試行）: \(error)")
+                CappyLog.shared.warning(tr("\(what) failed temporarily (\(attempt)/\(maxAttempts), retrying in \(Int(delay)) s): \(error)", ja: "\(what) が一時的に失敗しました（\(attempt)/\(maxAttempts)、\(Int(delay)) 秒後に再試行）: \(error)"))
                 try await sleep(delay)
                 delay = min(maxDelay, delay * 2)
                 attempt += 1

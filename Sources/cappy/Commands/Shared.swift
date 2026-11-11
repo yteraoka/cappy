@@ -14,7 +14,7 @@ enum TranscribeRunner {
     static func run(store: SessionStore, profile: Profile, request: Request) async throws {
         let providerName = request.providerName ?? profile.provider
         if providerName == "none" {
-            Console.print("プロバイダが none のため、文字起こしは行いません（録音のみ）")
+            Console.print(tr("Provider is none, so no transcription (recording only)", ja: "プロバイダが none のため、文字起こしは行いません（録音のみ）"))
             return
         }
         let provider = try ProviderFactory.make(name: providerName, profile: profile)
@@ -46,12 +46,12 @@ enum TranscribeRunner {
         }
         opts.pollMax = 300
         if request.mix {
-            Console.print("注意: --mix では自分と相手の区別が失われ、話者の区別はプロバイダの話者分離に頼ります")
+            Console.print(tr("Note: --mix loses the distinction between you and the remote side; speakers are told apart only by the provider's diarization", ja: "注意: --mix では自分と相手の区別が失われ、話者の区別はプロバイダの話者分離に頼ります"))
         }
         let transcriber = Transcriber(store: store, provider: provider, options: opts)
         let urls = try await transcriber.run()
         Console.clearStatus()
-        Console.print("文字起こしが完了しました:")
+        Console.print(tr("Transcription finished:", ja: "文字起こしが完了しました:"))
         for u in urls { Console.print("  \(u.path)") }
     }
 }
@@ -68,23 +68,23 @@ enum SummarizeRunner {
     static func run(store: SessionStore, profile: Profile, request: Request) async throws {
         if profile.summaryProvider == "none" {
             if request.explicit {
-                Console.print("要約のプロバイダが none のため、要約は行いません")
+                Console.print(tr("Summary provider is none, so no summary", ja: "要約のプロバイダが none のため、要約は行いません"))
             }
             return
         }
         if let e = request.effort, !SummarySettings.knownEfforts.contains(e) {
-            throw CappyError.usage("--effort が不正です: \(e)（low / medium / high / xhigh / max）")
+            throw CappyError.usage(tr("Invalid --effort: \(e) (low / medium / high / xhigh / max)", ja: "--effort が不正です: \(e)（low / medium / high / xhigh / max）"))
         }
         let s = profile.summary
         let model = request.model ?? s.model
         guard let family = SummaryModelFamily.of(model) else {
-            throw CappyError.usage("--model が不正です: \(model)（claude- または gemini- で始まるモデル ID、Bedrock なら moonshotai.kimi-k3.1 のような ID）")
+            throw CappyError.usage(tr("Invalid --model: \(model) (a model ID starting with claude- or gemini-, or on Bedrock an ID such as moonshotai.kimi-k3.1)", ja: "--model が不正です: \(model)（claude- または gemini- で始まるモデル ID、Bedrock なら moonshotai.kimi-k3.1 のような ID）"))
         }
         if profile.summaryProvider == "bedrock" && family == .gemini {
-            throw CappyError.usage("--model が不正です: \(model)（Bedrock では Claude のモデルだけを使えます）")
+            throw CappyError.usage(tr("Invalid --model: \(model) (Gemini models are not available on Bedrock)", ja: "--model が不正です: \(model)（Bedrock では Claude のモデルだけを使えます）"))
         }
         if profile.summaryProvider == "vertex" && (model.contains("anthropic.") || family == .bedrockChat) {
-            throw CappyError.usage("--model が不正です: \(model)（Bedrock のモデル ID は summary.provider = \"bedrock\" のときだけ使えます）")
+            throw CappyError.usage(tr("Invalid --model: \(model) (Bedrock model IDs can be used only with summary.provider = \"bedrock\")", ja: "--model が不正です: \(model)（Bedrock のモデル ID は summary.provider = \"bedrock\" のときだけ使えます）"))
         }
         let client = try SummaryClientFactory.make(profile: profile)
         let options = Summarizer.Options(
@@ -95,15 +95,15 @@ enum SummarizeRunner {
             language: profile.language,
             instructions: try SummaryClientFactory.instructions(profile: profile),
             force: request.force)
-        Console.status("要約を作成しています（\(options.model)）…")
+        Console.status(tr("Creating the summary (\(options.model))…", ja: "要約を作成しています（\(options.model)）…"))
         let outcome = try await Summarizer(store: store, client: client, options: options).run()
         Console.clearStatus()
         switch outcome {
         case .created(let url):
-            Console.print("要約を作成しました:")
+            Console.print(tr("Summary created:", ja: "要約を作成しました:"))
             Console.print("  \(url.path)")
         case .upToDate(let url):
-            Console.print("同じ文字起こしから作った要約があります（作り直すには --force）:")
+            Console.print(tr("A summary of the same transcript already exists (use --force to regenerate):", ja: "同じ文字起こしから作った要約があります（作り直すには --force）:"))
             Console.print("  \(url.path)")
         }
     }
@@ -158,19 +158,19 @@ final class InterruptController: @unchecked Sendable {
             if n == 1 { onStop(sig == SIGTERM ? "sigterm" : "interrupt") }
         case .finalizing:
             lock.withLock { _skipConversion = true }
-            Console.print("\(name): 変換を省略して終了します")
+            Console.print(tr("\(name): skipping the conversion and exiting", ja: "\(name): 変換を省略して終了します"))
         case .converting:
             Console.clearStatus()
-            Console.print("\(name): 変換を中断しました。録音ファイル（CAF）は保存済みです。"
-                + "送信用ファイルは `cappy recover \(sessionPath)` で作成できます")
+            Console.print(tr("\(name): conversion interrupted. The recordings (CAF) are saved. ", ja: "\(name): 変換を中断しました。録音ファイル（CAF）は保存済みです。")
+                + tr("Create the files to send with `cappy recover \(sessionPath)`", ja: "送信用ファイルは `cappy recover \(sessionPath)` で作成できます"))
             Foundation.exit(130)
         case .transcribing:
             Console.clearStatus()
-            Console.print("\(name): 中断しました。`cappy transcribe \(sessionPath)` で再開できます")
+            Console.print(tr("\(name): interrupted. Resume with `cappy transcribe \(sessionPath)`", ja: "\(name): 中断しました。`cappy transcribe \(sessionPath)` で再開できます"))
             Foundation.exit(130)
         case .summarizing:
             Console.clearStatus()
-            Console.print("\(name): 中断しました。`cappy summarize \(sessionPath)` で要約を作り直せます")
+            Console.print(tr("\(name): interrupted. Create the summary again with `cappy summarize \(sessionPath)`", ja: "\(name): 中断しました。`cappy summarize \(sessionPath)` で要約を作り直せます"))
             Foundation.exit(130)
         case .done:
             Foundation.exit(130)
