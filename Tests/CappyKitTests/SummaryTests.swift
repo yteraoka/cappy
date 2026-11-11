@@ -47,7 +47,7 @@ final class FakeSummaryClient: SummaryModelClient, @unchecked Sendable {
         #expect(p.summary.effort == "medium")
         #expect(p.summary.auto)
         #expect(p.summary.maxTokens == 20000)
-        #expect(p.summary.model == "claude-opus-5-5")
+        #expect(p.summary.model == "gemini-4-argon")
         #expect(try c.profile(named: "other").summaryProjectID == "llm-project")
         // 録音のみのプロファイルは要約もしない
         #expect(try c.profile(named: "local").summaryProvider == "none")
@@ -322,5 +322,147 @@ final class FakeSummaryClient: SummaryModelClient, @unchecked Sendable {
             _ = try await Summarizer(store: store, client: client, options: options()).run()
         } throws: { ($0 as? CappyError)?.status == .usage }
         #expect(client.requests.isEmpty)
+    }
+}
+
+@Suite struct GeminiVertexClientTests {
+    static let request = SummaryRequest(system: "sys", userText: "hello", maxTokens: 32000, effort: "medium")
+
+    static func sse(_ chunks: [[String: Any]]) -> HTTPResponse {
+        let lines = chunks.map { "data: " + String(decoding: try! JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }
+        return HTTPResponse(status: 200, body: Data((lines.joined(separator: "\r\n\r\n") + "\r\n\r\n").utf8))
+    }
+
+    nonisolated(unsafe) static let okChunks: [[String: Any]] = [
+        ["candidates": [["content": ["role": "model", "parts": [["text": "考え中", "thought": true]]]]],
+         "modelVersion": "gemini-4-argon"],
+        ["candidates": [["content": ["role": "model", "parts": [["text": "## 概要\n"]]]]]],
+        ["candidates": [["content": ["role": "model", "parts": [["text": "予算を決めた。"]]], "finishReason": "STOP"]],
+         "usageMetadata": ["promptTokenCount": 900, "candidatesTokenCount": 120, "thoughtsTokenCount": 300]],
+    ]
+
+    @Test func thinkingConfigPerGeneration() {
+        #expect(GeminiVertexClient.usesThinkingLevel("gemini-4-argon"))
+        #expect(GeminiVertexClient.usesThinkingLevel("gemini-3.5-flash"))
+        #expect(GeminiVertexClient.usesThinkingLevel("gemini-3.1-pro-preview"))
+        #expect(!GeminiVertexClient.usesThinkingLevel("gemini-2.5-pro"))
+        #expect(GeminiVertexClient.thinkingLevel(effort: "low") == "LOW")
+        #expect(GeminiVertexClient.thinkingLevel(effort: "medium") == "MEDIUM")
+        #expect(GeminiVertexClient.thinkingLevel(effort: "xhigh") == "HIGH")
+        let old = GeminiVertexClient.body(Self.request, model: "gemini-2.5-flash", thinking: true)
+        #expect((old["generationConfig"] as? [String: Any])?["thinkingConfig"] == nil)
+    }
+
+    @Test func streamsTextSkippingThoughts() async throws {
+        let stub = StubTransport { _ in Self.sse(Self.okChunks) }
+        let client = GeminiVertexClient(projectID: "p1", region: "global", auth: StaticToken(), transport: stub, retry: .none)
+        let r = try await client.generate(Self.request, model: "gemini-4-argon")
+        #expect(r.text == "## 概要\n予算を決めた。")
+        #expect(r.stopReason == "end_turn")
+        #expect(r.model == "gemini-4-argon")
+        #expect(r.inputTokens == 900)
+        #expect(r.outputTokens == 420)
+
+        let call = try #require(stub.calls.first)
+        #expect(call.url == "https://aiplatform.googleapis.com/v1/projects/p1/locations/global/publishers/google/models/gemini-4-argon:streamGenerateContent?alt=sse")
+        #expect(call.headers["x-goog-user-project"] == "p1")
+        let body = try #require(try JSONSerialization.jsonObject(with: call.body ?? Data()) as? [String: Any])
+        let sys = (body["systemInstruction"] as? [String: Any])?["parts"] as? [[String: Any]]
+        #expect(sys?.first?["text"] as? String == "sys")
+        let contents = body["contents"] as? [[String: Any]]
+        #expect(contents?.first?["role"] as? String == "user")
+        let gen = try #require(body["generationConfig"] as? [String: Any])
+        #expect(gen["maxOutputTokens"] as? Int == 32000)
+        #expect((gen["thinkingConfig"] as? [String: Any])?["thinkingLevel"] as? String == "MEDIUM")
+    }
+
+    @Test func finishReasonsMapToStopReasons() throws {
+        func parse(_ chunks: [[String: Any]]) throws -> SummaryResponse {
+            var p = GeminiStreamParser(model: "gemini-x")
+            for c in chunks { try p.feed("data: " + String(decoding: try JSONSerialization.data(withJSONObject: c), as: UTF8.self)) }
+            return try p.finish()
+        }
+        let safety = try parse([["candidates": [["finishReason": "SAFETY"]]]])
+        #expect(safety.stopReason == "refusal" && safety.refusalCategory == "safety")
+        let blocked = try parse([["promptFeedback": ["blockReason": "PROHIBITED_CONTENT"]]])
+        #expect(blocked.stopReason == "refusal" && blocked.refusalCategory == "prohibited_content")
+        let long = try parse([["candidates": [["content": ["parts": [["text": "途中"]]], "finishReason": "MAX_TOKENS"]]]])
+        #expect(long.stopReason == "max_tokens" && long.text == "途中")
+        // finishReason がないまま終わったら途中切断（再試行対象）
+        #expect(throws: GoogleAPIError.self) {
+            _ = try parse([["candidates": [["content": ["parts": [["text": "a"]]]]]]])
+        }
+        var p = GeminiStreamParser(model: "m")
+        #expect(throws: GoogleAPIError.self) {
+            try p.feed(#"data: {"error":{"code":429,"message":"Resource exhausted","status":"RESOURCE_EXHAUSTED"}}"#)
+        }
+    }
+
+    @Test func retriesWithoutThinkingWhenRejected() async throws {
+        let attempts = Counter()
+        let stub = StubTransport { _ in
+            if attempts.next() == 1 {
+                return .json(["error": ["code": 400, "message": "thinking_level MEDIUM is not supported for this model",
+                                        "status": "INVALID_ARGUMENT"]], status: 400)
+            }
+            return Self.sse(Self.okChunks)
+        }
+        let client = GeminiVertexClient(projectID: "p1", region: "global", auth: StaticToken(), transport: stub, retry: .none)
+        let r = try await client.generate(Self.request, model: "gemini-3-flash-preview")
+        #expect(r.text.hasPrefix("## 概要"))
+        #expect(stub.calls.count == 2)
+        let second = try #require(try JSONSerialization.jsonObject(with: stub.calls[1].body ?? Data()) as? [String: Any])
+        #expect((second["generationConfig"] as? [String: Any])?["thinkingConfig"] == nil)
+    }
+
+    @Test func countTokens() async throws {
+        let stub = StubTransport { _ in .json(["totalTokens": 31]) }
+        let client = GeminiVertexClient(projectID: "p1", region: "eu", auth: StaticToken(), transport: stub, retry: .none)
+        #expect(try await client.countTokens(Self.request, model: "gemini-4-argon") == 31)
+        #expect(stub.calls.first?.url == "https://aiplatform.eu.rep.googleapis.com/v1/projects/p1/locations/eu/publishers/google/models/gemini-4-argon:countTokens")
+    }
+
+    @Test func routerDispatchesByModelName() async throws {
+        let stub = StubTransport { call in
+            call.url.contains("publishers/google") ? Self.sse(Self.okChunks) : HTTPResponse(status: 200, body: Data(ClaudeVertexClientTests.sse.utf8))
+        }
+        let client = VertexSummaryClient(projectID: "p1", region: "global", auth: StaticToken(), transport: stub, retry: .none)
+        _ = try await client.generate(Self.request, model: "claude-opus-5-5")
+        _ = try await client.generate(Self.request, model: "gemini-4-argon")
+        #expect(stub.calls.map { $0.url.contains("publishers/anthropic") } == [true, false])
+        await #expect(throws: CappyError.self) {
+            _ = try await client.generate(Self.request, model: "gpt-5")
+        }
+    }
+}
+
+@Suite struct SummaryModelConfigTests {
+    func parse(_ toml: String) throws -> Profile {
+        try CappyConfig.parse(toml, path: URL(fileURLWithPath: "/tmp/c.toml")).profile(named: "default")
+    }
+
+    @Test func geminiModelAndFallbacks() throws {
+        let gemini = try parse("[profiles.default.summary]\nmodel = \"gemini-4-argon\"")
+        #expect(SummaryModelFamily.of(gemini.summary.model) == .gemini)
+        #expect(gemini.summary.effectiveFallback(for: "gemini-4-argon") == nil)
+
+        let claude = try parse("[profiles.default.summary]\nmodel = \"claude-opus-5-5\"")
+        #expect(claude.summary.effectiveFallback(for: "claude-opus-5-5") == "claude-opus-4-8")
+        // --model で上書きしたときは、そのモデルの系統の既定を使う
+        #expect(claude.summary.effectiveFallback(for: "gemini-3.5-flash") == nil)
+
+        let explicit = try parse("[profiles.default.summary]\nmodel = \"gemini-4-argon\"\nfallback_model = \"claude-opus-5-5\"")
+        #expect(explicit.summary.effectiveFallback(for: "gemini-4-argon") == "claude-opus-5-5")
+        let off = try parse("[profiles.default.summary]\nfallback_model = \"\"")
+        #expect(off.summary.effectiveFallback(for: off.summary.model) == nil)
+        // 既定のモデルは Gemini 4 Argon（再試行なし）
+        let defaults = try parse("[profiles.default]\nlanguage = \"ja-JP\"")
+        #expect(defaults.summary.model == "gemini-4-argon")
+        #expect(defaults.summary.effectiveFallback(for: defaults.summary.model) == nil)
+    }
+
+    @Test func rejectsUnknownModelFamily() {
+        #expect(throws: CappyError.self) { _ = try parse("[profiles.default.summary]\nmodel = \"gpt-5\"") }
+        #expect(throws: CappyError.self) { _ = try parse("[profiles.default.summary]\nfallback_model = \"llama-4\"") }
     }
 }

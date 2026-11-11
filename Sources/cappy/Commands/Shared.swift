@@ -60,11 +60,15 @@ enum SummarizeRunner {
         if let e = request.effort, !SummarySettings.knownEfforts.contains(e) {
             throw CappyError.usage("--effort が不正です: \(e)（low / medium / high / xhigh / max）")
         }
-        let client = try SummaryClientFactory.make(profile: profile)
         let s = profile.summary
+        let model = request.model ?? s.model
+        guard SummaryModelFamily.of(model) != nil else {
+            throw CappyError.usage("--model が不正です: \(model)（claude- または gemini- で始まる Vertex AI のモデル ID）")
+        }
+        let client = try SummaryClientFactory.make(profile: profile)
         let options = Summarizer.Options(
-            model: request.model ?? s.model,
-            fallbackModel: request.model == nil ? s.fallbackModel : nil,
+            model: model,
+            fallbackModel: s.effectiveFallback(for: model),
             effort: request.effort ?? s.effort,
             maxTokens: s.maxTokens,
             language: profile.language,

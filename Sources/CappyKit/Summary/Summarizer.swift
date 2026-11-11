@@ -178,6 +178,9 @@ public struct Summarizer: Sendable {
         case 403:
             return "Vertex AI API の有効化（aiplatform.googleapis.com）と、roles/aiplatform.user の付与を確認してください"
         case 404:
+            if SummaryModelFamily.of(model) == .gemini {
+                return "\(model) が \(region ?? "-") で使えません。モデル ID と summary.region を確認してください"
+            }
             return "\(model) が \(region ?? "-") で使えません。Model Garden で Claude を有効にしているか、summary.model / summary.region を確認してください"
         case 429:
             return "Vertex AI の Claude のクォータを超えています。時間をおいて `cappy summarize` を再実行してください"
@@ -198,7 +201,7 @@ public enum SummaryClientFactory {
                     hint: "[profiles.\(profile.name).google] の project_id、または [profiles.\(profile.name).summary] の project_id を設定してください")
             }
             let auth = try ApplicationDefaultCredentials.load(transport: transport)
-            return ClaudeVertexClient(projectID: project, region: profile.summary.region, auth: auth, transport: transport)
+            return VertexSummaryClient(projectID: project, region: profile.summary.region, auth: auth, transport: transport)
         case "none":
             throw CappyError.usage("要約のプロバイダが none のため、要約は行いません")
         default:

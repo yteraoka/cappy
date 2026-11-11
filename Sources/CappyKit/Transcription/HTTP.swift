@@ -27,8 +27,9 @@ extension HTTPTransport {
     /// 既定の実装: 本文をまとめて受け取ってから行に分ける（スタブ用）
     public func streamLines(_ request: URLRequest, _ onLine: (String) throws -> Void) async throws -> HTTPResponse {
         let r = try await send(request)
-        for line in r.text.split(separator: "\n", omittingEmptySubsequences: true) {
-            try onLine(String(line.hasSuffix("\r") ? line.dropLast() : line))
+        // "\r\n" は 1 文字（書記素）として扱われるため、改行文字の集合で分ける
+        for line in r.text.components(separatedBy: .newlines) where !line.isEmpty {
+            try onLine(line)
         }
         return HTTPResponse(status: r.status, body: Data(), headers: r.headers)
     }

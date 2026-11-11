@@ -6,7 +6,8 @@ struct Summarize: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "文字起こし済みのセッションから会議の要約（summary.md）を作る",
         discussion: """
-        transcript.json を Claude（Vertex AI）に送り、概要・決定事項・アクションアイテム・議論の要点・未解決事項をまとめます。
+        transcript.json を Vertex AI の Claude または Gemini に送り、概要・決定事項・アクションアイテム・議論の要点・未解決事項をまとめます。
+        モデルは claude- で始まれば Claude、gemini- で始まれば Gemini を使います。
         認証は文字起こしと同じ Google のアプリケーションデフォルト認証情報（ADC）を使います。
         同じ文字起こしから作った要約がある場合は作り直しません（--force で作り直す）。
         """
@@ -15,7 +16,7 @@ struct Summarize: AsyncParsableCommand {
     @Argument(help: "セッションディレクトリ")
     var sessionDir: String
 
-    @Option(help: "モデル（既定はプロファイルの summary.model。例: claude-opus-5-5）")
+    @Option(help: "モデル（既定はプロファイルの summary.model。例: gemini-4-argon, claude-opus-5-5）")
     var model: String?
 
     @Option(help: "思考の深さ（low / medium / high / xhigh / max。既定はプロファイルの summary.effort）")

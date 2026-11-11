@@ -24,7 +24,7 @@ public struct GoogleSettings: Sendable, Equatable {
     }
 }
 
-/// 会議の要約（Claude on Vertex AI）
+/// 会議の要約（Vertex AI の Claude / Gemini）
 public struct SummarySettings: Sendable, Equatable {
     /// vertex / none。nil ならプロファイルの provider から決める（none なら none、それ以外は vertex）
     public var provider: String?
@@ -32,9 +32,11 @@ public struct SummarySettings: Sendable, Equatable {
     public var projectID: String?
     /// global / us / eu / リージョン名
     public var region: String = "global"
-    public var model: String = "claude-opus-5-5"
-    /// 拒否（refusal）されたときに再試行するモデル。空文字なら再試行しない
-    public var fallbackModel: String = "claude-opus-4-8"
+    /// claude- で始まれば Claude、gemini- で始まれば Gemini を使う
+    public var model: String = "gemini-4-argon"
+    /// 拒否（refusal）されたときに再試行するモデル。nil ならモデルの系統で決める
+    /// （Claude は claude-opus-4-8、Gemini は再試行しない）。空文字なら再試行しない
+    public var fallbackModel: String?
     /// low / medium / high / xhigh / max
     public var effort: String = "high"
     public var maxTokens: Int = 32000
@@ -46,6 +48,12 @@ public struct SummarySettings: Sendable, Equatable {
     public init() {}
 
     public static let knownProviders: Set<String> = ["vertex", "none"]
+
+    /// 実際に使う再試行先。model が設定の model と違う（--model で上書きした）場合は系統の既定を使う
+    public func effectiveFallback(for model: String) -> String? {
+        if model == self.model, let f = fallbackModel { return f.isEmpty ? nil : f }
+        return SummaryModelFamily.of(model)?.defaultFallback
+    }
     public static let knownEfforts: Set<String> = ["low", "medium", "high", "xhigh", "max"]
 }
 
@@ -167,7 +175,7 @@ public struct CappyConfig: Sendable {
             p.summary.projectID = try str("project_id", m, sctx)
             if let v = try str("region", m, sctx) { p.summary.region = v }
             if let v = try str("model", m, sctx) { p.summary.model = v }
-            if let v = try str("fallback_model", m, sctx) { p.summary.fallbackModel = v }
+            p.summary.fallbackModel = try str("fallback_model", m, sctx)
             if let v = try str("effort", m, sctx) { p.summary.effort = v }
             if let v = try int("max_tokens", m, sctx) { p.summary.maxTokens = v }
             if let v = try bool("auto", m, sctx) { p.summary.auto = v }
@@ -177,6 +185,10 @@ public struct CappyConfig: Sendable {
             }
             if !SummarySettings.knownEfforts.contains(p.summary.effort) {
                 throw CappyError.usage("\(sctx).effort が不正です: \(p.summary.effort)（low / medium / high / xhigh / max）")
+            }
+            for (key, value) in [("model", p.summary.model), ("fallback_model", p.summary.fallbackModel ?? "")]
+            where !value.isEmpty && SummaryModelFamily.of(value) == nil {
+                throw CappyError.usage("\(sctx).\(key) が不正です: \(value)（claude- または gemini- で始まるモデル ID）")
             }
             if p.summary.maxTokens < 1024 {
                 throw CappyError.usage("\(sctx).max_tokens は 1024 以上にしてください")
