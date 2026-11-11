@@ -79,6 +79,8 @@ public struct AmazonTranscribeProvider: TranscriptionProvider {
             guard r.status == 200 else { throw AWSAPIError.from(r) }
             return r
         }
+        // DeleteTranscriptionJob などは本文が空で返る
+        guard !resp.body.isEmpty else { return [:] }
         return (try JSONSerialization.jsonObject(with: resp.body) as? [String: Any]) ?? [:]
     }
 

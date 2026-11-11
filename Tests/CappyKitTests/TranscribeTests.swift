@@ -196,7 +196,8 @@ import Testing
 
     @Test func cleanupDeletesObjectAndJob() async throws {
         let stub = StubTransport { call in
-            call.method == "DELETE" ? HTTPResponse(status: 204, body: Data()) : .json([:])
+            // DeleteTranscriptionJob は本文が空の 200 を返す
+            HTTPResponse(status: call.method == "DELETE" ? 204 : 200, body: Data())
         }
         try await provider(stub).cleanup(JobHandle(provider: "transcribe", track: .remote, id: "j1",
                                                    info: ["object": "s3://my-bucket/cappy/sess-1/transcribe/remote.flac"]))
