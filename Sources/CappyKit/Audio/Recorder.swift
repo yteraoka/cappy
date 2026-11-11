@@ -479,7 +479,8 @@ public final class Recorder: @unchecked Sendable {
             monitorTimer = nil
             debounce.values.forEach { $0.cancel() }
             removeListeners()
-            engine?.stop()
+            // 外側の定数 engine と区別するため self を明示する（Swift 6.1 ではエラーになる）
+            self.engine?.stop()
             return (self.engine, self.tap)
         }
         await writer?.stopAndDrain()
