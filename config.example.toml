@@ -72,9 +72,14 @@ max_speakers = 10            # 話者分離の最大人数（2〜30）
 provider = "bedrock"
 region = "jp"
 
-# Amazon Bedrock の Claude で要約する例
+# Vertex AI の Gemini で文字起こしし、Amazon Bedrock の Claude で要約する例
+# プロファイルはほかのプロファイルの設定を引き継がないため、文字起こしに使う Google Cloud の設定もここに書く
 [profiles.bedrock]
 provider = "gemini"
+
+[profiles.bedrock.google]
+project_id = "my-project"
+bucket = "my-cappy-bucket"
 
 [profiles.bedrock.aws]
 region = "ap-northeast-1"
