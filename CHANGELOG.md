@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.3.0](https://github.com/yteraoka/cappy/compare/v0.2.0...v0.3.0) - 2026-11-12
+
+- 録音中にマイクの取り込みを on / off できるようにする（Space キーと cappy mic） by @yteraoka in https://github.com/yteraoka/cappy/pull/16
+- 出力デバイスとタップのサンプルレートが異なっても remote を正しいレートで記録する by @yteraoka in https://github.com/yteraoka/cappy/pull/18
+
 ## [v0.2.0](https://github.com/yteraoka/cappy/compare/v0.1.0...v0.2.0) - 2026-11-11
 
 - 表示を英語と日本語に対応し、既定を英語にする（README も英語に） by @yteraoka in https://github.com/yteraoka/cappy/pull/13
