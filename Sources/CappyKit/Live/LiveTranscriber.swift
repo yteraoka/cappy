@@ -31,6 +31,8 @@ public struct GeminiLiveBackend: LiveBackend {
                      onEvent: @escaping @Sendable (LiveTranscriber.Event) -> Void) async throws -> LiveSession {
         let socket = try await connector.connect()
         let handle = LiveSessionHandle(socket: socket, startMs: startMs, track: options.track, language: options.language,
+                                       targetUtteranceMs: options.targetUtteranceMs, quietUtteranceMs: options.quietUtteranceMs,
+                                       maxUtteranceMs: options.maxUtteranceMs,
                                        onEvent: onEvent)
         do {
             try await handle.setup(model: options.model, timeout: options.setupTimeoutSeconds)
@@ -58,6 +60,13 @@ public final class LiveTranscriber: @unchecked Sendable {
         public var hardLimitMs: Int64 = 9 * 60_000 + 45_000
         /// 話の切れ目とみなす無音（認識途中の文字がない時間, ms）
         public var quietMs: Int64 = 1_200
+        /// 確定しない発言がこの長さを超えたら、文の終わり（認識途中の文字の末尾近くに「。」などが来たところ）で確定させる（ms。Gemini のみ）。
+        /// 相手が話し続けるとサーバーが話の切れ目を見つけられず、止めるまで何も確定しないため
+        public var targetUtteranceMs: Int64 = 20_000
+        /// 文の終わりが来ないままこの長さを超えたら、音の小さいところで確定させる（ms。Gemini のみ）
+        public var quietUtteranceMs: Int64 = 30_000
+        /// 確定しない発言がこの長さを超えたら、音の大きさによらず確定させる（ms。Gemini のみ）
+        public var maxUtteranceMs: Int64 = 40_000
         /// セッションの終了時に、残りの結果を待つ時間（秒）
         public var drainSeconds: Double = 8
         public var setupTimeoutSeconds: Double = 15
@@ -229,12 +238,25 @@ final class LiveSessionHandle: LiveSession, @unchecked Sendable {
     let startMs: Int64
     let track: TrackID
     let language: String
+    let targetUtteranceMs: Int64
+    let quietUtteranceMs: Int64
+    let maxUtteranceMs: Int64
     let onEvent: @Sendable (LiveTranscriber.Event) -> Void
     private let lock = NSLock()
     /// 送った音声の長さ（セッション内, ms）
     private var sentMs: Int64 = 0
     /// 認識途中の発言の開始位置（セッション内, ms）
     private var utteranceStartMs: Int64?
+    /// 認識途中の文字（確定しないまま終わったときに残す）
+    private var lastInterim: String?
+    /// 直近の音声の大きさ（100 ms ごと、約 3 秒分）。区切る位置を選ぶのに使う
+    private var recentLevels: [Float] = []
+    /// 長い発言を確定させるために audioStreamEnd を送った位置（セッション内, ms）
+    private var flushedAtMs: Int64?
+    /// 区切って確定させた発言の、最後の文の終わりより後ろ（次の発言の頭に付ける）
+    private var carry: String?
+    /// carry を切り出した発言の終わり（セッション内, ms）。carry の発言の開始位置にする
+    private var carryAtMs: Int64 = 0
     /// 最後に認識結果（途中・確定）を受け取った位置（セッション内, ms）
     private var lastActivityMs: Int64 = 0
     private var goAway = false
@@ -246,11 +268,15 @@ final class LiveSessionHandle: LiveSession, @unchecked Sendable {
     private var lastMessageAt = Date()
 
     init(socket: LiveSocket, startMs: Int64, track: TrackID, language: String,
+         targetUtteranceMs: Int64 = 20_000, quietUtteranceMs: Int64 = 30_000, maxUtteranceMs: Int64 = 40_000,
          onEvent: @escaping @Sendable (LiveTranscriber.Event) -> Void) {
         self.socket = socket
         self.startMs = startMs
         self.track = track
         self.language = language
+        self.targetUtteranceMs = targetUtteranceMs
+        self.quietUtteranceMs = quietUtteranceMs
+        self.maxUtteranceMs = maxUtteranceMs
         self.onEvent = onEvent
     }
 
@@ -335,8 +361,91 @@ final class LiveSessionHandle: LiveSession, @unchecked Sendable {
     }
 
     func sendAudio(_ chunk: LiveTranscriber.Chunk) async throws {
+        if let open = shouldFlush(level: Self.level(chunk.pcm)) {
+            // 音声の終わりを伝えると、サーバーは認識途中の発言を確定する。続けて音声を送れば同じセッションで認識を続ける
+            CappyLog.shared.debug("live \(track.rawValue): flushing an utterance of \(open / 1000)s")
+            try await socket.send(Self.audioStreamEndMessage)
+        }
         try await socket.send(Self.audioMessage(chunk.pcm))
         lock.withLock { sentMs = max(sentMs, chunk.startMs + chunk.durationMs - startMs) }
+    }
+
+    /// 確定しない発言が長く続いているなら、その長さ（ms）を返す（ここで区切る）。
+    /// targetUtteranceMs を超えたら文の終わりで、quietUtteranceMs を超えたら直近 3 秒で特に音の小さいところで、
+    /// maxUtteranceMs を超えたらすぐに区切る
+    func shouldFlush(level: Float) -> Int64? {
+        lock.withLock {
+            recentLevels.append(level)
+            if recentLevels.count > 30 { recentLevels.removeFirst(recentLevels.count - 30) }
+            guard let start = utteranceStartMs else { return nil }
+            // 前に区切ってから確定が届くまでは待つ（届かなければ 10 秒後にもう一度）
+            if let f = flushedAtMs, sentMs - f < 10_000 { return nil }
+            let open = sentMs - start
+            var flush = open >= maxUtteranceMs
+            if !flush, open >= targetUtteranceMs, let text = lastInterim, let after = Self.splitAtSentenceEnd(text)?.tail {
+                // 認識途中の文字は音声より少し遅れて届き、文の終わりの後ろに次の言葉が付いていることが多い
+                flush = after.count <= Self.sentenceTailAllowance
+            }
+            if !flush, open >= quietUtteranceMs, recentLevels.count >= 10 {
+                let sorted = recentLevels.sorted()
+                flush = level <= sorted[sorted.count / 10]
+            }
+            guard flush else { return nil }
+            flushedAtMs = sentMs
+            return open
+        }
+    }
+
+    /// 文の終わりの後ろに付いていてもよい文字数（これより短ければ、文の終わりとみなして区切る）
+    static let sentenceTailAllowance = 12
+
+    /// 最後の文の終わり（「。」「？」「！」など。直後の閉じかっこを含む）で分ける。文の終わりがなければ nil。
+    /// 半角の . ? ! は、直後が空白か末尾のときだけ文の終わりとみなす（3.5 などで分けない）
+    static func splitAtSentenceEnd(_ text: String) -> (head: String, tail: String)? {
+        let chars = Array(text)
+        let closing: Set<Character> = ["」", "』", "）", ")", "\"", "'", "”", "’"]
+        var i = chars.count - 1
+        while i >= 0 {
+            let c = chars[i]
+            let isEnd: Bool
+            if "。？！．".contains(c) {
+                isEnd = true
+            } else if ".?!".contains(c) {
+                isEnd = i + 1 == chars.count || chars[i + 1].isWhitespace
+            } else {
+                isEnd = false
+            }
+            if isEnd {
+                var j = i + 1
+                while j < chars.count, closing.contains(chars[j]) { j += 1 }
+                let head = String(chars[..<j]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let tail = String(chars[j...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                return (head, tail)
+            }
+            i -= 1
+        }
+        return nil
+    }
+
+    /// 2 つの文字列をつなぐ（英数字どうしの間だけ空白を入れる）
+    static func join(_ a: String, _ b: String) -> String {
+        guard let x = a.last, let y = b.first else { return a + b }
+        let wordy: (Character) -> Bool = { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        return wordy(x) && wordy(y) ? a + " " + b : a + b
+    }
+
+    /// 16 bit PCM の大きさ（RMS）
+    static func level(_ pcm: Data) -> Float {
+        pcm.withUnsafeBytes { raw -> Float in
+            let samples = raw.bindMemory(to: Int16.self)
+            guard !samples.isEmpty else { return 0 }
+            var sum: Float = 0
+            for v in samples {
+                let f = Float(Int16(littleEndian: v))
+                sum += f * f
+            }
+            return (sum / Float(samples.count)).squareRoot()
+        }
     }
 
     func shouldRotate(at positionMs: Int64, options: LiveTranscriber.Options) -> Bool {
@@ -366,7 +475,29 @@ final class LiveSessionHandle: LiveSession, @unchecked Sendable {
         }
         socket.close()
         await receiver?.value
-        // 確定しないまま終わった発言は、途中の文字を捨てる
+        // 確定しないまま終わった発言は、途中の文字を捨てずに残す（張り替えや停止で失わないように）
+        let (pending, unconfirmed): (Segment?, Bool) = lock.withLock {
+            defer {
+                utteranceStartMs = nil
+                lastInterim = nil
+                carry = nil
+            }
+            let interim = lastInterim?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            var start = utteranceStartMs ?? sentMs
+            if carry != nil { start = min(start, carryAtMs) }
+            if interim.isEmpty || utteranceStartMs == nil {
+                // 区切った発言の残り（文の途中）だけが残っている
+                guard let c = carry, !c.isEmpty else { return (nil, false) }
+                return (Segment(track: track, speaker: nil, startMs: startMs + start, endMs: startMs + max(start, sentMs), text: c, confidence: nil), false)
+            }
+            let text = carry.map { Self.join($0, interim) } ?? interim
+            return (Segment(track: track, speaker: nil, startMs: startMs + start, endMs: startMs + max(start, sentMs), text: text, confidence: nil), true)
+        }
+        if unconfirmed, let pending {
+            CappyLog.shared.warning(tr("live \(track.rawValue): kept an unconfirmed utterance as it is (\(pending.text.count) characters)",
+                                       ja: "live \(track.rawValue): 確定しなかった発言を認識途中の文字のまま残しました（\(pending.text.count) 文字）"))
+        }
+        if let pending { onEvent(.segment(pending)) }
         onEvent(.interim(track, nil))
     }
 
@@ -385,6 +516,7 @@ final class LiveSessionHandle: LiveSession, @unchecked Sendable {
            let t = interim["text"] as? String, !t.isEmpty {
             lock.withLock {
                 if utteranceStartMs == nil { utteranceStartMs = max(0, sentMs - 1_500) }
+                lastInterim = t
                 lastActivityMs = sentMs
             }
             onEvent(.interim(track, t))
@@ -393,16 +525,36 @@ final class LiveSessionHandle: LiveSession, @unchecked Sendable {
            let t = (final["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
             let startOffset = GoogleResultParser.durationMs(GoogleResultParser.field(final, "startOffset"))
             let endOffset = GoogleResultParser.durationMs(GoogleResultParser.field(final, "endOffset"))
-            let (start, end): (Int64, Int64) = lock.withLock {
-                let e = endOffset ?? sentMs
-                let s = startOffset ?? utteranceStartMs ?? max(0, e - 2_000)
+            let (start, end, text): (Int64, Int64, String?) = lock.withLock {
+                var e = endOffset ?? sentMs
+                var s = startOffset ?? utteranceStartMs ?? max(0, e - 2_000)
+                // 前に区切った発言の文の途中の部分を頭に付ける
+                var text = t
+                if let c = carry {
+                    text = Self.join(c, t)
+                    s = min(s, carryAtMs)
+                }
+                carry = nil
+                // こちらから区切った発言は、最後の文の終わりより後ろを次の発言に回す（文の途中で切れないように）
+                if flushedAtMs != nil, let (head, tail) = Self.splitAtSentenceEnd(text), !head.isEmpty, !tail.isEmpty {
+                    // 分けた位置の時刻は、文字数の割合で見積もる
+                    let split = s + (max(s, e) - s) * Int64(head.count) / Int64(head.count + tail.count)
+                    text = head
+                    carry = tail
+                    carryAtMs = split
+                    e = split
+                }
                 utteranceStartMs = nil
+                lastInterim = nil
+                flushedAtMs = nil
                 lastActivityMs = sentMs
-                return (s, max(s, e))
+                return (s, max(s, e), text.isEmpty ? nil : text)
             }
             let speaker = (GoogleResultParser.field(final, "speakerLabel") as? String).flatMap { $0.isEmpty ? nil : $0 }
-            onEvent(.segment(Segment(track: track, speaker: speaker, startMs: startMs + start, endMs: startMs + end,
-                                     text: t, confidence: nil)))
+            if let text {
+                onEvent(.segment(Segment(track: track, speaker: speaker, startMs: startMs + start, endMs: startMs + end,
+                                         text: text, confidence: nil)))
+            }
             onEvent(.interim(track, nil))
         }
     }

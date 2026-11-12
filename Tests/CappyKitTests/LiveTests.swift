@@ -146,6 +146,171 @@ final class EventLog: @unchecked Sendable {
         #expect(connector.sockets[0].sent.last == "{\"realtimeInput\":{\"audioStreamEnd\":true}}")
     }
 
+    /// 相手が話し続けてサーバーが話の切れ目を見つけない場合（認識途中の文字だけが届き、audioStreamEnd でやっと確定する）
+    @Test func flushesLongUtterancesWithinTheSession() async throws {
+        let connector = FakeLiveConnector { socket, text in
+            let audio = socket.sent.filter { $0.contains("\"audio\"") }.count
+            if text.contains("audioStreamEnd") {
+                socket.push(["serverContent": ["inputTranscription": ["text": "発言\(audio)"]]])
+            } else if text.contains("\"audio\"") {
+                socket.push(["serverContent": ["interimInputTranscription": ["text": "途中\(audio)"]]])
+            }
+        }
+        let log = EventLog()
+        var opts = LiveTranscriber.Options(model: "m", language: "ja-JP", track: .remote)
+        opts.targetUtteranceMs = 1_000
+        opts.quietUtteranceMs = 1_000
+        opts.maxUtteranceMs = 2_000
+        opts.drainSeconds = 1
+        let t = LiveTranscriber(options: opts, connector: connector) { log.add($0) }
+        t.start()
+        for i in 0..<100 {
+            t.enqueue(Self.chunk(i))
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        await t.finish()
+
+        // 止める前に、同じセッションのまま何度も確定している
+        let socket = try #require(connector.sockets.first)
+        #expect(connector.sockets.count == 1)
+        let ends = socket.sent.indices.filter { socket.sent[$0].contains("audioStreamEnd") }
+        #expect(ends.count >= 4)
+        #expect(ends.dropLast().allSatisfy { socket.sent[$0 + 1].contains("\"audio\"") }) // 区切った後も音声を送り続ける
+        #expect(log.segments.count >= 4)
+        // 1 つの発言は maxUtteranceMs（とその前後の余裕）を超えない
+        #expect(log.segments.allSatisfy { $0.endMs - $0.startMs <= 2_000 + 1_500 + 200 })
+        #expect(socket.sent.filter { $0.contains("\"audio\"") }.count == 100)
+    }
+
+    /// targetUtteranceMs を超えたら、音の大きさより文の終わりを優先して区切る
+    @Test func flushesAtTheEndOfASentence() async throws {
+        let connector = FakeLiveConnector { socket, text in
+            let audio = socket.sent.filter { $0.contains("\"audio\"") }.count
+            if text.contains("audioStreamEnd") {
+                socket.push(["serverContent": ["inputTranscription": ["text": "確定\(audio)"]]])
+            } else if text.contains("\"audio\"") {
+                // 25 個目（2.5 秒）の音声で文が終わる。それ以外は文の途中
+                let interim = audio == 25 ? "ここで文が終わる。 " : "文の途中\(audio)"
+                socket.push(["serverContent": ["interimInputTranscription": ["text": interim]]])
+            }
+        }
+        let log = EventLog()
+        var opts = LiveTranscriber.Options(model: "m", language: "ja-JP", track: .remote)
+        opts.targetUtteranceMs = 1_000
+        opts.quietUtteranceMs = 3_000
+        opts.maxUtteranceMs = 4_000
+        opts.drainSeconds = 1
+        let t = LiveTranscriber(options: opts, connector: connector) { log.add($0) }
+        t.start()
+        for i in 0..<40 {
+            t.enqueue(Self.chunk(i))
+            try await Task.sleep(nanoseconds: 3_000_000)
+        }
+        await t.finish()
+        let socket = try #require(connector.sockets.first)
+        // 最初の区切りは、文が終わった直後（26 個目の音声の前）
+        let audioBeforeFirstEnd = socket.sent.prefix { !$0.contains("audioStreamEnd") }.filter { $0.contains("\"audio\"") }.count
+        #expect(audioBeforeFirstEnd == 25)
+    }
+
+    @Test func splitsAtTheLastSentenceEnd() {
+        func split(_ s: String) -> [String]? { LiveSessionHandle.splitAtSentenceEnd(s).map { [$0.head, $0.tail] } }
+        #expect(split("考えてます。僕ね、今の") == ["考えてます。", "僕ね、今の"])
+        #expect(split("そうです。") == ["そうです。", ""])
+        #expect(split("本当ですか？ ") == ["本当ですか？", ""])
+        #expect(split("「やります！」それで") == ["「やります！」", "それで"])
+        #expect(split("That's it. And then") == ["That's it.", "And then"])
+        #expect(split("version 3.5 is") == nil) // 小数点では分けない
+        #expect(split("望月さんはね、") == nil)
+        #expect(split("") == nil)
+        #expect(LiveSessionHandle.join("And", "then") == "And then")
+        #expect(LiveSessionHandle.join("僕ね、", "今の") == "僕ね、今の")
+    }
+
+    /// 区切って確定させた発言の、最後の文の終わりより後ろは次の発言の頭に回す
+    @Test func carriesTheTailOfAFlushedUtterance() async throws {
+        let connector = FakeLiveConnector { socket, text in
+            let audio = socket.sent.filter { $0.contains("\"audio\"") }.count
+            let ends = socket.sent.filter { $0.contains("audioStreamEnd") }.count
+            if text.contains("audioStreamEnd") {
+                // 1 回目（区切り）は文の途中まで、2 回目（終了）は残りを確定する
+                let final = ends == 1 ? "最初の文です。次の文は" : "ここで終わります。"
+                socket.push(["serverContent": ["inputTranscription": ["text": final]]])
+            } else if text.contains("\"audio\""), ends == 0 {
+                socket.push(["serverContent": ["interimInputTranscription": ["text": "最初の文\(audio)"]]])
+            }
+        }
+        let log = EventLog()
+        var opts = LiveTranscriber.Options(model: "m", language: "ja-JP", track: .remote)
+        opts.targetUtteranceMs = 500
+        opts.quietUtteranceMs = 500
+        opts.maxUtteranceMs = 1_000
+        opts.drainSeconds = 1
+        let t = LiveTranscriber(options: opts, connector: connector) { log.add($0) }
+        t.start()
+        for i in 0..<30 {
+            t.enqueue(Self.chunk(i))
+            try await Task.sleep(nanoseconds: 3_000_000)
+        }
+        await t.finish()
+        #expect(log.segments.map(\.text) == ["最初の文です。", "次の文はここで終わります。"])
+        let segs = log.segments
+        #expect(segs.count == 2 && segs[1].startMs <= segs[0].endMs)
+    }
+
+    @Test func emitsTheCarriedTailWhenTheSessionEnds() async throws {
+        let connector = FakeLiveConnector { socket, text in
+            let audio = socket.sent.filter { $0.contains("\"audio\"") }.count
+            let ends = socket.sent.filter { $0.contains("audioStreamEnd") }.count
+            if text.contains("audioStreamEnd"), ends == 1 {
+                socket.push(["serverContent": ["inputTranscription": ["text": "文です。続き"]]])
+            } else if text.contains("\"audio\""), ends == 0 {
+                socket.push(["serverContent": ["interimInputTranscription": ["text": "文\(audio)"]]])
+            }
+        }
+        let log = EventLog()
+        var opts = LiveTranscriber.Options(model: "m", language: "ja-JP", track: .remote)
+        opts.targetUtteranceMs = 500
+        opts.quietUtteranceMs = 500
+        opts.maxUtteranceMs = 1_000
+        opts.drainSeconds = 0.3
+        let t = LiveTranscriber(options: opts, connector: connector) { log.add($0) }
+        t.start()
+        for i in 0..<20 {
+            t.enqueue(Self.chunk(i))
+            try await Task.sleep(nanoseconds: 3_000_000)
+        }
+        await t.finish()
+        #expect(log.segments.map(\.text) == ["文です。", "続き"])
+    }
+
+    @Test func keepsUnconfirmedTextWhenTheSessionEnds() async throws {
+        // 認識途中の文字は届くが、audioStreamEnd を送っても確定しない
+        let connector = FakeLiveConnector { socket, text in
+            if text.contains("\"audio\""), socket.sent.filter({ $0.contains("\"audio\"") }).count == 5 {
+                socket.push(["serverContent": ["interimInputTranscription": ["text": "最後まで確定しなかった発言"]]])
+            }
+        }
+        let log = EventLog()
+        var opts = LiveTranscriber.Options(model: "m", language: "ja-JP", track: .remote)
+        opts.drainSeconds = 0.3
+        let t = LiveTranscriber(options: opts, connector: connector) { log.add($0) }
+        t.start()
+        for i in 0..<10 { t.enqueue(Self.chunk(i)) }
+        await t.finish()
+        let seg = try #require(log.segments.first)
+        #expect(log.segments.count == 1)
+        #expect(seg.text == "最後まで確定しなかった発言")
+        #expect(seg.endMs == 1_000)
+    }
+
+    @Test func levelIsRMS() {
+        var pcm = Data()
+        for v: Int16 in [1_000, -1_000, 1_000, -1_000] { withUnsafeBytes(of: v.littleEndian) { pcm.append(contentsOf: $0) } }
+        #expect(LiveSessionHandle.level(pcm) == 1_000)
+        #expect(LiveSessionHandle.level(Data()) == 0)
+    }
+
     @Test func permanentFailureStopsSending() async throws {
         let connector = FakeLiveConnector(failure: LiveConnectionError(message: "HTTP 403", permanent: true))
         let log = EventLog()
