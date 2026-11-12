@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.5.0](https://github.com/yteraoka/cappy/compare/v0.4.0...v0.5.0) - 2026-11-12
+
+- 全画面で録音から過去の録音の閲覧まで行う cappy tui を追加する by @yteraoka in https://github.com/yteraoka/cappy/pull/22
+- cappy tui の描画のちらつきを抑える by @yteraoka in https://github.com/yteraoka/cappy/pull/23
+- cappy tui の過去の録音から、まだ要約していないセッションの要約を作れるようにする by @yteraoka in https://github.com/yteraoka/cappy/pull/25
+
 ## [v0.4.0](https://github.com/yteraoka/cappy/compare/v0.3.0...v0.4.0) - 2026-11-12
 
 - 対話で設定ファイルを作る cappy init を追加し、設定を provider（クラウド）と model（何を使うか）に整理する by @yteraoka in https://github.com/yteraoka/cappy/pull/19
