@@ -71,6 +71,11 @@ struct Record: AsyncParsableCommand {
     @Flag(inversion: .prefixedNo, help: ArgumentHelp(tr("Summarize the meeting after --transcribe / --live (default: summary.auto of the profile)", ja: "--transcribe / --live 時に続けて会議の要約を作る（既定はプロファイルの summary.auto）")))
     var summarize: Bool?
 
+    @Option(name: .customLong("summary-model"),
+            help: ArgumentHelp(tr("Model for the summary (default: summary.model of the profile)", ja: "要約に使うモデル（既定はプロファイルの summary.model）")),
+            completion: .custom { _, _, _ in CompletionCandidates.models() })
+    var summaryModel: String?
+
     @Flag(help: ArgumentHelp(tr("Transcribe in real time while recording (transcribe.live_model on Vertex AI, or Amazon Transcribe Streaming when transcribe.provider = aws; results go to live-transcript.*)", ja: "録音しながらリアルタイムで文字起こしする（Vertex AI の transcribe.live_model、transcribe.provider = aws なら Amazon Transcribe Streaming。結果は live-transcript.*）")))
     var live = false
 
@@ -100,6 +105,10 @@ struct Record: AsyncParsableCommand {
         }
         if summarize == true && !transcribe && !live {
             throw ValidationError(tr("--summarize requires --transcribe or --live (after recording, use `cappy transcribe --summarize`)", ja: "--summarize は --transcribe か --live と一緒に指定してください（録音後なら `cappy transcribe --summarize`）"))
+        }
+        // 録音が終わってから気づかないよう、モデル ID の形だけは先に確かめる
+        if let m = summaryModel, SummaryModelFamily.of(m) == nil {
+            throw ValidationError(tr("Invalid --summary-model: \(m) (a model ID starting with claude- or gemini-, or on Bedrock an ID such as moonshotai.kimi-k3.1)", ja: "--summary-model が不正です: \(m)（claude- または gemini- で始まるモデル ID、Bedrock なら moonshotai.kimi-k3.1 のような ID）"))
         }
     }
 
@@ -296,13 +305,13 @@ struct Record: AsyncParsableCommand {
                 providerName: nil, language: nil, mix: mix, formats: formats, force: false, keepRemote: false))
             if (summarize ?? profile.summary.auto) && profile.provider != "none" {
                 interrupts.setPhase(.summarizing)
-                try await SummarizeRunner.run(store: store, profile: profile, request: .init(explicit: summarize == true))
+                try await SummarizeRunner.run(store: store, profile: profile, request: .init(model: summaryModel, explicit: summarize == true))
             }
         } else {
             if !liveURLs.isEmpty && (summarize ?? profile.summary.auto) {
                 // リアルタイム文字起こしの結果から要約する
                 interrupts.setPhase(.summarizing)
-                try await SummarizeRunner.run(store: store, profile: profile, request: .init(explicit: summarize == true))
+                try await SummarizeRunner.run(store: store, profile: profile, request: .init(model: summaryModel, explicit: summarize == true))
             }
             Console.print(tr("Transcribe: cappy transcribe \(dir.path)", ja: "文字起こし: cappy transcribe \(dir.path)"))
         }

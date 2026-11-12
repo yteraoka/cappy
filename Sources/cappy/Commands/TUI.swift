@@ -10,6 +10,7 @@ struct TUI: AsyncParsableCommand {
         abstract: tr("Choose the profile, operation and app on a full screen, then record on the same screen", ja: "全画面でプロファイル・操作・アプリを選び、そのまま同じ画面で録音する"),
         discussion: tr("""
         The upper part chooses the profile, what to do after recording (transcribe, summarize, live transcription),
+        the summary model (when summarizing; the available models are fetched from Vertex AI / Bedrock),
         the microphone, auto stop and the session name (Enter opens the choices). The lower part lists the apps that
         use audio (helper processes of the same app are grouped; refreshed automatically). Choose an app and press
         Enter to start `cappy record` with those settings; the recording, transcription and summary are shown on
@@ -27,8 +28,9 @@ struct TUI: AsyncParsableCommand {
         create the summary of a session not summarized yet (from the menu; Ctrl-C interrupts it),
         or delete a session (d; asks first and moves the folder to the Trash).
         """, ja: """
-        上の欄でプロファイル、録音後の操作（文字起こし・要約・リアルタイム文字起こし）、マイク、自動停止、
-        セッション名を選びます（Enter で選択肢を表示）。下の欄は音声を使うアプリの一覧です（同じアプリの
+        上の欄でプロファイル、録音後の操作（文字起こし・要約・リアルタイム文字起こし）、要約モデル（要約するとき。
+        使えるモデルを Vertex AI / Bedrock から取得します）、マイク、自動停止、セッション名を選びます
+        （Enter で選択肢を表示）。下の欄は音声を使うアプリの一覧です（同じアプリの
         ヘルパーは 1 行にまとめ、自動で更新します）。アプリを選んで Enter を押すと、その設定で `cappy record` を
         始め、録音・文字起こし・要約の様子を同じ画面に表示します。
 
@@ -671,9 +673,12 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
     private func handleLauncher(_ key: TUIKey) {
         var choice: Choice??
         var switchToSessions = false
+        var modelLoad: RecordLauncher.Action?
         let wantsRefresh: Bool = lock.withLock {
             dirty = true
-            switch launcher.handle(key) {
+            defer { if modelLoad == nil && mode == .launcher { modelLoad = launcher.pendingModelLoad() } }
+            let action = launcher.handle(key)
+            switch action {
             case .quit?:
                 choice = .some(nil)
             case .start(let args)?:
@@ -687,11 +692,14 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
                 mode = .viewingLog
             case .switchPage?:
                 switchToSessions = true
+            case .loadModels?:
+                modelLoad = action
             case nil:
                 break
             }
             return false
         }
+        if case .loadModels(let key, let profile)? = modelLoad { loadModels(key: key, profile: profile) }
         if wantsRefresh {
             let targets = refresh()
             lock.withLock { launcher.update(targets: targets) }
@@ -699,6 +707,23 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
         if switchToSessions { showSessions() }
         guard let choice else { return }
         resolveChoice(choice)
+    }
+
+    /// 要約モデルの一覧を API で取得し、終わったら画面に反映する（取得中も操作できる）
+    private func loadModels(key: String, profile: Profile) {
+        Task.detached { [weak self] in
+            let result: Result<[SummaryModelOption], Error>
+            do {
+                result = .success(try await SummaryModelCatalog.list(profile: profile))
+            } catch {
+                result = .failure(error)
+            }
+            guard let self else { return }
+            self.lock.withLock {
+                self.launcher.setModelList(key: key, result)
+                self.dirty = true
+            }
+        }
     }
 
     // MARK: 描画

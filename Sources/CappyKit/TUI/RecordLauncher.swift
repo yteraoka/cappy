@@ -131,6 +131,9 @@ public enum LaunchOperation: String, CaseIterable, Sendable {
         return allCases.filter { canSummarize || !$0.summarizes }
     }
 
+    /// 要約まで行う操作か（要約モデルを選ぶ行を出す）
+    public var summarizes: Bool { self == .summarize || self == .liveSummarize }
+
     /// プロファイルを選んだときの初期値（summary.auto なら要約まで）
     public static func preferred(for profile: Profile) -> LaunchOperation {
         let ops = available(for: profile)
@@ -161,7 +164,14 @@ public enum LaunchMic: CaseIterable, Sendable {
 
 /// `cappy tui` の画面の状態。キー入力を受けて、録音を始めるときは record の引数を返す
 public struct RecordLauncher: Sendable {
-    public enum Field: CaseIterable, Sendable { case profile, operation, mic, duration, name }
+    public enum Field: CaseIterable, Sendable { case profile, operation, summaryModel, mic, duration, name }
+
+    /// 要約モデルの一覧の取得状況（取得先ごと。SummaryModelCatalog.cacheKey）
+    public enum ModelList: Equatable, Sendable {
+        case loading
+        case loaded([SummaryModelOption])
+        case failed(String)
+    }
 
     public enum Action: Equatable, Sendable {
         case start([String])
@@ -171,6 +181,8 @@ public struct RecordLauncher: Sendable {
         case showLog
         /// 過去の録音のページに切り替える（Tab）
         case switchPage
+        /// 要約モデルの一覧を取得する（終わったら setModelList を呼ぶ）
+        case loadModels(key: String, profile: Profile)
     }
 
     /// 前回の録音の結果（選ぶ画面に戻ったときに上に出す）
@@ -198,8 +210,12 @@ public struct RecordLauncher: Sendable {
     public private(set) var mic: LaunchMic = .on
     public private(set) var durationIndex = 0
     public private(set) var name = ""
+    /// 要約に使うモデル（nil ならプロファイルの summary.model）
+    public private(set) var summaryModel: String?
+    /// 取得した要約モデルの一覧（SummaryModelCatalog.cacheKey ごと）
+    public private(set) var modelLists: [String: ModelList] = [:]
     public private(set) var targets: [LaunchTarget] = [LaunchTarget.system]
-    /// 0..<Field.allCases.count が設定の行、それ以降が録音対象の行
+    /// 0..<fields.count が設定の行、それ以降が録音対象の行
     public private(set) var cursor: Int
     public var verbose = false
     /// 一覧で対象を選び直したか（選ぶまでは、一覧が更新されても先頭を指す）
@@ -224,7 +240,14 @@ public struct RecordLauncher: Sendable {
         let p = list[index]
         operations = LaunchOperation.available(for: p)
         operation = LaunchOperation.preferred(for: p)
-        cursor = Field.allCases.count
+        cursor = Self.fields(for: operation).count
+    }
+
+    /// 表示する設定の行（要約モデルは要約まで行う操作のときだけ）
+    public var fields: [Field] { Self.fields(for: operation) }
+
+    static func fields(for operation: LaunchOperation) -> [Field] {
+        Field.allCases.filter { $0 != .summaryModel || operation.summarizes }
     }
 
     /// 設定ファイルのプロファイルを default を先頭に並べる
@@ -239,7 +262,7 @@ public struct RecordLauncher: Sendable {
     public var duration: String? { Self.durations[durationIndex] }
 
     public var row: Row {
-        cursor < Field.allCases.count ? .field(Field.allCases[cursor]) : .target(cursor - Field.allCases.count)
+        cursor < fields.count ? .field(fields[cursor]) : .target(cursor - fields.count)
     }
 
     public var selectedTarget: LaunchTarget? {
@@ -247,17 +270,17 @@ public struct RecordLauncher: Sendable {
         return nil
     }
 
-    private var rowCount: Int { Field.allCases.count + targets.count }
+    private var rowCount: Int { fields.count + targets.count }
 
     /// 一覧を新しくする。選んでいた対象が残っていれば、並びが変わってもそこに留まる
     public mutating func update(targets new: [LaunchTarget]) {
         let selected = picked ? selectedTarget?.kind : nil
         targets = new.isEmpty ? [LaunchTarget.system] : new
         if selectedTarget != nil && !picked {
-            cursor = Field.allCases.count
+            cursor = fields.count
         } else if let selected {
             if let i = targets.firstIndex(where: { $0.kind == selected }) {
-                cursor = Field.allCases.count + i
+                cursor = fields.count + i
             } else {
                 cursor = min(cursor, rowCount - 1)
             }
@@ -270,8 +293,9 @@ public struct RecordLauncher: Sendable {
             (tr("Target", ja: "録音対象"), "\(target.name)  (\(target.detail))"),
             (label(of: .profile), value(of: .profile)),
             (label(of: .operation), value(of: .operation)),
-            (label(of: .mic), value(of: .mic)),
         ]
+        if operation.summarizes { rows.append((label(of: .summaryModel), effectiveSummaryModel)) }
+        rows.append((label(of: .mic), value(of: .mic)))
         if duration != nil { rows.append((label(of: .duration), value(of: .duration))) }
         let n = name.trimmingCharacters(in: .whitespaces)
         if !n.isEmpty { rows.append((label(of: .name), n)) }
@@ -281,6 +305,7 @@ public struct RecordLauncher: Sendable {
     /// record に渡す引数
     public func arguments(for target: LaunchTarget) -> [String] {
         var args = target.arguments + ["--profile", profile.name] + operation.arguments + mic.arguments
+        if operation.summarizes, let summaryModel, summaryModel != profile.summary.model { args += ["--summary-model", summaryModel] }
         if let duration { args += ["--duration", duration] }
         let n = name.trimmingCharacters(in: .whitespaces)
         if !n.isEmpty { args += ["--name", n] }
@@ -319,6 +344,11 @@ public struct RecordLauncher: Sendable {
             case .field(.name):
                 nameBeforeEdit = name
                 editingName = true
+            case .field(.summaryModel):
+                picker = Picker(field: .summaryModel, index: currentIndex(of: .summaryModel))
+                // 取得に失敗していたら、開き直したときに取り直す
+                if case .failed(_)? = modelList { modelLists[modelListKey] = nil }
+                if let a = modelLoadAction() { return a }
             case .field(let f):
                 picker = Picker(field: f, index: currentIndex(of: f))
             case .target:
@@ -401,6 +431,14 @@ public struct RecordLauncher: Sendable {
         switch field {
         case .profile: return profiles.map(Self.describe)
         case .operation: return operations.map(\.label)
+        case .summaryModel:
+            var list = modelChoices.map(describeModel)
+            switch modelList {
+            case .loading?, nil: list.append(tr("Getting the available models…", ja: "使えるモデルを取得しています…"))
+            case .failed(let m)?: list.append(tr("✗ Cannot get the models: \(m)", ja: "✗ モデルの一覧を取得できません: \(m)"))
+            case .loaded(_)?: break
+            }
+            return list
         case .mic: return LaunchMic.allCases.map(\.label)
         case .duration: return Self.durations.map(Self.describeDuration)
         case .name: return []
@@ -411,6 +449,7 @@ public struct RecordLauncher: Sendable {
         switch field {
         case .profile: return profileIndex
         case .operation: return operations.firstIndex(of: operation) ?? 0
+        case .summaryModel: return modelChoices.firstIndex(of: summaryModel) ?? 0
         case .mic: return LaunchMic.allCases.firstIndex(of: mic) ?? 0
         case .duration: return durationIndex
         case .name: return 0
@@ -418,15 +457,20 @@ public struct RecordLauncher: Sendable {
     }
 
     private mutating func select(_ field: Field, _ index: Int) {
-        let count = options(for: field).count
-        guard count > 0 else { return }
+        // 要約モデルの「取得中」などの行は選べない
+        let count = field == .summaryModel ? modelChoices.count : options(for: field).count
+        guard count > 0, field != .summaryModel || index < count else { return }
         let i = min(max(0, index), count - 1)
         switch field {
         case .profile:
+            let before = modelListKey
             profileIndex = i
             operations = LaunchOperation.available(for: profile)
             if !operations.contains(operation) { operation = LaunchOperation.preferred(for: profile) }
+            // 取得先が変わったら、プロファイルの既定のモデルに戻す
+            if modelListKey != before || !modelChoices.contains(summaryModel) { summaryModel = nil }
         case .operation: operation = operations[i]
+        case .summaryModel: summaryModel = modelChoices[i]
         case .mic: mic = LaunchMic.allCases[i]
         case .duration: durationIndex = i
         case .name: break
@@ -435,7 +479,7 @@ public struct RecordLauncher: Sendable {
 
     /// ←→ で前後の値に切り替える（端で反対側に回る）
     private mutating func change(_ field: Field, by delta: Int) {
-        let count = options(for: field).count
+        let count = field == .summaryModel ? modelChoices.count : options(for: field).count
         guard count > 1 else { return }
         select(field, ((currentIndex(of: field) + delta) % count + count) % count)
     }
@@ -486,8 +530,8 @@ public struct RecordLauncher: Sendable {
             for l in DisplayWidth.wrap(text, w - 1).prefix(3) { add(" " + l, notice.isError ? .selected : .heading) }
         }
         add("")
-        let labelWidth = max(Field.allCases.map { DisplayWidth.of(label(of: $0)) }.max() ?? 0, 8)
-        for (i, f) in Field.allCases.enumerated() {
+        let labelWidth = max(fields.map { DisplayWidth.of(label(of: $0)) }.max() ?? 0, 8)
+        for (i, f) in fields.enumerated() {
             let selected = cursor == i
             let l = label(of: f)
             let pad = String(repeating: " ", count: labelWidth - DisplayWidth.of(l))
@@ -565,6 +609,7 @@ public struct RecordLauncher: Sendable {
         switch field {
         case .profile: return tr("Profile", ja: "プロファイル")
         case .operation: return tr("Operation", ja: "操作")
+        case .summaryModel: return tr("Summary model", ja: "要約モデル")
         case .mic: return tr("Mic", ja: "マイク")
         case .duration: return tr("Auto stop", ja: "自動停止")
         case .name: return tr("Session name", ja: "セッション名")
@@ -575,10 +620,72 @@ public struct RecordLauncher: Sendable {
         switch field {
         case .profile: return Self.describe(profile)
         case .operation: return operation.label
+        case .summaryModel: return describeModel(summaryModel)
         case .mic: return mic.label
         case .duration: return Self.describeDuration(duration)
         case .name: return name
         }
+    }
+
+    /// 要約に実際に使うモデル
+    public var effectiveSummaryModel: String { summaryModel ?? profile.summary.model }
+
+    /// 選択肢の値（nil はプロファイルの既定）。一覧を取得したら、既定と同じものを除いて後ろに並べる
+    var modelChoices: [String?] {
+        var list: [String?] = [nil]
+        if case .loaded(let models)? = modelList {
+            list += models.map(\.id).filter { $0 != profile.summary.model }.map { Optional($0) }
+        }
+        // 一覧にないモデルを選んでいた場合（取得し直して消えたなど）も残す
+        if let summaryModel, !list.contains(summaryModel) { list.append(summaryModel) }
+        return list
+    }
+
+    func describeModel(_ model: String?) -> String {
+        guard let model else {
+            return tr("\(profile.summary.model) (profile default)", ja: "\(profile.summary.model)（プロファイルの既定）")
+        }
+        if case .loaded(let models)? = modelList, let name = models.first(where: { $0.id == model })?.name,
+           !name.isEmpty, name.lowercased() != model.lowercased() {
+            return "\(model)  (\(name))"
+        }
+        return model
+    }
+
+    /// 今のプロファイルの一覧の取得先
+    public var modelListKey: String { SummaryModelCatalog.cacheKey(for: profile) }
+    public var modelList: ModelList? { modelLists[modelListKey] }
+
+    /// 要約モデルの行にいて、一覧をまだ取得していなければ、取得を始める（取得中にする）
+    public mutating func modelLoadAction() -> Action? {
+        guard operation.summarizes, profile.summaryProvider != "none", modelList == nil else { return nil }
+        modelLists[modelListKey] = .loading
+        return .loadModels(key: modelListKey, profile: profile)
+    }
+
+    /// 要約モデルの行にカーソルが来たときに、一覧の取得を始める（取得済み・取得中なら nil）
+    public mutating func pendingModelLoad() -> Action? {
+        guard row == .field(.summaryModel) else { return nil }
+        return modelLoadAction()
+    }
+
+    /// 取得した一覧（または失敗の理由）を入れる
+    public mutating func setModelList(key: String, _ result: Result<[SummaryModelOption], Error>) {
+        switch result {
+        case .success(let models): modelLists[key] = .loaded(models)
+        case .failure(let e): modelLists[key] = .failed(Self.describeModelError(e))
+        }
+        if var p = picker, p.field == .summaryModel {
+            p.index = min(p.index, max(0, options(for: .summaryModel).count - 1))
+            picker = p
+        }
+    }
+
+    static func describeModelError(_ e: Error) -> String {
+        let text: String
+        if let c = e as? CappyError { text = c.message } else { text = "\(e)" }
+        let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
+        return DisplayWidth.of(line) > 80 ? DisplayWidth.fit(line, 80) : line
     }
 
     static func describe(_ p: Profile) -> String {

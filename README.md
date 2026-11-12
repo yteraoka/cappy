@@ -149,6 +149,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 
    Profile         default  (Gemini, ja-JP)
    Operation       Record → transcribe → summarize
+   Summary model   gemini-4-argon (profile default)
    Mic             On
    Auto stop       None (Ctrl-C to stop)
    Session name    weekly-sync
@@ -164,6 +165,10 @@ cappy completion zsh > ~/.zfunc/_cappy
 
 - In the upper part, choose a row with ↑↓ and press Enter to open a window with the choices, then choose with ↑↓ and Enter (Esc cancels; ✓ marks the current value). ←→ also switches to the previous / next value directly. On the session name row, press Enter to start editing, then Enter to finish or Esc to cancel.
 - The operation is one of "Record only", "Record → transcribe", "Record → transcribe → summarize", "Live transcription" and "Live transcription → summarize". Operations that the profile cannot do (`transcribe.provider` / `summary.provider` is `none`) are not shown. The initial choice goes up to the summary when `summary.auto` is true, otherwise up to the transcription.
+- Operations that summarize show a "Summary model" row. Moving to that row fetches the available models with the API (while it is loading, you can still start recording with the profile's default model). The chosen model is passed with `cappy record --summary-model`; the config file is not changed.
+  - Vertex AI (`summary.provider = "google"`): Gemini and Claude in Model Garden (`publishers/google/models` and `publishers/anthropic/models`). Embedding, image, audio and transcription models are left out. Whether the model is enabled in the project or available in `summary.region` is not checked, so Claude still has to be enabled in Model Garden.
+  - Bedrock (`summary.provider = "aws"`): `ListFoundationModels` (text output, ACTIVE) and `ListInferenceProfiles`. When `summary.region` is a scope such as `global` / `jp`, the models with an inference profile in that scope; when it is a Region name, the models that can be called on demand in that Region. IAM must allow `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles`.
+  - When fetching fails, the reason is shown in the list. Opening the choices again with Enter fetches again.
 - The lower part lists the apps that use audio: those playing first, then apps in `/Applications` and the like, then system daemons (dimmed). It is refreshed every 1.5 seconds. Helpers such as `com.google.Chrome.helper` are grouped under the parent bundle ID (`--app` is a prefix match, so the helpers are recorded too).
 - Choose an app and press Enter to start recording with those settings. The screen stays full-screen during the recording, conversion, transcription and summary, and shows the choices, the level meters or progress, and the messages (including live transcription captions). The equivalent `cappy record ...` is shown first.
 - The keys while recording are the same as `record` (Space mutes / unmutes the mic, Enter adds a marker; type some text first to give it a label).
@@ -226,6 +231,7 @@ When `cappy tui` quits, the messages it showed (for all the recordings) are writ
 | `--transcribe` (`--mix`, `--format`) | Transcribe after recording |
 | `--live` | Transcribe in real time while recording (`transcribe.live_model` with Gemini, or Amazon Transcribe Streaming when `transcribe.provider = "aws"`). Shows final results and saves them to `live-transcript.{md,json,srt}` |
 | `--summarize` / `--no-summarize` | Summarize after `--transcribe` / `--live` (default: `summary.auto` of the profile) |
+| `--summary-model <id>` | Model for the summary (default: `summary.model` of the profile; same values as `summarize --model`) |
 | `--profile <name>` | Config profile |
 | `--quiet` | Do not show the recording notice |
 | `-v, --verbose` | Also show dropped IOProc buffers and ring buffer usage |

@@ -149,6 +149,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 
    プロファイル    default  (Gemini, ja-JP)
    操作            録音 → 文字起こし → 要約
+   要約モデル      gemini-4-argon（プロファイルの既定）
    マイク          オン
    自動停止        しない（Ctrl-C で停止）
    セッション名    weekly-sync
@@ -164,6 +165,10 @@ cappy completion zsh > ~/.zfunc/_cappy
 
 - 上の欄は ↑↓ で行を選び、Enter で選択肢のウィンドウを開いて ↑↓ と Enter で選びます（Esc で取り消し、✓ が今の値）。←→ で前後の値に直接切り替えることもできます。セッション名は、その行で Enter を押すと編集が始まり、Enter で確定、Esc で取り消します。
 - 操作は「録音のみ」「録音 → 文字起こし」「録音 → 文字起こし → 要約」「リアルタイム文字起こし」「リアルタイム文字起こし → 要約」から選びます。プロファイルの `transcribe.provider` / `summary.provider` が `none` なら、使えないものは出しません。初期値は `summary.auto` が true なら要約まで、それ以外は文字起こしまでです。
+- 要約まで行う操作では「要約モデル」の行が出ます。その行に移ると、使えるモデルの一覧を API で取得します（取得中も、プロファイルの既定のモデルのまま録音を始められます）。選んだモデルは `cappy record --summary-model` で渡し、設定ファイルは変えません。
+  - Vertex AI（`summary.provider = "google"`）: Model Garden の Gemini と Claude（`publishers/google/models`・`publishers/anthropic/models`）。埋め込み・画像・音声・文字起こし用のモデルは除きます。プロジェクトで有効にしているか、`summary.region` で使えるかまでは確かめないので、Claude は Model Garden での有効化が必要です。
+  - Bedrock（`summary.provider = "aws"`）: `ListFoundationModels`（出力がテキストで ACTIVE のもの）と `ListInferenceProfiles`。`summary.region` が `global` / `jp` などの範囲ならその範囲の推論プロファイルがあるモデル、リージョン名ならそのリージョンでオンデマンドで呼べるモデルです。IAM で `bedrock:ListFoundationModels` と `bedrock:ListInferenceProfiles` が必要です。
+  - 取得に失敗したときは一覧に理由を表示します。もう一度 Enter で選択肢を開くと取り直します。
 - 下の欄は音声を使うアプリの一覧です。出力中のもの、`/Applications` などのアプリ、システムのデーモン（薄く表示）の順に並べ、1.5 秒ごとに更新します。`com.google.Chrome.helper` のようなヘルパーは親の bundle ID の行にまとめます（`--app` は前方一致なのでヘルパーも録音されます）。
 - アプリを選んで Enter を押すと、その設定で録音を始めます。録音・変換・文字起こし・要約の間も全画面のままで、選んだ内容、レベルメーターや進み具合、メッセージ（リアルタイム文字起こしの字幕を含む）を表示します。最初に同じ内容の `cappy record ...` を表示します。
 - 録音中のキーは `record` と同じです（Space でマイクのミュート / 解除、Enter でマーカー。先に文字を入力するとラベル付き）。
@@ -226,6 +231,7 @@ Enter で操作のメニューを開きます。よく使う操作は一覧で�
 | `--transcribe` (`--mix`, `--format`) | 録音後に続けて文字起こしする |
 | `--live` | 録音しながらリアルタイムで文字起こしする（Gemini の `transcribe.live_model`。`transcribe.provider = "aws"` なら Amazon Transcribe Streaming）。確定した発言を表示し、`live-transcript.{md,json,srt}` に保存する |
 | `--summarize` / `--no-summarize` | `--transcribe` / `--live` の後に続けて要約する（既定はプロファイルの `summary.auto`） |
+| `--summary-model <id>` | 要約に使うモデル（既定はプロファイルの `summary.model`。`summarize --model` と同じ値） |
 | `--profile <name>` | 設定プロファイル |
 | `--quiet` | 録音の告知メッセージを出さない |
 | `-v, --verbose` | IOProc のバッファ欠落数やリングバッファの使用率も出す |
