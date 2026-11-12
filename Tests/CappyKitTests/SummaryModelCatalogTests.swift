@@ -84,6 +84,43 @@ import Testing
         #expect(stub.calls.count == 1) // 推論プロファイルは取得しない
     }
 
+    @Test func keepsOnlyTheModelsThatCanBeUsed() async throws {
+        let models = ["ok-1", "denied", "not-found", "bad-id", "throttled", "ok-2", "network"].map { SummaryModelOption(id: $0) }
+        let list = try await SummaryModelCatalog.checkAvailable(models, concurrency: 3) { id in
+            switch id {
+            case "denied": throw AWSAPIError(httpStatus: 403, code: "AccessDeniedException", message: "no access")
+            case "not-found": throw GoogleAPIError.from(.json(["error": ["code": 404, "message": "not found"]], status: 404))
+            case "bad-id": throw AWSAPIError(httpStatus: 400, code: "ValidationException", message: "The provided model identifier is invalid")
+            case "throttled": throw AWSAPIError(httpStatus: 429, code: "ThrottlingException", message: "slow down")
+            case "network": throw URLError(.timedOut)
+            default: return
+            }
+        }
+        #expect(list.map(\.id) == ["ok-1", "throttled", "ok-2", "network"])
+        #expect(list.map(\.verified) == [true, false, true, false])
+    }
+
+    @Test func authenticationErrorFailsTheWholeList() async {
+        await #expect(throws: AWSAPIError.self) {
+            _ = try await SummaryModelCatalog.checkAvailable([SummaryModelOption(id: "a"), SummaryModelOption(id: "b")]) { _ in
+                throw AWSAPIError(httpStatus: 401, code: nil, message: "expired")
+            }
+        }
+    }
+
+    @Test func vertexClaudeAccessUsesTheModelEndpoint() async throws {
+        let stub = StubTransport { call in
+            if call.url.contains("claude-opus-5-5") {
+                return .json(["type": "error", "error": ["type": "invalid_request_error", "message": "max_tokens: must be greater than 0"]], status: 400)
+            }
+            return .json(["error": ["code": 403, "message": "Permission denied on resource project proj.", "status": "PERMISSION_DENIED"]], status: 403)
+        }
+        let client = ClaudeVertexClient(projectID: "proj", region: "global", auth: StaticToken(), transport: stub, retry: .none)
+        try await client.checkModelAccess(model: "claude-opus-5-5")
+        #expect(stub.calls[0].url == "https://aiplatform.googleapis.com/v1/projects/proj/locations/global/publishers/anthropic/models/claude-opus-5-5:rawPredict")
+        await #expect(throws: GoogleAPIError.self) { try await client.checkModelAccess(model: "claude-opus-4-8") }
+    }
+
     @Test func cacheKeyFollowsTheEndpoint() {
         var a = Profile(name: "a")
         a.summary.provider = "aws"
@@ -135,15 +172,15 @@ import Testing
         // 取得中も既定のモデルで始められ、取得中の行は選べない
         #expect(l.handle(.enter) == nil)
         #expect(L10n.$override.withValue(.en) { l.options(for: .summaryModel) }
-            == ["gemini-4-argon (profile default)", "Getting the available models…"])
+            == ["gemini-4-argon (profile default)", "Checking the available models…"])
         _ = l.handle(.down)
         _ = l.handle(.enter)
         #expect(l.summaryModel == nil)
 
         l.setModelList(key: key, .success([SummaryModelOption(id: "gemini-4-argon"), SummaryModelOption(id: "claude-opus-5-5", name: "Claude Opus 5.5"),
-                                           SummaryModelOption(id: "gemini-3.5-flash")]))
+                                           SummaryModelOption(id: "gemini-3.5-flash", verified: false)]))
         #expect(L10n.$override.withValue(.en) { l.options(for: .summaryModel) }
-            == ["gemini-4-argon (profile default)", "claude-opus-5-5  (Claude Opus 5.5)", "gemini-3.5-flash"])
+            == ["gemini-4-argon (profile default)", "claude-opus-5-5  (Claude Opus 5.5)", "gemini-3.5-flash  ? not verified"])
         _ = l.handle(.right)
         #expect(l.summaryModel == "claude-opus-5-5")
         #expect(l.arguments(for: zoom) == ["--app", "us.zoom.xos", "--profile", "default", "--transcribe", "--summarize",

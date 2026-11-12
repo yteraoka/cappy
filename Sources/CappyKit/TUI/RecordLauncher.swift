@@ -431,7 +431,7 @@ public struct RecordLauncher: Sendable {
         case .summaryModel:
             var list = modelChoices.map { describeModel($0) }
             switch modelList {
-            case .loading?, nil: list.append(tr("Getting the available models…", ja: "使えるモデルを取得しています…"))
+            case .loading?, nil: list.append(tr("Checking the available models…", ja: "使えるモデルを確認しています…"))
             case .failed(let m)?: list.append(tr("✗ Cannot get the models: \(m)", ja: "✗ モデルの一覧を取得できません: \(m)"))
             case .loaded(_)?: break
             }
@@ -642,11 +642,11 @@ public struct RecordLauncher: Sendable {
         guard let model else {
             return tr("\(profile.summary.model) (profile default)", ja: "\(profile.summary.model)（プロファイルの既定）")
         }
-        if case .loaded(let models)? = modelList, let name = models.first(where: { $0.id == model })?.name,
-           !name.isEmpty, name.lowercased() != model.lowercased() {
-            return "\(model)  (\(name))"
-        }
-        return model
+        guard case .loaded(let models)? = modelList, let m = models.first(where: { $0.id == model }) else { return model }
+        var text = model
+        if let name = m.name, !name.isEmpty, name.lowercased() != model.lowercased() { text += "  (\(name))" }
+        if !m.verified { text += tr("  ? not verified", ja: "  ？未確認") }
+        return text
     }
 
     /// 今のプロファイルの一覧の取得先

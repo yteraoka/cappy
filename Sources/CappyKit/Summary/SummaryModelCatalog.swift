@@ -6,10 +6,13 @@ public struct SummaryModelOption: Equatable, Sendable {
     public var id: String
     /// 表示名（API が返したもの。なければ nil）
     public var name: String?
+    /// 使えることを確かめたか（false: 一時的なエラーなどで確かめられなかった）
+    public var verified: Bool
 
-    public init(id: String, name: String? = nil) {
+    public init(id: String, name: String? = nil, verified: Bool = true) {
         self.id = id
         self.name = name
+        self.verified = verified
     }
 }
 
@@ -21,7 +24,13 @@ public struct SummaryModelOption: Equatable, Sendable {
 /// - Bedrock: `ListFoundationModels`（出力がテキストのモデル）と `ListInferenceProfiles`（システム定義の推論プロファイル）。
 ///   summary.region が推論プロファイルの範囲（global / jp など）なら、その範囲の推論プロファイルがあるモデル、
 ///   リージョン名なら、そのリージョンでオンデマンドで呼べるモデル
+///
+/// 一覧には申請・有効化をしていないモデル（Anthropic のモデルなど）も含まれるため、
+/// 各モデルを課金されない方法で呼んでみて（`checkAvailable`）、使えるものだけに絞る
 public enum SummaryModelCatalog {
+    /// モデルを使えるかの確認（使えなければ throw）
+    public typealias AccessCheck = @Sendable (String) async throws -> Void
+
     /// 一覧の取得先を区別するキー（プロファイルが違っても取得先が同じなら同じ一覧を使う）
     public static func cacheKey(for profile: Profile) -> String {
         switch profile.summaryProvider {
@@ -38,9 +47,23 @@ public enum SummaryModelCatalog {
     public static func list(profile: Profile, transport: HTTPTransport = URLSessionTransport()) async throws -> [SummaryModelOption] {
         switch profile.summaryProvider {
         case "google":
+            guard let project = profile.summaryProjectID.flatMap({ $0.isEmpty ? nil : $0 }) else {
+                throw CappyError.usage(
+                    tr("The Google Cloud project for summaries is not set", ja: "要約に使う Google Cloud プロジェクトが設定されていません"),
+                    hint: tr("Set project_id in [profiles.\(profile.name).google] or [profiles.\(profile.name).summary]", ja: "[profiles.\(profile.name).google] の project_id、または [profiles.\(profile.name).summary] の project_id を設定してください"))
+            }
             let auth = try ApplicationDefaultCredentials.load(transport: transport)
-            let project = profile.summaryProjectID.flatMap { $0.isEmpty ? nil : $0 }
-            return try await listVertex(userProject: project, auth: auth, transport: transport)
+            let models = try await listVertex(userProject: project, auth: auth, transport: transport)
+            let region = profile.summary.region, effort = profile.summary.effort
+            let claude = ClaudeVertexClient(projectID: project, region: region, auth: auth, transport: transport, retry: .none)
+            let gemini = GeminiVertexClient(projectID: project, region: region, auth: auth, transport: transport, retry: .none)
+            return try await checkAvailable(models) { model in
+                if SummaryModelFamily.of(model) == .claude {
+                    try await claude.checkModelAccess(model: model)
+                } else {
+                    try await gemini.checkAccess(model: model, effort: effort)
+                }
+            }
         case "aws":
             let aws = profile.aws ?? AWSSettings()
             let credentials = try AWSCredentialsProvider.resolve(profile: aws.profile, region: aws.region, transport: transport)
@@ -50,7 +73,12 @@ public enum SummaryModelCatalog {
                     tr("The AWS region for Bedrock is not set", ja: "Bedrock を呼び出す AWS のリージョンが設定されていません"),
                     hint: tr("Set region in [profiles.\(profile.name).aws], AWS_REGION, or region in the AWS profile", ja: "[profiles.\(profile.name).aws] の region、AWS_REGION、AWS のプロファイルの region のいずれかを設定してください"))
             }
-            return try await listBedrock(region: region, routing: routing, credentials: credentials, transport: transport)
+            let models = try await listBedrock(region: region, routing: routing, credentials: credentials, transport: transport)
+            let client = BedrockSummaryClient(region: region, routing: routing, credentials: credentials, transport: transport, retry: .none)
+            let effort = profile.summary.effort
+            return try await checkAvailable(models) { model in
+                try await client.checkAccess(model: model, effort: effort)
+            }
         default:
             return []
         }
@@ -203,6 +231,67 @@ public enum SummaryModelCatalog {
         if model.hasPrefix("anthropic.") { model = String(model.dropFirst("anthropic.".count)) }
         guard let family = SummaryModelFamily.of(model), family != .gemini else { return nil }
         return SummaryModelOption(id: model, name: name)
+    }
+
+    // MARK: - 使えるかの確認
+
+    /// 確認の結果
+    enum Availability: Equatable {
+        case available
+        /// 申請・有効化していない、リージョンで使えないなど
+        case unavailable
+        /// 一時的なエラー（429 / 5xx / 通信）で確かめられなかった
+        case unknown
+    }
+
+    /// エラーを分類する。認証の誤り（401）はどのモデルでも同じなので、一覧の取得の失敗として投げ直す
+    static func classify(_ error: Error) throws -> Availability {
+        let status: Int?
+        if let e = error as? AWSAPIError { status = e.httpStatus }
+        else if let e = error as? GoogleAPIError { status = e.httpStatus }
+        else { status = nil }
+        switch status {
+        case 401?: throw error
+        case 400?, 403?, 404?: return .unavailable
+        default:
+            if error is CappyError { return .unavailable } // このクライアントでは扱えないモデル
+            return .unknown
+        }
+    }
+
+    /// 各モデルを確かめて、使えるものだけを返す（順番はそのまま）。
+    /// 確かめられなかったものは verified = false で残す
+    public static func checkAvailable(_ models: [SummaryModelOption], concurrency: Int = 8,
+                                      check: @escaping AccessCheck) async throws -> [SummaryModelOption] {
+        var results = [Availability?](repeating: nil, count: models.count)
+        try await withThrowingTaskGroup(of: (Int, Availability).self) { group in
+            var next = 0
+            while next < models.count {
+                // 同時に確かめる数を concurrency までにする
+                if next >= concurrency, let done = try await group.next() { results[done.0] = done.1 }
+                let i = next, id = models[i].id
+                next += 1
+                group.addTask {
+                    do {
+                        try await check(id)
+                        return (i, Availability.available)
+                    } catch {
+                        return (i, try SummaryModelCatalog.classify(error))
+                    }
+                }
+            }
+            while let done = try await group.next() { results[done.0] = done.1 }
+        }
+        return models.enumerated().compactMap { i, m in
+            switch results[i] {
+            case .available?: return m
+            case .unknown?:
+                var u = m
+                u.verified = false
+                return u
+            case .unavailable?, nil: return nil
+            }
+        }
     }
 
     // MARK: - 共通

@@ -166,8 +166,9 @@ cappy completion zsh > ~/.zfunc/_cappy
 - 上の欄は ↑↓ で行を選び、Enter で選択肢のウィンドウを開いて ↑↓ と Enter で選びます（Esc で取り消し、✓ が今の値）。←→ で前後の値に直接切り替えることもできます。セッション名は、その行で Enter を押すと編集が始まり、Enter で確定、Esc で取り消します。
 - 操作は「録音のみ」「録音 → 文字起こし」「録音 → 文字起こし → 要約」「リアルタイム文字起こし」「リアルタイム文字起こし → 要約」から選びます。プロファイルの `transcribe.provider` / `summary.provider` が `none` なら、使えないものは出しません。初期値は `summary.auto` が true なら要約まで、それ以外は文字起こしまでです。
 - 要約まで行う操作では「要約モデル」の行が出ます。その行に移ると、使えるモデルの一覧を API で取得します（取得中も、プロファイルの既定のモデルのまま録音を始められます）。選んだモデルは `cappy record --summary-model` で渡し、設定ファイルは変えません。
-  - Vertex AI（`summary.provider = "google"`）: Model Garden の Gemini と Claude（`publishers/google/models`・`publishers/anthropic/models`）。埋め込み・画像・音声・文字起こし用のモデルは除きます。プロジェクトで有効にしているか、`summary.region` で使えるかまでは確かめないので、Claude は Model Garden での有効化が必要です。
+  - Vertex AI（`summary.provider = "google"`）: Model Garden の Gemini と Claude（`publishers/google/models`・`publishers/anthropic/models`）。埋め込み・画像・音声・文字起こし用のモデルは除きます。
   - Bedrock（`summary.provider = "aws"`）: `ListFoundationModels`（出力がテキストで ACTIVE のもの）と `ListInferenceProfiles`。`summary.region` が `global` / `jp` などの範囲ならその範囲の推論プロファイルがあるモデル、リージョン名ならそのリージョンでオンデマンドで呼べるモデルです。IAM で `bedrock:ListFoundationModels` と `bedrock:ListInferenceProfiles` が必要です。
+  - 一覧には申請・有効化していないモデル（Anthropic のモデルなど）も含まれるため、各モデルを課金されない方法で呼んでみて、このプロジェクト / アカウントと `summary.region` で使えるものだけを出します。Gemini はトークン数の確認、Claude on Vertex AI はモデルのエンドポイントへの `max_tokens = 0` の呼び出し、Bedrock は `cappy doctor` と同じ確認です。403・404・モデル ID の誤りなら出さず、一時的なエラー（429・5xx・通信）で確かめられなかったものは「？未確認」を付けて出します。モデルの数だけ（8 件ずつ並行して）リクエストを送るので、一覧が出るまで数秒かかることがあります。
   - 取得に失敗したときは一覧に理由を表示します。もう一度 Enter で選択肢を開くと取り直します。
 - 下の欄は音声を使うアプリの一覧です。出力中のもの、`/Applications` などのアプリ、システムのデーモン（薄く表示）の順に並べ、1.5 秒ごとに更新します。`com.google.Chrome.helper` のようなヘルパーは親の bundle ID の行にまとめます（`--app` は前方一致なのでヘルパーも録音されます）。
 - アプリを選んで Enter を押すと、その設定で録音を始めます。録音・変換・文字起こし・要約の間も全画面のままで、選んだ内容、レベルメーターや進み具合、メッセージ（リアルタイム文字起こしの字幕を含む）を表示します。最初に同じ内容の `cappy record ...` を表示します。
