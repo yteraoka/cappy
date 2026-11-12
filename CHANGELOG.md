@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.4.0](https://github.com/yteraoka/cappy/compare/v0.3.0...v0.4.0) - 2026-11-12
+
+- 対話で設定ファイルを作る cappy init を追加し、設定を provider（クラウド）と model（何を使うか）に整理する by @yteraoka in https://github.com/yteraoka/cappy/pull/19
+
 ## [v0.3.0](https://github.com/yteraoka/cappy/compare/v0.2.0...v0.3.0) - 2026-11-12
 
 - 録音中にマイクの取り込みを on / off できるようにする（Space キーと cappy mic） by @yteraoka in https://github.com/yteraoka/cappy/pull/16
