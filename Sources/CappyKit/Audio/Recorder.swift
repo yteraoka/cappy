@@ -423,6 +423,15 @@ public final class Recorder: @unchecked Sendable {
                 CappyLog.shared.warning(tr("Low disk space: \(free >> 20) MB", ja: "ディスクの空き容量が少ない: \(free >> 20) MB"))
             }
         }
+        // 出力デバイスのサンプルレートが変わったら、新しいレートで作り直す（トラックの形式がずれないように）
+        if let engine, !rebuildPending {
+            let rate = engine.currentSampleRate
+            if rate > 0, engine.sampleRate > 0, rate != engine.sampleRate {
+                CappyLog.shared.info(tr("The sample rate of the aggregate device changed: \(Int(engine.sampleRate)) → \(Int(rate)) Hz", ja: "集約デバイスのサンプルレートが変わりました: \(Int(engine.sampleRate)) → \(Int(rate)) Hz"))
+                rebuildEngine(reason: "sample_rate_changed")
+                return
+            }
+        }
         // IOProc が止まっていないか（デバイスが消えた場合など）
         if let engine, !rebuildPending {
             let count = engine.io.callbackCount.load(ordering: .relaxed)
