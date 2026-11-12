@@ -1,43 +1,46 @@
 # Example of ~/.config/cappy/config.toml (a Japanese version is in config.example.ja.toml)
+# `cappy init` creates a config file interactively; this file lists all the settings
 # Do not write credentials here (Google uses Application Default Credentials, AWS uses ~/.aws profiles)
+#
+# A profile is made of:
+#   [profiles.<name>]                  language, output directory
+#   [profiles.<name>.google] / .aws    cloud accounts shared by transcription and summary
+#   [profiles.<name>.transcribe]       transcription: provider (which cloud) and model (what to use)
+#   [profiles.<name>.summary]          meeting summary: provider (which cloud) and model (what to use)
 
 [profiles.default]
-provider = "gemini"          # gemini (Vertex AI) / google (Speech-to-Text v2) / transcribe (Amazon Transcribe) / none (record only; nothing is sent)
 language = "ja-JP"           # meeting language; also used for the headings and speaker names in transcript.md and summary.md
 output_dir = "~/Recordings/cappy"
 # disk_warn_mb = 1024        # warn when free space drops below this
 # disk_stop_mb = 300         # stop recording safely below this (exit code 4)
 
-# Common Google Cloud settings (project_id and bucket are also used by gemini), and settings for provider = "google"
+# Google Cloud account (used with provider = "google" for transcription and summary)
 [profiles.default.google]
 project_id = "my-project"
 bucket = "my-cappy-bucket"   # bucket that holds the audio to send temporarily
 delete_remote_after = true   # delete the audio and results in the bucket after transcription
-# The following are used only with provider = "google" (Speech-to-Text v2)
-location = "us"
-model = "chirp_3"
-# word_timestamps = true     # word timestamps (with them, a file is limited to about 20 minutes, so audio is split automatically)
-# chunk_minutes = 19         # chunk length (minutes). Default: 19 / 59 depending on word_timestamps
-# diarization = true         # try speaker diarization on the remote track
-# min_speakers = 1
-# max_speakers = 6
 
-# Transcription with Gemini on Vertex AI (provider = "gemini", record --live)
-[profiles.default.gemini]
-# project_id = "my-project"  # default: google.project_id
-location = "global"          # global / us / eu
-model = "gemini-3.5-transcribe"            # transcription of recorded files
-live_model = "gemini-3.5-transcribe-live"  # live transcription with record --live
-# chunk_minutes = 14         # length of one request (minutes, 1-15). Up to 15 minutes with diarization and timestamps
-# diarization = true         # speaker diarization on the remote track (up to 8 speakers)
-# word_timestamps = true     # word timestamps (without them, segment times are estimated)
-# custom_vocabulary = ["cappy", "Vertex AI"]  # proper nouns and other words to favor (up to 1000)
+# Transcription
+[profiles.default.transcribe]
+provider = "google"          # google / aws / none (record only; nothing is sent)
+# provider = "google": gemini-* uses Gemini on Vertex AI, other models (chirp_3, ...) use Speech-to-Text v2
+model = "gemini-3.5-transcribe"
+location = "global"          # Gemini: global / us / eu (default global). Speech-to-Text: us / eu / asia-northeast1 ... (default us)
+live_model = "gemini-3.5-transcribe-live"  # live transcription with record --live (Gemini Live API) when provider = "google"
+# chunk_minutes = 14         # length of one request (minutes). Gemini: 1-15 (default 14). Speech-to-Text: default 19 / 59 depending on word_timestamps
+# diarization = true         # speaker diarization on the remote track
+# word_timestamps = true     # word timestamps (Gemini: without them, segment times are estimated. Speech-to-Text: with them, a file is limited to about 20 minutes, so audio is split)
+# custom_vocabulary = ["cappy", "Vertex AI"]  # Gemini: proper nouns and other words to favor (up to 1000)
+# min_speakers = 1           # Speech-to-Text
+# max_speakers = 6           # Speech-to-Text, Amazon Transcribe (2-30)
+# vocabulary_name = "cappy-terms"     # Amazon Transcribe: custom vocabulary registered in advance (same Region and language)
+# language_model_name = "my-model"    # Amazon Transcribe: custom language model created in advance
 
-# Meeting summary (Claude / Gemini on Vertex AI). Uses the same ADC as above
+# Meeting summary
 [profiles.default.summary]
-# provider = "vertex"        # vertex / bedrock / none (default: none if provider above is none, otherwise vertex)
+# provider = "google"        # google (Vertex AI) / aws (Amazon Bedrock) / none. Default: transcribe.provider
 # project_id = "my-project"  # default: google.project_id
-region = "global"            # global / us / eu (us / eu restrict where data is processed, about 10% more expensive)
+region = "global"            # google: global / us / eu (us / eu restrict where data is processed, about 10% more expensive)
 model = "gemini-4-argon"     # gemini-* uses Gemini, claude-* uses Claude (e.g. "claude-opus-5-5")
 # fallback_model = "claude-opus-4-8"  # model to retry with when the summary is refused (default: claude-opus-4-8 for Claude, no retry for Gemini; "" disables)
 effort = "high"              # low / medium / high / xhigh / max (deeper is more careful but slower and more expensive; Gemini 3+ maps to thinkingLevel LOW / MEDIUM / HIGH)
@@ -45,37 +48,34 @@ effort = "high"              # low / medium / high / xhigh / max (deeper is more
 auto = false                 # if true, summarize automatically after transcribe (suppress with --no-summarize)
 # instructions_file = "~/.config/cappy/summary-instructions.md"  # extra instructions on how to write the summary
 
-# Common AWS settings (used for transcription with Amazon Transcribe and summaries with Amazon Bedrock)
+# AWS account (used with provider = "aws" for transcription and summary)
 # Do not write credentials; cappy uses the profiles in ~/.aws/config (SSO, access keys, credential_process, ...)
 # [profiles.default.aws]
 # profile = "my-sso-profile"   # default: AWS_PROFILE, then AWS_DEFAULT_PROFILE, then default
 # region = "ap-northeast-1"    # default: AWS_REGION, then AWS_DEFAULT_REGION, then region of the profile
-# bucket = "my-cappy-bucket"   # S3 bucket that holds the audio temporarily with provider = "transcribe" (same Region)
+# bucket = "my-cappy-bucket"   # S3 bucket that holds the audio temporarily for Amazon Transcribe (same Region)
 # delete_remote_after = true   # delete the audio in S3 and the Transcribe job after transcription
 
 # Example: transcribe with Amazon Transcribe and summarize with Claude on Bedrock
 [profiles.aws]
-provider = "transcribe"
 
 [profiles.aws.aws]
 region = "ap-northeast-1"
 bucket = "my-cappy-bucket"
 
-# record --live also uses Amazon Transcribe Streaming (diarization, vocabulary_name and language_model_name apply too)
+# record --live also uses Amazon Transcribe Streaming, with the same settings
 [profiles.aws.transcribe]
+provider = "aws"
 diarization = true           # speaker diarization on the remote track
 max_speakers = 10            # maximum number of speakers (2-30)
-# vocabulary_name = "cappy-terms"     # custom vocabulary registered in advance (same Region and language)
-# language_model_name = "my-model"    # custom language model created in advance
 
 [profiles.aws.summary]
-provider = "bedrock"
-region = "jp"
+# provider = "aws"           # same as transcribe.provider when omitted
+region = "jp"                # inference profile scope: global / jp / us / eu / au / apac, or a Region name (processed only in that Region)
 
-# Example: transcribe with Gemini on Vertex AI and summarize with Claude on Amazon Bedrock
+# Example: transcribe with Gemini on Vertex AI and summarize on Amazon Bedrock
 # Profiles do not inherit settings from other profiles, so the Google Cloud settings for transcription go here too
 [profiles.bedrock]
-provider = "gemini"
 
 [profiles.bedrock.google]
 project_id = "my-project"
@@ -84,24 +84,32 @@ bucket = "my-cappy-bucket"
 [profiles.bedrock.aws]
 region = "ap-northeast-1"
 
+[profiles.bedrock.transcribe]
+provider = "google"
+
 [profiles.bedrock.summary]
-provider = "bedrock"
-region = "jp"                # inference profile scope: global / jp / us / eu / au / apac, or a Region name (processed only in that Region)
+provider = "aws"
+region = "jp"
 model = "claude-opus-5-5"    # default: claude-opus-5-5. A Bedrock model ID such as jp.anthropic.claude-opus-5-5 also works
 # model = "global.moonshotai.kimi-k3.1"  # non-Claude models also work (Kimi K3.1, GLM-5.3 = "global.zai.glm-5.3", ...). Tokyo: global only
 effort = "high"
 
-# Example: separate destinations and output directories per client
+# Example: Speech-to-Text with separate destinations and output directories per client
 [profiles.client-a]
-provider = "google"
 output_dir = "~/Recordings/client-a"
 
 [profiles.client-a.google]
 project_id = "client-a-project"
-location = "eu"
 bucket = "client-a-cappy"
+
+[profiles.client-a.transcribe]
+provider = "google"
+model = "chirp_3"
+location = "eu"
 
 # Meetings whose content must not be sent outside
 [profiles.local-only]
-provider = "none"
 output_dir = "~/Recordings/local-only"
+
+[profiles.local-only.transcribe]
+provider = "none"            # the summary is also none unless summary.provider is set

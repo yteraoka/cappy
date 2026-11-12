@@ -37,11 +37,11 @@ final class FakeSummaryClient: SummaryModelClient, @unchecked Sendable {
         [profiles.other.summary]
         project_id = "llm-project"
 
-        [profiles.local]
+        [profiles.local.transcribe]
         provider = "none"
         """, path: URL(fileURLWithPath: "/tmp/c.toml"))
         let p = try c.profile(named: "default")
-        #expect(p.summaryProvider == "vertex")
+        #expect(p.summaryProvider == "google")
         #expect(p.summaryProjectID == "speech-project")
         #expect(p.summary.region == "us")
         #expect(p.summary.effort == "medium")

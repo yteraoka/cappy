@@ -347,16 +347,22 @@ public final class Transcriber: @unchecked Sendable {
 
 /// プロファイルからプロバイダを作る
 public enum ProviderFactory {
-    public static func make(name: String, profile: Profile, transport: HTTPTransport = URLSessionTransport()) throws -> TranscriptionProvider {
-        switch name {
-        case "gemini":
+    /// - Parameter model: transcribe.model の代わりに使うモデル（cappy transcribe --model）
+    public static func make(service: TranscriptionService, profile: Profile, model: String? = nil,
+                            transport: HTTPTransport = URLSessionTransport()) throws -> TranscriptionProvider {
+        switch service {
+        case .gemini:
+            var settings = profile.gemini
+            if let model { settings.model = model }
             let auth = try ApplicationDefaultCredentials.load(transport: transport)
-            return try GeminiTranscribeProvider(settings: profile.gemini, projectID: profile.geminiProjectID,
+            return try GeminiTranscribeProvider(settings: settings, projectID: profile.google.projectID,
                                                 bucket: profile.google.bucket, auth: auth, transport: transport)
-        case "google":
+        case .speech:
+            var settings = profile.google
+            if let model { settings.model = model }
             let auth = try ApplicationDefaultCredentials.load(transport: transport)
-            return try GoogleSpeechProvider(settings: profile.google, auth: auth, transport: transport)
-        case "transcribe":
+            return try GoogleSpeechProvider(settings: settings, auth: auth, transport: transport)
+        case .amazon:
             let aws = profile.aws ?? AWSSettings()
             let credentials = try AWSCredentialsProvider.resolve(profile: aws.profile, region: aws.region, transport: transport)
             guard let region = credentials.region else {
@@ -364,12 +370,10 @@ public enum ProviderFactory {
                     tr("The AWS region for Amazon Transcribe is not set", ja: "Amazon Transcribe を呼び出す AWS のリージョンが設定されていません"),
                     hint: tr("Set region in [profiles.\(profile.name).aws], AWS_REGION, or region in the AWS profile", ja: "[profiles.\(profile.name).aws] の region、AWS_REGION、AWS のプロファイルの region のいずれかを設定してください"))
             }
-            return try AmazonTranscribeProvider(settings: profile.transcribe, region: region, bucket: aws.bucket,
+            return try AmazonTranscribeProvider(settings: profile.awsTranscribe, region: region, bucket: aws.bucket,
                                                 credentials: credentials, transport: transport)
-        case "none":
+        case .none:
             throw CappyError.usage(tr("Provider is none, so no transcription (recording only)", ja: "プロバイダが none のため、文字起こしは行いません（録音のみ）"))
-        default:
-            throw CappyError.usage(tr("Unsupported provider: \(name) (gemini / google / transcribe / none)", ja: "未対応のプロバイダです: \(name)（gemini / google / transcribe / none）"))
         }
     }
 }

@@ -253,25 +253,24 @@ import Testing
 @Suite struct TranscribeConfigTests {
     @Test func parsesTranscribeAndAWS() throws {
         let c = try CappyConfig.parse("""
-        [profiles.a]
-        provider = "transcribe"
         [profiles.a.aws]
         region = "ap-northeast-1"
         bucket = "my-cappy"
         delete_remote_after = false
         [profiles.a.transcribe]
+        provider = "aws"
         diarization = false
         max_speakers = 5
         vocabulary_name = "terms"
         """, path: URL(fileURLWithPath: "/tmp/x.toml"))
         let p = try c.profile(named: "a")
-        #expect(p.provider == "transcribe")
+        #expect(p.provider == "aws")
         #expect(p.aws == AWSSettings(profile: nil, region: "ap-northeast-1", bucket: "my-cappy", deleteRemoteAfter: false))
-        #expect(p.transcribe.diarization == false)
-        #expect(p.transcribe.maxSpeakers == 5)
-        #expect(p.transcribe.vocabularyName == "terms")
+        #expect(p.awsTranscribe.diarization == false)
+        #expect(p.awsTranscribe.maxSpeakers == 5)
+        #expect(p.awsTranscribe.vocabularyName == "terms")
         #expect(throws: CappyError.self) {
-            try CappyConfig.parse("[profiles.a.transcribe]\nmax_speakers = 31\n", path: URL(fileURLWithPath: "/tmp/x.toml"))
+            try CappyConfig.parse("[profiles.a.transcribe]\nprovider = \"aws\"\nmax_speakers = 31\n", path: URL(fileURLWithPath: "/tmp/x.toml"))
         }
     }
 }

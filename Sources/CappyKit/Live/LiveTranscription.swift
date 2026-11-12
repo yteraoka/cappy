@@ -112,7 +112,7 @@ public final class LiveAudioSink: AudioSink, @unchecked Sendable {
 
 /// リアルタイム文字起こしの接続先
 public struct LiveConfig: Sendable {
-    /// session.json の live.provider（gemini / transcribe）
+    /// session.json の live.provider（gemini / transcribe。設定の provider = "aws" のときは transcribe と記録する）
     public var provider: String
     /// 記録用のモデル名
     public var model: String

@@ -22,7 +22,7 @@ struct Cappy: AsyncParsableCommand {
           4 録音中の I/O エラー  5 文字起こし・要約サービスのエラー
         """),
         version: CappyVersion.current,
-        subcommands: [Record.self, Mic.self, Transcribe.self, Summarize.self, Apps.self, Devices.self, Doctor.self, Recover.self, Completion.self]
+        subcommands: [Init.self, Record.self, Mic.self, Transcribe.self, Summarize.self, Apps.self, Devices.self, Doctor.self, Recover.self, Completion.self]
     )
 }
 

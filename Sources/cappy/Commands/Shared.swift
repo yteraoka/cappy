@@ -4,6 +4,8 @@ import Foundation
 enum TranscribeRunner {
     struct Request {
         var providerName: String?
+        /// transcribe.model の代わりに使うモデル（cappy transcribe --model）
+        var model: String? = nil
         var language: String?
         var mix: Bool
         var formats: [TranscriptFormat]
@@ -13,21 +15,30 @@ enum TranscribeRunner {
 
     static func run(store: SessionStore, profile: Profile, request: Request) async throws {
         let providerName = request.providerName ?? profile.provider
-        if providerName == "none" {
+        guard Profile.knownProviders.contains(providerName) else {
+            throw CappyError.usage(tr("Invalid --provider: \(providerName) (\(Profile.providerList))", ja: "--provider が不正です: \(providerName)（\(Profile.providerList)）"))
+        }
+        // --provider で別のクラウドにしたときは、プロファイルの transcribe.model は使わない
+        let model = request.model ?? (providerName == profile.provider ? profile.transcribeModel : nil)
+        let service = Profile.transcriptionService(provider: providerName, model: model)
+        if service == .none {
             Console.print(tr("Provider is none, so no transcription (recording only)", ja: "プロバイダが none のため、文字起こしは行いません（録音のみ）"))
             return
         }
-        let provider = try ProviderFactory.make(name: providerName, profile: profile)
-        let gemini = providerName == "gemini"
+        if request.model != nil && service == .amazon {
+            throw CappyError.usage(tr("--model can be used only with provider google (Amazon Transcribe has no model to choose)", ja: "--model は provider が google のときだけ使えます（Amazon Transcribe にはモデルの選択がありません）"))
+        }
+        let provider = try ProviderFactory.make(service: service, profile: profile, model: model)
+        let gemini = service == .gemini
         var opts: Transcriber.Options
         if let aws = provider as? AmazonTranscribeProvider {
             opts = Transcriber.Options(
                 language: request.language ?? profile.language,
                 mix: request.mix,
                 formats: request.formats,
-                diarization: profile.transcribe.diarization,
+                diarization: profile.awsTranscribe.diarization,
                 wordTimestamps: true,
-                maxSpeakers: profile.transcribe.maxSpeakers,
+                maxSpeakers: profile.awsTranscribe.maxSpeakers,
                 cleanup: (profile.aws?.deleteRemoteAfter ?? true) && !request.keepRemote,
                 force: request.force,
                 location: aws.region)
@@ -42,7 +53,7 @@ enum TranscribeRunner {
                 maxSpeakers: gemini ? nil : profile.google.maxSpeakers,
                 cleanup: profile.google.deleteRemoteAfter && !request.keepRemote,
                 force: request.force,
-                location: gemini ? profile.gemini.location : (providerName == "google" ? profile.google.location : nil))
+                location: gemini ? profile.gemini.location : profile.google.location)
         }
         opts.pollMax = 300
         if request.mix {
@@ -80,11 +91,11 @@ enum SummarizeRunner {
         guard let family = SummaryModelFamily.of(model) else {
             throw CappyError.usage(tr("Invalid --model: \(model) (a model ID starting with claude- or gemini-, or on Bedrock an ID such as moonshotai.kimi-k3.1)", ja: "--model が不正です: \(model)（claude- または gemini- で始まるモデル ID、Bedrock なら moonshotai.kimi-k3.1 のような ID）"))
         }
-        if profile.summaryProvider == "bedrock" && family == .gemini {
+        if profile.summaryProvider == "aws" && family == .gemini {
             throw CappyError.usage(tr("Invalid --model: \(model) (Gemini models are not available on Bedrock)", ja: "--model が不正です: \(model)（Bedrock では Claude のモデルだけを使えます）"))
         }
-        if profile.summaryProvider == "vertex" && (model.contains("anthropic.") || family == .bedrockChat) {
-            throw CappyError.usage(tr("Invalid --model: \(model) (Bedrock model IDs can be used only with summary.provider = \"bedrock\")", ja: "--model が不正です: \(model)（Bedrock のモデル ID は summary.provider = \"bedrock\" のときだけ使えます）"))
+        if profile.summaryProvider == "google" && (model.contains("anthropic.") || family == .bedrockChat) {
+            throw CappyError.usage(tr("Invalid --model: \(model) (Bedrock model IDs can be used only with summary.provider = \"aws\")", ja: "--model が不正です: \(model)（Bedrock のモデル ID は summary.provider = \"aws\" のときだけ使えます）"))
         }
         let client = try SummaryClientFactory.make(profile: profile)
         let options = Summarizer.Options(

@@ -51,20 +51,24 @@ import Testing
 @Suite struct ConfigTests {
     let specExample = """
     [profiles.default]
-    provider = "google"
     language = "ja-JP"
     output_dir = "~/Recordings/cappy"
 
     [profiles.default.google]
     project_id = "my-project"
-    location = "us"
     bucket = "my-cappy-bucket"
-    model = "chirp_3"
     delete_remote_after = true
 
+    [profiles.default.transcribe]
+    provider = "google"
+    model = "chirp_3"
+    location = "us"
+
     [profiles.client-a]
-    provider = "none"
     output_dir = "/tmp/client-a"
+
+    [profiles.client-a.transcribe]
+    provider = "none"
     """
 
     @Test func parsesSpecExample() throws {
@@ -97,16 +101,17 @@ import Testing
         let c = try CappyConfig.load(from: URL(fileURLWithPath: "/nonexistent/cappy/config.toml"))
         #expect(!c.fileExists)
         let p = try c.profile(named: "default")
-        #expect(p.provider == "gemini")
+        #expect(p.provider == "google")
+        #expect(p.transcriptionService == .gemini)
         #expect(p.google.location == "us")
     }
 
     @Test func invalidTypesAreRejected() {
         #expect(throws: CappyError.self) {
-            try CappyConfig.parse("[profiles.default]\nprovider = 1", path: URL(fileURLWithPath: "/x"))
+            try CappyConfig.parse("[profiles.default.transcribe]\nprovider = 1", path: URL(fileURLWithPath: "/x"))
         }
         #expect(throws: CappyError.self) {
-            try CappyConfig.parse("[profiles.default]\nprovider = \"whisper\"", path: URL(fileURLWithPath: "/x"))
+            try CappyConfig.parse("[profiles.default.transcribe]\nprovider = \"whisper\"", path: URL(fileURLWithPath: "/x"))
         }
         #expect(throws: CappyError.self) {
             try CappyConfig.parse("[profiles.default.google]\ndelete_remote_after = \"yes\"", path: URL(fileURLWithPath: "/x"))
@@ -115,12 +120,14 @@ import Testing
 
     @Test func chunkMinutesOverride() throws {
         let c = try CappyConfig.parse("""
-        [profiles.default.google]
+        [profiles.default.transcribe]
+        model = "chirp_3"
         word_timestamps = false
         """, path: URL(fileURLWithPath: "/x"))
         #expect(try c.profile(named: nil).google.effectiveChunkSeconds == 59 * 60)
         let d = try CappyConfig.parse("""
-        [profiles.default.google]
+        [profiles.default.transcribe]
+        model = "chirp_3"
         chunk_minutes = 10
         """, path: URL(fileURLWithPath: "/x"))
         #expect(try d.profile(named: nil).google.effectiveChunkSeconds == 600)

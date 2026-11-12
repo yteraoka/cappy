@@ -24,7 +24,7 @@ public struct GeminiTranscribeProvider: TranscriptionProvider {
                 concurrency: Int = 3) throws {
         guard let projectID, !projectID.isEmpty else {
             throw CappyError.usage(tr("project_id for Gemini transcription is not set", ja: "Gemini の文字起こしに使う project_id が設定されていません"),
-                                   hint: tr("Set project_id in [profiles.<name>.google] or [profiles.<name>.gemini] of ~/.config/cappy/config.toml", ja: "~/.config/cappy/config.toml の [profiles.<name>.google] か [profiles.<name>.gemini] に project_id を書いてください"))
+                                   hint: tr("Set project_id in [profiles.<name>.google] of ~/.config/cappy/config.toml", ja: "~/.config/cappy/config.toml の [profiles.<name>.google] に project_id を書いてください"))
         }
         guard let bucket, !bucket.isEmpty else {
             throw CappyError.usage(tr("The bucket for the audio is not set", ja: "音声を置く bucket が設定されていません"),

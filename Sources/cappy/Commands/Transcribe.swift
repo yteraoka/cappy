@@ -10,9 +10,13 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: ArgumentHelp(tr("Session directory", ja: "セッションディレクトリ")), completion: .directory)
     var sessionDir: String
 
-    @Option(help: ArgumentHelp(tr("Transcription provider (gemini / google / transcribe / none; default: provider of the profile)", ja: "文字起こしプロバイダ（gemini / google / transcribe / none。既定はプロファイルの provider）")),
+    @Option(help: ArgumentHelp(tr("Cloud to transcribe with (google / aws / none; default: transcribe.provider of the profile)", ja: "文字起こしに使うクラウド（google / aws / none。既定はプロファイルの transcribe.provider）")),
             completion: .list(CompletionCandidates.providers))
     var provider: String?
+
+    @Option(help: ArgumentHelp(tr("Model with provider google: gemini-* uses Gemini on Vertex AI, others (e.g. chirp_3) use Speech-to-Text (default: transcribe.model of the profile)", ja: "provider が google のときのモデル。gemini-* なら Vertex AI の Gemini、それ以外（chirp_3 など）なら Speech-to-Text（既定はプロファイルの transcribe.model）")),
+            completion: .list(CompletionCandidates.transcribeModels))
+    var model: String?
 
     @Option(help: ArgumentHelp(tr("Language code (default: language of the profile, e.g. ja-JP)", ja: "言語コード（既定はプロファイルの language。例: ja-JP）")), completion: .list(CompletionCandidates.languages))
     var language: String?
@@ -61,7 +65,7 @@ struct Transcribe: AsyncParsableCommand {
         defer { sources.forEach { $0.cancel() } }
 
         try await TranscribeRunner.run(store: store, profile: profile, request: .init(
-            providerName: provider, language: language, mix: mix, formats: formats, force: force, keepRemote: keepRemote))
+            providerName: provider, model: model, language: language, mix: mix, formats: formats, force: force, keepRemote: keepRemote))
         if (summarize ?? profile.summary.auto) && (provider ?? profile.provider) != "none" {
             try await SummarizeRunner.run(store: store, profile: profile, request: .init(explicit: summarize == true))
         }

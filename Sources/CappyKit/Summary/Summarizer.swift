@@ -241,7 +241,7 @@ extension Summarizer {
 public enum SummaryClientFactory {
     public static func make(profile: Profile, transport: HTTPTransport = URLSessionTransport()) throws -> SummaryModelClient {
         switch profile.summaryProvider {
-        case "vertex":
+        case "google":
             guard let project = profile.summaryProjectID, !project.isEmpty else {
                 throw CappyError.usage(
                     tr("The Google Cloud project for summaries is not set", ja: "要約に使う Google Cloud プロジェクトが設定されていません"),
@@ -249,7 +249,7 @@ public enum SummaryClientFactory {
             }
             let auth = try ApplicationDefaultCredentials.load(transport: transport)
             return VertexSummaryClient(projectID: project, region: profile.summary.region, auth: auth, transport: transport)
-        case "bedrock":
+        case "aws":
             let aws = profile.aws ?? AWSSettings()
             let credentials = try AWSCredentialsProvider.resolve(profile: aws.profile, region: aws.region, transport: transport)
             let routing = profile.summary.region
@@ -262,7 +262,7 @@ public enum SummaryClientFactory {
         case "none":
             throw CappyError.usage(tr("Summary provider is none, so no summary", ja: "要約のプロバイダが none のため、要約は行いません"))
         default:
-            throw CappyError.usage(tr("Unsupported summary provider: \(profile.summaryProvider) (vertex / bedrock / none)", ja: "未対応の要約プロバイダです: \(profile.summaryProvider)（vertex / bedrock / none）"))
+            throw CappyError.usage(tr("Unsupported summary provider: \(profile.summaryProvider) (google / aws / none)", ja: "未対応の要約プロバイダです: \(profile.summaryProvider)（google / aws / none）"))
         }
     }
 
