@@ -4,15 +4,7 @@ import Foundation
 
 enum Table {
     /// 東アジア文字を 2 桁として幅を数える
-    static func width(_ s: String) -> Int {
-        s.unicodeScalars.reduce(0) { w, u in
-            let v = u.value
-            let wide = (0x1100...0x115F).contains(v) || (0x2E80...0xA4CF).contains(v) || (0xAC00...0xD7A3).contains(v)
-                || (0xF900...0xFAFF).contains(v) || (0xFE30...0xFE4F).contains(v) || (0xFF00...0xFF60).contains(v)
-                || (0xFFE0...0xFFE6).contains(v) || (0x1F300...0x1FAFF).contains(v)
-            return w + (wide ? 2 : 1)
-        }
-    }
+    static func width(_ s: String) -> Int { DisplayWidth.of(s) }
 
     static func render(_ header: [String], _ rows: [[String]]) -> String {
         let all = [header] + rows

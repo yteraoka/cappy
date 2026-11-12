@@ -66,13 +66,29 @@ public final class CappyLog: @unchecked Sendable {
 }
 
 /// ターミナルへの表示（stderr）
+/// Console の出力先を差し替える（cappy tui が画面に表示するため）
+public protocol ConsoleSink: AnyObject, Sendable {
+    func consolePrint(_ message: String)
+    func consoleStatus(_ message: String)
+    func consoleClearStatus()
+}
+
 public enum Console {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var statusLineActive = false
+    nonisolated(unsafe) private static var sink: ConsoleSink?
 
     public static var isTTY: Bool { isatty(STDERR_FILENO) != 0 }
 
+    /// 以後の表示を sink に送る（nil で stderr に戻す）
+    public static func redirect(to s: ConsoleSink?) {
+        lock.withLock { sink = s }
+    }
+
+    private static var currentSink: ConsoleSink? { lock.withLock { sink } }
+
     public static func print(_ message: String) {
+        if let s = currentSink { s.consolePrint(message); return }
         lock.withLock {
             if statusLineActive {
                 FileHandle.standardError.write(Data("\r\u{1B}[2K".utf8))
@@ -84,6 +100,7 @@ public enum Console {
 
     /// 同じ行を上書きするステータス表示（TTY のみ）
     public static func status(_ message: String) {
+        if let s = currentSink { s.consoleStatus(message); return }
         guard isTTY else { return }
         lock.withLock {
             FileHandle.standardError.write(Data("\r\u{1B}[2K\(message)".utf8))
@@ -92,6 +109,7 @@ public enum Console {
     }
 
     public static func clearStatus() {
+        if let s = currentSink { s.consoleClearStatus(); return }
         lock.withLock {
             if statusLineActive {
                 FileHandle.standardError.write(Data("\r\u{1B}[2K".utf8))

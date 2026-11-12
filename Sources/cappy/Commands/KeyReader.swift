@@ -14,8 +14,19 @@ private func restoreSavedTermios() {
     }
 }
 
+/// 録音中のキー入力を止める
+protocol KeyInputStopper: AnyObject {
+    func stop()
+}
+
+/// 録音中のキー入力を外から渡す（cappy tui が自分で読んだ入力を record に渡す）
+protocol RecordKeyInput: KeyInputStopper, Sendable {
+    /// 読み始める。使えなければ false
+    func start(onEvent: @escaping @Sendable (KeyInputParser.Event, String) -> Void) -> Bool
+}
+
 /// 録音中だけ端末を 1 文字ずつ読むモードにして、キー入力を KeyInputParser に渡す
-final class KeyReader: @unchecked Sendable {
+final class KeyReader: KeyInputStopper, @unchecked Sendable {
     private let lock = NSLock()
     private var parser = KeyInputParser()
     private var active = false
