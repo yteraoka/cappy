@@ -13,6 +13,8 @@ struct Record: AsyncParsableCommand {
           cappy record --system --no-mic
 
         Press Enter while recording to add a marker. Type some text before Enter to give the marker a label.
+        Press Space (with nothing typed) to mute / unmute the microphone (also `cappy mic off|on|toggle` from elsewhere).
+        While muted, the mic track is recorded as silence, so sounds picked up while you are muted in the meeting app are not kept.
         Ctrl-C stops recording and creates the files to send. A second Ctrl-C skips the conversion and exits.
         """, ja: """
         例:
@@ -22,6 +24,8 @@ struct Record: AsyncParsableCommand {
           cappy record --system --no-mic
 
         録音中に Enter を押すとマーカー（目印）を記録します。文字を入力してから Enter でラベル付きになります。
+        何も入力していないときに Space を押すとマイクをミュート / 解除します（別のターミナルなどからは `cappy mic off|on|toggle`）。
+        ミュート中はマイクのトラックを無音で記録するため、会議アプリでミュートしている間の音を残さずに済みます。
         Ctrl-C で停止して送信用ファイルまで作成します。2 回目の Ctrl-C で変換を省いて終了します。
         """)
     )
@@ -38,6 +42,9 @@ struct Record: AsyncParsableCommand {
 
     @Flag(name: .customLong("no-mic"), help: ArgumentHelp(tr("Do not record the microphone", ja: "マイクを録音しない")))
     var noMic = false
+
+    @Flag(help: ArgumentHelp(tr("Start with the microphone muted (unmute with Space or `cappy mic on`)", ja: "マイクをミュートした状態で録音を始める（解除は Space か `cappy mic on`）")))
+    var muted = false
 
     @Option(help: ArgumentHelp(tr("Microphone input device UID (default: the system default input; see `cappy devices`)", ja: "マイクの入力デバイス UID（既定はシステムの既定入力。`cappy devices` で確認）")),
             completion: .custom { _, _, _ in CompletionCandidates.microphones() })
@@ -84,6 +91,9 @@ struct Record: AsyncParsableCommand {
         }
         if noMic && mic != nil {
             throw ValidationError(tr("--no-mic cannot be combined with --mic", ja: "--no-mic と --mic は同時に指定できません"))
+        }
+        if noMic && muted {
+            throw ValidationError(tr("--no-mic cannot be combined with --muted", ja: "--no-mic と --muted は同時に指定できません"))
         }
         if mix && !transcribe {
             throw ValidationError(tr("--mix requires --transcribe (after recording, use `cappy transcribe --mix`)", ja: "--mix は --transcribe と一緒に指定してください（録音後なら `cappy transcribe --mix`）"))
@@ -138,7 +148,8 @@ struct Record: AsyncParsableCommand {
         let recorder = Recorder(
             options: RecorderOptions(targets: spec, micEnabled: !noMic, micUID: mic,
                                      diskWarnBytes: Int64(profile.diskWarnMB) << 20,
-                                     diskStopBytes: Int64(profile.diskStopMB) << 20),
+                                     diskStopBytes: Int64(profile.diskStopMB) << 20,
+                                     micMutedAtStart: muted),
             session: store)
 
         let (events, continuation) = AsyncStream<StopEvent>.makeStream()
@@ -169,6 +180,10 @@ struct Record: AsyncParsableCommand {
             throw error
         }
 
+        let micControl = MicMuteController(recorder: recorder)
+        micControl.start(session: dir, name: name)
+        defer { micControl.stop() }
+
         let sleepDone = DispatchSemaphore(value: 0)
         let sleepWatcher = SleepWatcher {
             continuation.yield(.stop("sleep"))
@@ -179,7 +194,16 @@ struct Record: AsyncParsableCommand {
         Console.print(tr("Recording started: \(dir.path)", ja: "録音を開始しました: \(dir.path)"))
         let trackList = store.metadata.tracks.map { tr("\($0.id.displayName) (\($0.id.rawValue))", ja: "\($0.id.displayName)（\($0.id.rawValue)）") }
             .joined(separator: tr(", ", ja: "・"))
-        Console.print(tr("Tracks: \(trackList)  Stop: Ctrl-C\(isatty(STDIN_FILENO) != 0 ? "  Marker: Enter" : "")", ja: "トラック: \(trackList)  停止: Ctrl-C\(isatty(STDIN_FILENO) != 0 ? "  マーカー: Enter" : "")"))
+        let statusLine = StatusLine()
+        let keys = startKeyReader(recorder, micControl: micControl, statusLine: statusLine)
+        defer { keys?.stop() }
+        let tty = keys != nil
+        let muteKey = tty && micControl.hasMic
+        Console.print(tr("Tracks: \(trackList)  Stop: Ctrl-C\(muteKey ? "  Mic mute: Space" : "")\(tty ? "  Marker: Enter (type a label first if you like)" : "")",
+                         ja: "トラック: \(trackList)  停止: Ctrl-C\(muteKey ? "  マイクのミュート: Space" : "")\(tty ? "  マーカー: Enter（先に文字を入力するとラベル付き）" : "")"))
+        if recorder.isMicMuted {
+            Console.print(tr("🔇 The mic is muted. Unmute: \(muteKey ? "Space or " : "")`cappy mic on`", ja: "🔇 マイクはミュート中です。解除: \(muteKey ? "Space か " : "")`cappy mic on`"))
+        }
 
         if let maxDuration {
             Task {
@@ -187,8 +211,7 @@ struct Record: AsyncParsableCommand {
                 continuation.yield(.stop("duration"))
             }
         }
-        let statusTimer = startStatusLine(recorder)
-        startMarkerReader(recorder)
+        let statusTimer = startStatusLine(recorder, statusLine)
 
         // 停止要因を待つ
         var fatal: CappyError?
@@ -202,6 +225,7 @@ struct Record: AsyncParsableCommand {
         }
         interrupts.setPhase(.finalizing)
         statusTimer.cancel()
+        keys?.stop()
         Console.clearStatus()
         Console.print(reason == "sleep" ? tr("Stopping the recording because the Mac is going to sleep…", ja: "スリープするため録音を停止しています…") : tr("Stopping the recording…", ja: "録音を停止しています…"))
 
@@ -212,6 +236,7 @@ struct Record: AsyncParsableCommand {
         } catch {
             stopError = error
         }
+        micControl.stop()
         var liveURLs: [URL] = []
         if let liveSession {
             do {
@@ -229,7 +254,7 @@ struct Record: AsyncParsableCommand {
             Console.print(tr("Warning: the remote track was completely silent. The target app may not have played any audio, or ", ja: "警告: 相手側（remote）が完全に無音でした。対象アプリが音を出していなかったか、")
                 + tr("system audio recording may not be allowed (`cappy doctor`)", ja: "システムオーディオ録音が許可されていない可能性があります（`cappy doctor`）"))
         }
-        if recorder.silentTracks.contains(.mic) {
+        if recorder.silentTracks.contains(.mic) && !Self.mutedThroughout(meta2) {
             Console.print(tr("Warning: the mic track was completely silent. Check the microphone permission and the input device", ja: "警告: 自分（mic）が完全に無音でした。マイクの許可と入力デバイスを確認してください"))
         }
         if liveSession != nil {
@@ -325,37 +350,49 @@ struct Record: AsyncParsableCommand {
         }
     }
 
-    private func startStatusLine(_ recorder: Recorder) -> DispatchSourceTimer {
+    private func startStatusLine(_ recorder: Recorder, _ statusLine: StatusLine) -> DispatchSourceTimer {
         let timer = DispatchSource.makeTimerSource(queue: .global())
         timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
         let hasMic = !noMic
         timer.setEventHandler {
             let s = recorder.status()
             var line = tr("● REC \(TimeFormat.elapsed(s.elapsed))  remote \(LevelMeter.bar(s.peaks[.remote]))", ja: "● 録音中 \(TimeFormat.elapsed(s.elapsed))  相手 \(LevelMeter.bar(s.peaks[.remote]))")
-            if hasMic { line += tr("  mic \(LevelMeter.bar(s.peaks[.mic]))", ja: "  自分 \(LevelMeter.bar(s.peaks[.mic]))") }
+            if hasMic {
+                line += s.micMuted ? tr("  mic 🔇muted", ja: "  自分 🔇ミュート")
+                                   : tr("  mic \(LevelMeter.bar(s.peaks[.mic]))", ja: "  自分 \(LevelMeter.bar(s.peaks[.mic]))")
+            }
             if s.gaps > 0 { line += tr("  gaps \(s.gaps)", ja: "  欠落 \(s.gaps)") }
             if let caption = LiveCaptions.shared.line(maxLength: 36) { line += "  💬 \(caption)" }
             if CappyLog.shared.verbose { line += String(format: "  drop %d  ring %.0f%%", s.droppedRecords, s.ringUsage * 100) }
-            Console.status(line)
+            statusLine.setBase(line)
         }
         timer.resume()
         return timer
     }
 
-    private func startMarkerReader(_ recorder: Recorder) {
-        guard isatty(STDIN_FILENO) != 0 else { return }
-        let t = Thread {
-            var n = 0
-            while let line = readLine() {
-                n += 1
-                let label = line.trimmingCharacters(in: .whitespaces)
-                recorder.addMarker(label: label.isEmpty ? nil : label)
+    /// キー入力（Space でミュートの切り替え、Enter でマーカー）を読み始める。端末から入力できなければ nil
+    private func startKeyReader(_ recorder: Recorder, micControl: MicMuteController, statusLine: StatusLine) -> KeyReader? {
+        let reader = KeyReader { event, text in
+            switch event {
+            case .toggleMute:
+                micControl.toggle()
+            case .marker(let label):
+                statusLine.setInput("")
+                recorder.addMarker(label: label)
+                let n = recorder.session.metadata.markers.count
                 let at = TimeFormat.elapsed(recorder.status().elapsed)
-                Console.print(tr("Marker \(n) added (\(at))\(label.isEmpty ? "" : ": \(label)")", ja: "マーカー \(n) を記録しました（\(at)）\(label.isEmpty ? "" : ": \(label)")"))
+                Console.print(tr("Marker \(n) added (\(at))\(label.map { ": \($0)" } ?? "")", ja: "マーカー \(n) を記録しました（\(at)）\(label.map { ": \($0)" } ?? "")"))
+            case .edited:
+                statusLine.setInput(text)
             }
         }
-        t.name = "dev.cappy.markers"
-        t.start()
+        return reader.start() ? reader : nil
+    }
+
+    /// 録音中ずっとマイクをミュートしていたか（それなら無音の警告は出さない）
+    static func mutedThroughout(_ meta: SessionMetadata) -> Bool {
+        guard let mutes = meta.micMutes, let duration = meta.track(.mic)?.durationMs, duration > 0 else { return false }
+        return SessionMute.totalMs(mutes, untilMs: duration) >= duration - 100
     }
 
     private func printSummary(_ meta: SessionMetadata) {
@@ -366,7 +403,35 @@ struct Record: AsyncParsableCommand {
             line += tr(", \(meta.gaps.count) gap(s), \(total) ms in total", ja: "、欠落 \(meta.gaps.count) 区間 計 \(total) ms")
         }
         if !meta.markers.isEmpty { line += tr(", \(meta.markers.count) marker(s)", ja: "、マーカー \(meta.markers.count)") }
+        if let mutes = meta.micMutes, !mutes.isEmpty {
+            let total = SessionMute.totalMs(mutes, untilMs: meta.track(.mic)?.durationMs ?? maxMs)
+            line += tr(", mic muted \(TimeFormat.hms(ms: total)) in total", ja: "、マイクのミュート 計 \(TimeFormat.hms(ms: total))")
+        }
         line += tr(")", ja: "）")
         Console.print(line)
+    }
+}
+
+/// 録音中のステータス行（0.5 秒ごとの表示に、入力中のラベルを添える）
+final class StatusLine: @unchecked Sendable {
+    private let lock = NSLock()
+    private var base = ""
+    private var input = ""
+
+    func setBase(_ line: String) {
+        lock.withLock { base = line }
+        render()
+    }
+
+    /// キー入力のたびに呼ぶ（レベルメーターを読み直さず、直前の表示に添えて書き直す）
+    func setInput(_ text: String) {
+        lock.withLock { input = text }
+        render()
+    }
+
+    private func render() {
+        let (b, i) = lock.withLock { (base, input) }
+        guard !b.isEmpty else { return }
+        Console.status(i.isEmpty ? b : b + "  ✎ " + String(i.suffix(30)) + "▏")
     }
 }

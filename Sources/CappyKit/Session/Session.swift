@@ -114,6 +114,37 @@ public struct SessionMarker: Codable, Sendable, Equatable {
     }
 }
 
+/// マイクをミュートした区間（録音開始からの ms。終了前は endMs が nil）
+public struct SessionMute: Codable, Sendable, Equatable {
+    public var startMs: Int64
+    public var endMs: Int64?
+
+    public init(startMs: Int64, endMs: Int64? = nil) {
+        self.startMs = startMs
+        self.endMs = endMs
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case startMs = "start_ms"
+        case endMs = "end_ms"
+    }
+
+    /// ミュートの開始・解除を区間の一覧に反映する
+    public static func apply(muted: Bool, atMs: Int64, to mutes: inout [SessionMute]) {
+        if muted {
+            if let last = mutes.last, last.endMs == nil { return }
+            mutes.append(SessionMute(startMs: atMs))
+        } else if let i = mutes.indices.last, mutes[i].endMs == nil {
+            mutes[i].endMs = max(mutes[i].startMs, atMs)
+        }
+    }
+
+    /// ミュートしていた合計時間（閉じていない区間は untilMs まで）
+    public static func totalMs(_ mutes: [SessionMute], untilMs: Int64) -> Int64 {
+        mutes.reduce(0) { $0 + max(0, ($1.endMs ?? untilMs) - $1.startMs) }
+    }
+}
+
 public struct RecordingState: Codable, Sendable, Equatable {
     public enum State: String, Codable, Sendable {
         /// 録音中（このまま残っていれば異常終了）
@@ -261,6 +292,8 @@ public struct SessionMetadata: Codable, Sendable, Equatable {
     public var tracks: [SessionTrack]
     public var gaps: [SessionGap]
     public var markers: [SessionMarker]
+    /// マイクをミュートした区間（record 中の Space キーや `cappy mic off` で切り替えたもの）
+    public var micMutes: [SessionMute]?
     public var recording: RecordingState
     public var transcription: TranscriptionState?
     public var summary: SummaryState?
@@ -284,6 +317,7 @@ public struct SessionMetadata: Codable, Sendable, Equatable {
         case id, name, targets, tracks, gaps, markers, recording, transcription, summary, live, profile
         case startedAt = "started_at"
         case endedAt = "ended_at"
+        case micMutes = "mic_mutes"
         case toolVersion = "tool_version"
     }
 

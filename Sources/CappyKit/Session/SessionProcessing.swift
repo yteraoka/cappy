@@ -91,6 +91,11 @@ public enum SessionProcessing {
             if m.recording.state == .recording {
                 m.recording.stopReason = "recovered"
             }
+            if var mutes = m.micMutes, let micMs = durations[.mic] {
+                // ミュートしたまま異常終了した場合は、マイクのトラックの末尾で区間を閉じる
+                SessionMute.apply(muted: false, atMs: micMs, to: &mutes)
+                m.micMutes = mutes
+            }
             m.recording.state = .finalized
             m.recording.recoveredAt = TimeFormat.iso8601(Date())
         }

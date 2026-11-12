@@ -89,12 +89,16 @@ public struct RecorderOptions: Sendable {
     public var micUID: String?
     public var diskWarnBytes: Int64
     public var diskStopBytes: Int64
+    /// マイクをミュートした状態で録音を始める
+    public var micMutedAtStart: Bool
 
     public init(targets: RecordTargetSpec, micEnabled: Bool, micUID: String?,
-                diskWarnBytes: Int64 = 1 << 30, diskStopBytes: Int64 = 300 << 20) {
+                diskWarnBytes: Int64 = 1 << 30, diskStopBytes: Int64 = 300 << 20,
+                micMutedAtStart: Bool = false) {
         self.targets = targets
         self.micEnabled = micEnabled
         self.micUID = micUID
+        self.micMutedAtStart = micMutedAtStart
         self.diskWarnBytes = diskWarnBytes
         self.diskStopBytes = diskStopBytes
     }
@@ -106,6 +110,8 @@ public struct RecorderStatus: Sendable {
     public var droppedRecords: Int
     public var ringUsage: Double
     public var gaps: Int
+    /// マイクをミュートしているか
+    public var micMuted: Bool = false
 }
 
 /// タップとマイクを 1 つの集約デバイスにまとめて録音する
@@ -209,6 +215,8 @@ public final class Recorder: @unchecked Sendable {
             let writer = CaptureWriter(io: engine.io, sinks: sinks)
             writer.onGap = { [weak self] gap in self?.recordGap(gap) }
             writer.onFirstRecord = { [weak self] host in self?.recordStart(hostTime: host) }
+            writer.onMicMuteChanged = { [weak self] muted, atMs in self?.recordMicMute(muted, atMs: atMs) }
+            writer.micMuted.store(options.micMutedAtStart && fileSinks[.mic] != nil, ordering: .relaxed)
             self.writer = writer
 
             try session.update { m in
@@ -262,6 +270,16 @@ public final class Recorder: @unchecked Sendable {
             m.startedAt = TimeFormat.iso8601(start)
             m.recording.hostTimeStart = hostTime
             for i in m.tracks.indices { m.tracks[i].offsetMs = 0 }
+        }
+    }
+
+    private func recordMicMute(_ muted: Bool, atMs: Int64) {
+        CappyLog.shared.info(muted ? tr("Mic muted at=\(atMs)ms", ja: "マイクをミュートしました at=\(atMs)ms")
+                                   : tr("Mic unmuted at=\(atMs)ms", ja: "マイクのミュートを解除しました at=\(atMs)ms"))
+        _ = try? session.update { m in
+            var mutes = m.micMutes ?? []
+            SessionMute.apply(muted: muted, atMs: atMs, to: &mutes)
+            m.micMutes = mutes
         }
     }
 
@@ -459,7 +477,21 @@ public final class Recorder: @unchecked Sendable {
         guard let writer else { return RecorderStatus(elapsed: 0, peaks: [:], droppedRecords: 0, ringUsage: 0, gaps: 0) }
         let s = writer.snapshot()
         return RecorderStatus(elapsed: writer.elapsedSeconds, peaks: s.peaks, droppedRecords: s.droppedRecords,
-                              ringUsage: s.ringUsage, gaps: s.gaps)
+                              ringUsage: s.ringUsage, gaps: s.gaps, micMuted: isMicMuted)
+    }
+
+    /// マイクのトラックを録音しているか（ミュートの対象があるか）
+    public var hasMicTrack: Bool { control.sync { fileSinks[.mic] != nil } }
+
+    /// マイクをミュートしているか（要求した状態。音声への反映は次のバッファから）
+    public var isMicMuted: Bool { writer?.micMuted.load(ordering: .relaxed) ?? false }
+
+    /// マイクのミュートを切り替える。マイクのトラックがなければ何もせず false を返す
+    @discardableResult
+    public func setMicMuted(_ muted: Bool) -> Bool {
+        guard hasMicTrack, let writer else { return false }
+        writer.micMuted.store(muted, ordering: .relaxed)
+        return true
     }
 
     /// 録音中の目印（フェーズ 2）
@@ -494,6 +526,11 @@ public final class Recorder: @unchecked Sendable {
         let ended = Date()
         let frames = fileSinks.mapValues { $0.framesWritten }
         try session.update { m in
+            if var mutes = m.micMutes, let f = frames[.mic], let t = m.track(.mic) {
+                // ミュートしたまま停止した場合は、マイクのトラックの末尾で区間を閉じる
+                SessionMute.apply(muted: false, atMs: Int64((Double(f) / t.sampleRate * 1000).rounded()), to: &mutes)
+                m.micMutes = mutes
+            }
             m.endedAt = TimeFormat.iso8601(ended)
             m.recording.state = .finalized
             m.recording.stopReason = reason

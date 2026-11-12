@@ -36,6 +36,13 @@ final class CaptureWriter: @unchecked Sendable {
     var onGap: ((SessionGap) -> Void)?
     /// 最初のレコードを受け取ったとき（ホストタイム）
     var onFirstRecord: ((UInt64) -> Void)?
+    /// マイクのミュートが実際に切り替わったとき（ミュートしたか、タイムライン上の ms）
+    var onMicMuteChanged: ((Bool, Int64) -> Void)?
+
+    /// マイクのミュート要求。ミュート中はマイクの音を無音に置き換えてシンクに渡す（長さは変えない）
+    let micMuted = Atomic<Bool>(false)
+    /// 実際に反映しているミュート状態（ライタースレッドだけが触る）
+    private var appliedMicMute = false
 
     init(io: CaptureIO, sinks: [TrackID: [AudioSink]]) {
         self.current = io
@@ -147,7 +154,7 @@ final class CaptureWriter: @unchecked Sendable {
         guard let ref = trackBuffers[.remote] ?? trackBuffers[.mic] else { return }
         let duration = Double(ref.frameLength) / ref.format.sampleRate
 
-        let (gap, isFirst) = lock.withLock { () -> (TimelineTracker.Gap?, Bool) in
+        let (gap, isFirst, recordStart) = lock.withLock { () -> (TimelineTracker.Gap?, Bool, Double) in
             let dropped = io.ring.droppedCount > lastDropped
             if dropped {
                 droppedTotal += io.ring.droppedCount - lastDropped
@@ -158,7 +165,7 @@ final class CaptureWriter: @unchecked Sendable {
             pendingReason = nil
             let g = timeline.observe(hostTime: header.hostTime, duration: duration,
                                      newEngineReason: first ? nil : r, droppedSinceLast: dropped)
-            return (g, first)
+            return (g, first, timeline.position - duration)
         }
         if isFirst { onFirstRecord?(header.hostTime) }
         if let gap {
@@ -173,6 +180,12 @@ final class CaptureWriter: @unchecked Sendable {
             lock.withLock { stats.gaps += 1 }
             onGap?(SessionGap(startMs: startMs, endMs: endMs, reason: gap.reason))
         }
+        let muted = micMuted.load(ordering: .relaxed)
+        if muted != appliedMicMute {
+            appliedMicMute = muted
+            onMicMuteChanged?(muted, Int64((recordStart * 1000).rounded()))
+        }
+        if muted, let b = trackBuffers[.mic] { Self.zero(b) }
         for track in tracks {
             if let b = trackBuffers[track] {
                 for s in sinks[track] ?? [] { s.consume(b, at: header.hostTime) }
@@ -206,6 +219,13 @@ final class CaptureWriter: @unchecked Sendable {
         }
         buf.frameLength = frames
         return buf
+    }
+
+    private static func zero(_ b: AVAudioPCMBuffer) {
+        let abl = UnsafeMutableAudioBufferListPointer(b.mutableAudioBufferList)
+        for i in 0..<abl.count {
+            if let d = abl[i].mData { memset(d, 0, Int(abl[i].mDataByteSize)) }
+        }
     }
 
     private func writeSilence(track: TrackID, format: AVAudioFormat, seconds: Double) {

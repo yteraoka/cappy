@@ -111,6 +111,10 @@ cappy record --app us.zoom.xos --name weekly-sync --live
 # 文字起こし済みのセッションから要約を作る
 cappy summarize ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
+# 録音中のマイクをミュート / 解除する（別のターミナルやホットキーから）
+cappy mic off
+cappy mic on
+
 # 異常終了したセッションの修復
 cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
@@ -126,6 +130,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 | `--pid <pid>` | 録音対象を PID で指定。複数指定可 |
 | `--system` | 自分自身を除くシステム全体の出力を録音 |
 | `--no-mic` / `--mic <UID>` | マイク録音の無効化 / 入力デバイスの指定（既定はシステムの既定入力。変更にも追従） |
+| `--muted` | マイクをミュートした状態で録音を始める（「マイクのミュート」を参照） |
 | `--out <dir>` / `--name <title>` | 保存先 / セッション名 |
 | `--duration 90m` | 指定時間で自動停止（`1h30m`、`45s` なども可） |
 | `--wait` | 対象が音声を出し始めるまで待つ |
@@ -136,9 +141,21 @@ cappy completion zsh > ~/.zfunc/_cappy
 | `--quiet` | 録音の告知メッセージを出さない |
 | `-v, --verbose` | IOProc のバッファ欠落数やリングバッファの使用率も出す |
 
-- 録音中に Enter を押すとマーカー（目印）を `session.json` の `markers` に記録します。文字を入力してから Enter を押すとラベル付きになります。
+- 録音中に Enter を押すとマーカー（目印）を `session.json` の `markers` に記録します。文字を入力してから Enter を押すとラベル付きになります（入力中の文字はステータス行に表示します。Backspace で 1 文字、Ctrl-U で全部消せます）。何も入力していないときに Space を押すとマイクをミュートします（「マイクのミュート」を参照）。
+- 録音中はターミナルを 1 キーずつ読むモードにし、録音を止めると元に戻します。`kill -9` などで強制終了して入力した文字が表示されなくなった場合は `stty sane` を実行してください。
 - Ctrl-C / SIGTERM で停止し、CAF を確定して送信用ファイルまで作ります。2 回目の Ctrl-C で変換を省いて終了します（あとで `recover` で作れます）。
 - スリープの直前に停止して確定します。復帰後に自動で再開はしません。
+
+#### マイクのミュート
+
+会議アプリはミュート中もマイクを使い続けるため、そのままでは会議アプリでミュートしている間の独り言や周りの音まで録音（と文字起こし）されます。会議アプリと一緒に cappy のマイクもミュートしてください。
+
+- `cappy record` を実行しているターミナルで Space を押すと、ミュートを切り替えます（何も入力していないときだけ。マーカーのラベルを入力し始めたら Space はラベルの一部になります）。日本語入力中の全角スペースでも切り替わります。
+- 別のターミナル・スクリプト・ホットキーからは `cappy mic off`（ミュート）、`cappy mic on`（解除）、`cappy mic toggle`、`cappy mic`（状態の表示）。複数の録音を実行中なら `--pid` で選びます。
+- `cappy record --muted` でミュートした状態から始められます。
+- ミュート中はマイクのトラックを無音で記録します。トラックの長さは変わらないので、相手側のトラックとの時刻もずれません。リアルタイム文字起こしにも無音を送ります。ミュートした区間は `session.json` の `mic_mutes` に記録し、ステータス行には「自分 🔇ミュート」と表示します。
+- Zoom・Meet・Teams のミュート状態を cappy から読み取ることはできません（他のアプリに公開しておらず、たいていミュート中もマイクを開いたままにしているため）。合わせたい場合は、会議アプリのミュートのショートカットと `cappy mic toggle` を 1 つのホットキーにまとめる（ショートカット.app・Raycast・Hammerspoon・BetterTouchTool など）か、両方を同時に切り替えてください。
+- `cappy mic` は `$TMPDIR/cappy/` のファイル（`CAPPY_RUNTIME_DIR` で変更可）から録音中のプロセスを探し、SIGUSR1（ミュート）/ SIGUSR2（解除）を送ります。PID が再利用された別のプロセスに送らないよう、プロセスの開始時刻も照合します。
 
 #### リアルタイム文字起こし（`--live`）
 
@@ -327,7 +344,7 @@ AWS_PROFILE=my-sso-profile cappy doctor
 
 ```text
 ~/Recordings/cappy/2026-11-11T1000_weekly-sync/   (0700)
-├── session.json       # メタデータと処理状態（tracks, gaps, markers, transcription ...）
+├── session.json       # メタデータと処理状態（tracks, gaps, markers, mic_mutes, transcription ...）
 ├── remote.caf         # 相手側（タップ）録音中の原本（ネイティブ形式・Float32）
 ├── mic.caf            # 自分（マイク）録音中の原本
 ├── remote.flac        # 送信用（16 kHz・モノラル・16 bit。FLAC が使えなければ WAV）
