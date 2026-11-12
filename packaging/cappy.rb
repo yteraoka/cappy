@@ -20,7 +20,8 @@ class Cappy < Formula
     <<~EOS
       The first recording asks the terminal app you run cappy from for
       the "System Audio Recording" and "Microphone" permissions.
-      Run `cappy doctor` to check permissions, authentication and settings.
+      Run `cappy init` to create the config file interactively, and
+      `cappy doctor` to check permissions, authentication and settings.
       Set CAPPY_LANG=ja to show messages in Japanese.
     EOS
   end

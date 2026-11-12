@@ -149,10 +149,10 @@ import Testing
         func parse(_ t: String) throws -> Profile {
             try CappyConfig.parse(t, path: URL(fileURLWithPath: "/tmp/x.toml")).profile(named: "a")
         }
-        let p = try parse("[profiles.a.summary]\nprovider = \"bedrock\"\nmodel = \"global.moonshotai.kimi-k3.1\"\n")
+        let p = try parse("[profiles.a.summary]\nprovider = \"aws\"\nmodel = \"global.moonshotai.kimi-k3.1\"\n")
         #expect(p.summary.model == "global.moonshotai.kimi-k3.1")
         #expect(p.summary.effectiveFallback(for: p.summary.model) == nil)
-        let q = try parse("[profiles.a.summary]\nprovider = \"bedrock\"\nmodel = \"zai.glm-5.3\"\nfallback_model = \"global.moonshotai.kimi-k3.1\"\n")
+        let q = try parse("[profiles.a.summary]\nprovider = \"aws\"\nmodel = \"zai.glm-5.3\"\nfallback_model = \"global.moonshotai.kimi-k3.1\"\n")
         #expect(q.summary.effectiveFallback(for: q.summary.model) == "global.moonshotai.kimi-k3.1")
         #expect(throws: CappyError.self) { try parse("[profiles.a.summary]\nmodel = \"moonshotai.kimi-k3.1\"\n") }
     }

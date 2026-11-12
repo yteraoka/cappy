@@ -75,7 +75,7 @@ cappy completion bash > ~/.local/share/bash-completion/completions/cappy
 - `--profile`: 設定ファイルのプロファイル名
 - `record --app` / `--pid` / `--mic`: その時点の音声プロセスの bundle ID・PID、入力デバイスの UID（zsh では名前や「出力中」も表示）
 - `summarize --model`: よく使うモデルと、設定ファイルに書かれたモデル
-- `--effort`・`transcribe --provider`・`--format`・`--language`、セッションディレクトリ
+- `--effort`・`transcribe --provider` / `--model`・`--format`・`--language`、セッションディレクトリ
 
 ## 権限
 
@@ -86,9 +86,26 @@ cappy completion bash > ~/.local/share/bash-completion/completions/cappy
 - 許可されていない場合、`record` は録音を始めずに終了コード 2 で終了します。
 - システムオーディオ録音が未許可でも、タップの作成自体は成功して相手側が無音になることがあります。その場合は録音後に警告を出します。
 
+## 初期設定
+
+`cappy init` で、質問に答えながら設定ファイル（`~/.config/cappy/config.toml`）を作れます。尋ねるのは次の項目です。
+
+- 文字起こしに使うサービス（Vertex AI の Gemini、Speech-to-Text、Amazon Transcribe、使わない）と会議の言語
+- Google Cloud のプロジェクトと Cloud Storage のバケット、または AWS のプロファイル・リージョン・S3 バケット（gcloud のプロジェクトや `~/.aws/config` のプロファイルを候補に出します）
+- 要約に使うサービス（Vertex AI、Amazon Bedrock、要約しない）、モデルとリージョン、文字起こしの後に続けて要約するか
+- 録音の保存先
+
+```bash
+cappy init                  # default プロファイルを作る
+cappy init --profile aws    # 別のプロファイルを追加する
+```
+
+保存する前に内容を表示します。設定ファイルがすでにあればプロファイルを追加し、同名のプロファイルは確認のうえ置き換えます（元のファイルは `config.toml.bak` に残し、ほかのプロファイルやコメントはそのまま残します）。認証情報は書き込みません。最後に次の手順（`gcloud auth application-default login` や `aws sso login` など）を表示し、`cappy doctor` で確認するかを尋ねます。バケットは作成しないので、事前に作っておいてください。
+
 ## 使い方
 
 ```bash
+cappy init                         # 設定ファイルを対話で作る（「初期設定」を参照）
 cappy apps                         # 音声プロセスの一覧（PID・bundle ID・出力中か）
 cappy devices                      # 入力デバイスの一覧（UID・名前・サンプルレート）
 cappy doctor                       # 権限・認証・設定・バケットの診断
@@ -135,7 +152,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 | `--duration 90m` | 指定時間で自動停止（`1h30m`、`45s` なども可） |
 | `--wait` | 対象が音声を出し始めるまで待つ |
 | `--transcribe` (`--mix`, `--format`) | 録音後に続けて文字起こしする |
-| `--live` | 録音しながらリアルタイムで文字起こしする（`gemini.live_model`。`provider = "transcribe"` なら Amazon Transcribe Streaming）。確定した発言を表示し、`live-transcript.{md,json,srt}` に保存する |
+| `--live` | 録音しながらリアルタイムで文字起こしする（Gemini の `transcribe.live_model`。`transcribe.provider = "aws"` なら Amazon Transcribe Streaming）。確定した発言を表示し、`live-transcript.{md,json,srt}` に保存する |
 | `--summarize` / `--no-summarize` | `--transcribe` / `--live` の後に続けて要約する（既定はプロファイルの `summary.auto`） |
 | `--profile <name>` | 設定プロファイル |
 | `--quiet` | 録音の告知メッセージを出さない |
@@ -159,7 +176,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 
 #### リアルタイム文字起こし（`--live`）
 
-- 自分（mic）と相手（remote）をそれぞれ 16 kHz・モノラルの PCM にして、100 ms ごとに送ります。送り先は、プロファイルの `provider` が `transcribe` なら Amazon Transcribe Streaming、それ以外は Vertex AI の Live API です。確定した発言は `[00:01:23] 相手: …` の形で表示し、認識途中の文字はステータス行に出します。
+- 自分（mic）と相手（remote）をそれぞれ 16 kHz・モノラルの PCM にして、100 ms ごとに送ります。送り先は、プロファイルの `provider` が `aws` なら Amazon Transcribe Streaming、それ以外は Vertex AI の Live API です。確定した発言は `[00:01:23] 相手: …` の形で表示し、認識途中の文字はステータス行に出します。
 - Live API は 1 セッションで約 10 分の音声までのため、9 分を過ぎたら話の切れ目で（遅くとも 9 分 45 秒で）次のセッションに張り替えます。Amazon Transcribe Streaming は 1 セッション 4 時間までのため、3 時間 50 分を過ぎたら同じように張り替えます。時刻は録音全体の時刻にそろえます。
 - 接続が切れたら再接続します（その間の音声はリアルタイム文字起こしに含まれず、`session.json` の `live.dropped_ms` に記録します）。権限や設定の誤りで接続できない場合は、リアルタイム文字起こしだけを止めて録音は続けます。
 - Live API では話者分離はできません（相手側は「相手」とだけ表示します）。Amazon Transcribe Streaming では remote トラックで話者分離を行い（`transcribe.diarization`）、`相手（0）` のように表示します（`live-transcript.md` では「相手 1」「相手 2」）。精度の高い結果が必要なら、録音後に `cappy transcribe` を実行してください（`--live --transcribe` で両方行えます）。
@@ -170,7 +187,8 @@ cappy completion zsh > ~/.zfunc/_cappy
 
 | オプション | 説明 |
 | --- | --- |
-| `--provider gemini\|google\|transcribe\|none` | 既定はプロファイルの `provider`（`gemini`）。`google` は Speech-to-Text v2（chirp_3）、`transcribe` は Amazon Transcribe |
+| `--provider google\|aws\|none` | 文字起こしに使うクラウド。既定はプロファイルの `transcribe.provider`（`google`） |
+| `--model <id>` | `google` のとき、`gemini-*` なら Vertex AI の Gemini、それ以外（`chirp_3` など）なら Speech-to-Text v2。既定はプロファイルの `transcribe.model`（`gemini-3.5-transcribe`） |
 | `--language ja-JP` | 既定はプロファイルの `language` |
 | `--mix` | 2 トラックをミックスした 1 本で送る。課金対象は約半分になるが、自分と相手の区別は失われる |
 | `--format md,json,srt` | 出力形式 |
@@ -180,7 +198,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 
 ### summarize
 
-`transcript.json` を Vertex AI の Claude / Gemini、または Amazon Bedrock のモデル（`summary.provider = "bedrock"`）に送り、`summary.md` に次の構成で書き出します: 概要 / 決定事項 / アクションアイテム（担当・内容・期限・時刻の表）/ 議論の要点 / 未解決事項・持ち越し（英語などの会議では、見出しも会議の言語になります）。決定事項などには根拠となる発言の時刻 `[HH:MM:SS]` が付くので、`transcript.md` で前後を確認できます。
+`transcript.json` を Vertex AI の Claude / Gemini、または Amazon Bedrock のモデル（`summary.provider = "aws"`）に送り、`summary.md` に次の構成で書き出します: 概要 / 決定事項 / アクションアイテム（担当・内容・期限・時刻の表）/ 議論の要点 / 未解決事項・持ち越し（英語などの会議では、見出しも会議の言語になります）。決定事項などには根拠となる発言の時刻 `[HH:MM:SS]` が付くので、`transcript.md` で前後を確認できます。
 
 | オプション | 説明 |
 | --- | --- |
@@ -207,7 +225,43 @@ cappy completion zsh > ~/.zfunc/_cappy
 
 ## 設定
 
-`~/.config/cappy/config.toml`（環境変数 `CAPPY_CONFIG` で変更可）にプロファイル単位で書きます。例は [`config.example.ja.toml`](./config.example.ja.toml)（英語版は [`config.example.toml`](./config.example.toml)）を参照してください。設定ファイルがなければ `default` プロファイルの既定値（provider = gemini、language = ja-JP、output_dir = ~/Recordings/cappy）を使います。
+`~/.config/cappy/config.toml`（環境変数 `CAPPY_CONFIG` で変更可）にプロファイル単位で書きます。`cappy init` で対話して作れます。すべての設定の例は [`config.example.ja.toml`](./config.example.ja.toml)（英語版は [`config.example.toml`](./config.example.toml)）を参照してください。設定ファイルがなければ `default` プロファイルの既定値（文字起こし・要約とも Vertex AI の Gemini、language = ja-JP、output_dir = ~/Recordings/cappy）を使います。
+
+プロファイルは次のテーブルからなります。
+
+| テーブル | 内容 |
+| --- | --- |
+| `[profiles.<name>]` | `language`（会議の言語）、`output_dir`、`disk_warn_mb`、`disk_stop_mb` |
+| `[profiles.<name>.google]` | 文字起こしと要約で共通の Google Cloud のアカウント: `project_id`、`bucket`、`delete_remote_after` |
+| `[profiles.<name>.aws]` | 文字起こしと要約で共通の AWS のアカウント: `profile`、`region`、`bucket`、`delete_remote_after` |
+| `[profiles.<name>.transcribe]` | 文字起こし: `provider`（`google` / `aws` / `none`）、`model`、`location`、`diarization` など |
+| `[profiles.<name>.summary]` | 会議の要約: `provider`（`google` / `aws` / `none`）、`model`、`region`、`auto` など |
+
+`provider` でクラウド（`[google]` か `[aws]` のアカウント）を、`model` で何を使うかを選びます。
+
+| | `provider = "google"` | `provider = "aws"` |
+| --- | --- | --- |
+| 文字起こし | `model = "gemini-*"`: Vertex AI の Gemini（既定 `gemini-3.5-transcribe`）<br>それ以外（`chirp_3` など）: Speech-to-Text v2 | Amazon Transcribe |
+| 要約 | Vertex AI の Claude / Gemini（既定 `gemini-4-argon`） | Amazon Bedrock の Claude など（既定 `claude-opus-5-5`） |
+
+```toml
+[profiles.default]
+language = "ja-JP"
+
+[profiles.default.google]
+project_id = "my-project"
+bucket = "my-cappy-bucket"
+
+[profiles.default.transcribe]
+provider = "google"
+model = "gemini-3.5-transcribe"
+
+[profiles.default.summary]
+provider = "google"
+model = "gemini-4-argon"
+```
+
+`summary.provider` を省略すると `transcribe.provider` と同じになります。`[transcribe]` の `model`・`location`・`chunk_minutes` は `model` のサービス（Gemini か Speech-to-Text）に、それ以外（`diarization`・`word_timestamps`・`max_speakers` など）はそれを持つすべてのサービスに効きます。そのため `cappy transcribe --model chirp_3` や `--provider aws` で切り替えても、そのサービスの既定値で動きます。
 
 認証情報は設定ファイルに書かず、Google のアプリケーションデフォルト認証情報（ADC）を使います。
 
@@ -230,7 +284,7 @@ JSON
 gcloud storage buckets update gs://my-cappy-bucket --lifecycle-file lifecycle.json
 ```
 
-- 必要な権限: Vertex AI の利用（`roles/aiplatform.user`）、バケットに対する `storage.objects.create/get/list/delete`。`provider = "google"` を使う場合は Speech-to-Text の利用（`roles/speech.client` など）も必要です（`gcloud services enable speech.googleapis.com` も）。
+- 必要な権限: Vertex AI の利用（`roles/aiplatform.user`）、バケットに対する `storage.objects.create/get/list/delete`。Speech-to-Text のモデル（`model = "chirp_3"` など）を使う場合は Speech-to-Text の利用（`roles/speech.client` など）も必要です（`gcloud services enable speech.googleapis.com` も）。
 - 文字起こしの既定は Vertex AI の `gemini-3.5-transcribe`（`location = "global"`）です。`aiplatform.googleapis.com` を有効にしてください（下の「要約の準備」と同じ）。
 - 送信する音声はバケットに置いて `gs://` で渡します。Vertex AI（または Speech-to-Text）のサービスエージェントがバケットを読める必要があります（同じプロジェクトのバケットなら通常は不要）。
 - `cappy doctor` で、認証の有効性、API へのアクセス、バケットの権限・均一アクセス制御・ライフサイクルを確認できます。
@@ -250,20 +304,20 @@ gcloud projects add-iam-policy-binding my-project \
 - 既定はグローバルエンドポイント（`region = "global"`）です。データの処理地域を限定したい場合は `us` / `eu`（マルチリージョン）を指定します。使えるエンドポイントはモデルごとに異なるので、Model Garden のモデルの説明で確認してください（新しい Claude モデルは単一リージョンのエンドポイントでは提供されていません）。
 - 課金は Google Cloud から請求されます（[料金](https://cloud.google.com/vertex-ai/generative-ai/pricing#claude-models)）。使ったトークン数は `session.json` の `summary.input_tokens` / `output_tokens` で確認できます。
 - `cappy doctor` は、課金されないトークン数の確認 API（Claude は `count-tokens:rawPredict`、Gemini は `countTokens`）でモデルへのアクセスを確認します。
-- 外部に送信したくない案件では、プロファイルで `[profiles.<name>.summary] provider = "none"` にしてください（`provider = "none"` のプロファイルでは要約も既定で none になります）。
+- 外部に送信したくない案件では、プロファイルで `[profiles.<name>.summary] provider = "none"` にしてください（`transcribe.provider = "none"` のプロファイルでは要約も既定で none になります）。
 
 ### 文字起こし（Amazon Transcribe）の準備
 
-```toml
-[profiles.default]
-provider = "transcribe"
+`[transcribe]` の `provider = "aws"` で Amazon Transcribe を使います。
 
+```toml
 [profiles.default.aws]
 region = "ap-northeast-1"     # Transcribe とバケットのリージョン
 bucket = "my-cappy-bucket"    # 送信する音声を一時的に置く S3 バケット（同じリージョン）
 # delete_remote_after = true  # 文字起こし後に S3 上の音声と Transcribe のジョブを削除
 
 [profiles.default.transcribe]
+provider = "aws"
 # diarization = true          # remote トラックで話者分離
 # max_speakers = 10           # 話者分離の最大人数（2〜30）
 # vocabulary_name = "cappy-terms"      # 事前に登録したカスタム語彙（同じリージョン・言語）
@@ -293,7 +347,7 @@ aws s3api put-bucket-lifecycle-configuration --bucket my-cappy-bucket --lifecycl
 region = "ap-northeast-1"     # 呼び出すリージョン（省略時は AWS_REGION → プロファイルの region）
 
 [profiles.default.summary]
-provider = "bedrock"
+provider = "aws"              # 省略時は transcribe.provider と同じ
 region = "jp"                 # 推論プロファイルの範囲: global / jp / us / eu / au / apac、またはリージョン名
 model = "claude-opus-5-5"     # 省略時は claude-opus-5-5。Kimi K3.1 なら "global.moonshotai.kimi-k3.1"
 ```
@@ -368,9 +422,9 @@ AWS_PROFILE=my-sso-profile cappy doctor
 - **Gemini による文字起こし（既定）**: `gemini-3.5-transcribe` の `generateContent`（v1beta1、`generationConfig.audioTranscriptionConfig`）に、バケットに置いた音声を `fileData` で渡します。話者分離・タイムスタンプ有効時は 1 リクエスト 15 分までのため、既定 14 分ごとに分割して並行（最大 3 本）に送り、時刻をずらしてマージします。分割ごとの結果はセッションディレクトリに一時保存し、中断しても完了した分割は送り直しません。応答の `parts[].audioTranscription`（`speakerLabel`、`words[].startOffset/endOffset`）から発言を作り、30 秒を超える発言は句点や間で分けます。話者分離を拒否された場合は話者分離なしで送り直します。
 - **リアルタイム文字起こし（Amazon Transcribe Streaming）**: `wss://transcribestreaming.<region>.amazonaws.com:8443/stream-transcription-websocket` に SigV4 の署名付き URL（クエリに署名、有効期限 5 分）で接続し、イベントストリーム形式（前半の長さと CRC32・ヘッダー・本文・全体の CRC32）の `AudioEvent` で音声を送ります。`TranscriptEvent` の `IsPartial = false` の結果を確定した発言にし、単語の `Speaker` が変わるところで分けます。終わりは空の `AudioEvent` で伝えます。WebSocket の ping には応答しないため、接続の失敗は最初の受信で検出します。`BadRequestException`（無音による時間切れを除く）は再接続しても直らないものとして、リアルタイム文字起こしだけを止めます。話者分離を拒否された場合は、話者分離なしで張り直します。
 - **リアルタイム文字起こし**: Live API（`wss://…/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`）に `setup`（`inputAudioTranscription`、`responseModalities: ["TEXT"]`）を送り、`realtimeInput.audio`（`audio/pcm;rate=16000`）で音声を送ります。`serverContent.inputTranscription` を確定、`interimInputTranscription` を途中の文字として扱います。`AudioSink` を実装する `LiveAudioSink` として、録音中の音声を受け取ります。
-- **Amazon Transcribe の結果**（`provider = "transcribe"` の場合）: 結果 JSON の `results.items` から単語と句読点を取り出し、話者（`speaker_label`、古い形式では `speaker_labels.segments`）が変わるところと、文の終わり・間（0.8 秒）・長さ（30 秒）で発言に分けます。日本語などは単語を空白なしでつなぎます。信頼度は単語の平均です。
-- **chirp_3 の制限**（`provider = "google"` の場合）: 公式ドキュメントでは、BatchRecognize は「概ね 1 時間まで、単語タイムスタンプ有効時は約 20 分まで」です。そのため、送信用ファイルを既定 19 分ごとに分割して 1 リクエストで送り、結果を時刻オフセット付きでマージします（`chunk_minutes` で変更可）。分割した場合、話者分離のラベルはチャンクをまたいで一致しない可能性があります。
-- **話者分離**（`provider = "google"` の場合）: chirp_3 は日本語の話者分離に対応しています（BatchRecognize のみ）。remote トラックで有効にし、モデルが拒否した場合（投入時・実行時のいずれも）は話者分離なしで再投入し、その旨を `session.json` の `transcription.jobs[].note` に記録します。
+- **Amazon Transcribe の結果**（`provider = "aws"` の場合）: 結果 JSON の `results.items` から単語と句読点を取り出し、話者（`speaker_label`、古い形式では `speaker_labels.segments`）が変わるところと、文の終わり・間（0.8 秒）・長さ（30 秒）で発言に分けます。日本語などは単語を空白なしでつなぎます。信頼度は単語の平均です。
+- **chirp_3 の制限**（Speech-to-Text の場合）: 公式ドキュメントでは、BatchRecognize は「概ね 1 時間まで、単語タイムスタンプ有効時は約 20 分まで」です。そのため、送信用ファイルを既定 19 分ごとに分割して 1 リクエストで送り、結果を時刻オフセット付きでマージします（`chunk_minutes` で変更可）。分割した場合、話者分離のラベルはチャンクをまたいで一致しない可能性があります。
+- **話者分離**（Speech-to-Text の場合）: chirp_3 は日本語の話者分離に対応しています（BatchRecognize のみ）。remote トラックで有効にし、モデルが拒否した場合（投入時・実行時のいずれも）は話者分離なしで再投入し、その旨を `session.json` の `transcription.jobs[].note` に記録します。
 - **要約**: `cappy summarize` はモデル名で呼び出し先を切り替えます。Claude は Vertex AI の Messages API（`streamRawPredict`、`anthropic_version = 2026-10-21`）を、適応的思考（adaptive thinking）と `effort` で呼び出します。Gemini は `streamGenerateContent?alt=sse` を `thinkingConfig.thinkingLevel` で呼び出し、思考の部分（`thought: true`）は出力に含めません。どちらもストリーミングで受け取ります。文字起こし本文は `<transcript>` で囲み、その中の指示には従わないようモデルに指示しています。
 - **表示言語**: 文言は `tr("English", ja: "日本語")` の形でコードに並べて書き、`L10n.current`（`CAPPY_LANG` → `LC_ALL` → `LC_MESSAGES` → `LANG`、既定は英語）で選びます。リソースバンドルを使うと単一のバイナリで配れないためです。作るファイルは `UILanguage.forDocument(language)` で会議の言語に合わせます。Info.plist の利用目的の文字列は、切り替えられないため英語と日本語を併記しています。
 - **システムオーディオ録音の許可状態**: 公開 API がないため、TCC.framework の `TCCAccessPreflight` / `TCCAccessRequest` を動的に呼び出して確認しています。

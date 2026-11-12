@@ -9,35 +9,34 @@ import Testing
 
     @Test func defaultsToGeminiOnGlobal() throws {
         let p = try parse("[profiles.default.google]\nproject_id = \"p1\"\nbucket = \"b1\"")
-        #expect(p.provider == "gemini")
+        #expect(p.provider == "google")
+        #expect(p.transcriptionService == .gemini)
         #expect(p.gemini.model == "gemini-3.5-transcribe")
         #expect(p.gemini.liveModel == "gemini-3.5-transcribe-live")
         #expect(p.gemini.location == "global")
         #expect(p.gemini.chunkMinutes == 14)
-        #expect(p.geminiProjectID == "p1")
-        #expect(Profile(name: "x").provider == "gemini")
+        #expect(p.google.projectID == "p1")
+        #expect(Profile(name: "x").transcriptionService == .gemini)
     }
 
     @Test func parsesGeminiSection() throws {
         let p = try parse("""
-        [profiles.default]
-        provider = "gemini"
-        [profiles.default.gemini]
-        project_id = "p2"
+        [profiles.default.transcribe]
+        provider = "google"
+        model = "gemini-3.5-transcribe"
         location = "us"
         chunk_minutes = 10
         diarization = false
         custom_vocabulary = ["cappy", "Vertex AI"]
         """)
-        #expect(p.geminiProjectID == "p2")
         #expect(p.gemini.location == "us")
         #expect(p.gemini.chunkSeconds == 600)
         #expect(!p.gemini.diarization)
         #expect(p.gemini.customVocabulary == ["cappy", "Vertex AI"])
-        #expect(throws: CappyError.self) { _ = try parse("[profiles.default.gemini]\nchunk_minutes = 20") }
-        #expect(throws: CappyError.self) { _ = try parse("[profiles.default.gemini]\ncustom_vocabulary = [1, 2]") }
-        // 従来の Speech-to-Text も選べる
-        #expect(try parse("[profiles.default]\nprovider = \"google\"").provider == "google")
+        #expect(throws: CappyError.self) { _ = try parse("[profiles.default.transcribe]\nchunk_minutes = 20") }
+        #expect(throws: CappyError.self) { _ = try parse("[profiles.default.transcribe]\ncustom_vocabulary = [1, 2]") }
+        // Speech-to-Text はモデルで選ぶ
+        #expect(try parse("[profiles.default.transcribe]\nmodel = \"chirp_3\"").transcriptionService == .speech)
     }
 }
 

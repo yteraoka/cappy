@@ -18,6 +18,7 @@ public struct TranscribeSettings: Sendable, Equatable {
 /// 1 ファイル 8 時間・2 GB までなので分割しない。結果は Transcribe が管理する場所に置かせ、
 /// GetTranscriptionJob が返す署名付き URL（有効期限 15 分）から取得する。
 public struct AmazonTranscribeProvider: TranscriptionProvider {
+    /// session.json に記録するサービス名（設定の provider = "aws" とは別。既存のセッションとの互換のため変えない）
     public let name = "transcribe"
     public var model: String? { nil }
 

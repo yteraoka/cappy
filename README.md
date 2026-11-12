@@ -75,7 +75,7 @@ Besides subcommands and options, these values are completed:
 - `--profile`: profile names in the config file
 - `record --app` / `--pid` / `--mic`: bundle IDs and PIDs of the current audio processes, and input device UIDs (zsh also shows names and whether a process is playing)
 - `summarize --model`: commonly used models and the models in the config file
-- `--effort`, `transcribe --provider`, `--format`, `--language`, and session directories
+- `--effort`, `transcribe --provider` / `--model`, `--format`, `--language`, and session directories
 
 ## Permissions
 
@@ -86,9 +86,26 @@ Two permissions are needed: "System Audio Recording" and "Microphone". For a CLI
 - Without permission, `record` exits with code 2 without recording.
 - Even without system audio recording permission, creating the tap can succeed and the remote track becomes silent. cappy warns about this after recording.
 
+## Initial setup
+
+`cappy init` asks a few questions and writes the config file (`~/.config/cappy/config.toml`). It asks for:
+
+- where to transcribe (Gemini on Vertex AI, Speech-to-Text, Amazon Transcribe, or none) and the meeting language
+- the Google Cloud project and Cloud Storage bucket, or the AWS profile, Region and S3 bucket (it suggests the gcloud project and the profiles in `~/.aws/config`)
+- where to summarize (Vertex AI, Amazon Bedrock, or none), the model and region, and whether to summarize automatically
+- where to save recordings
+
+```bash
+cappy init                  # create the default profile
+cappy init --profile aws    # add another profile
+```
+
+It shows the result before saving. If the config file already exists, the profile is added; a profile with the same name is replaced after confirmation (the previous file is kept as `config.toml.bak`; other profiles and comments are kept). Credentials are never written. At the end it lists the next steps (such as `gcloud auth application-default login` or `aws sso login`) and offers to run `cappy doctor`. The buckets themselves are not created; create them in advance.
+
 ## Usage
 
 ```bash
+cappy init                         # create the config file interactively (see "Initial setup")
 cappy apps                         # list audio processes (PID, bundle ID, whether playing)
 cappy devices                      # list input devices (UID, name, sample rate)
 cappy doctor                       # check permissions, authentication, settings and buckets
@@ -135,7 +152,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 | `--duration 90m` | Stop automatically after this duration (`1h30m`, `45s`, ... also work) |
 | `--wait` | Wait until the target starts playing audio |
 | `--transcribe` (`--mix`, `--format`) | Transcribe after recording |
-| `--live` | Transcribe in real time while recording (`gemini.live_model`, or Amazon Transcribe Streaming when `provider = "transcribe"`). Shows final results and saves them to `live-transcript.{md,json,srt}` |
+| `--live` | Transcribe in real time while recording (`transcribe.live_model` with Gemini, or Amazon Transcribe Streaming when `transcribe.provider = "aws"`). Shows final results and saves them to `live-transcript.{md,json,srt}` |
 | `--summarize` / `--no-summarize` | Summarize after `--transcribe` / `--live` (default: `summary.auto` of the profile) |
 | `--profile <name>` | Config profile |
 | `--quiet` | Do not show the recording notice |
@@ -159,7 +176,7 @@ Meeting apps keep using the microphone while you are muted in them, so cappy wou
 
 #### Live transcription (`--live`)
 
-- The mic and remote tracks are each converted to 16 kHz mono PCM and sent every 100 ms. They go to Amazon Transcribe Streaming when `provider` of the profile is `transcribe`, and to the Vertex AI Live API otherwise. Final results are shown as `[00:01:23] Remote: …`, and text still being recognized is shown on the status line.
+- The mic and remote tracks are each converted to 16 kHz mono PCM and sent every 100 ms. They go to Amazon Transcribe Streaming when `provider` of the profile is `aws`, and to the Vertex AI Live API otherwise. Final results are shown as `[00:01:23] Remote: …`, and text still being recognized is shown on the status line.
 - The Live API accepts about 10 minutes of audio per session, so cappy switches to a new session at a pause after 9 minutes (at the latest at 9:45). Amazon Transcribe Streaming accepts 4 hours per session, so cappy switches the same way after 3 hours 50 minutes. Times are aligned to the whole recording.
 - cappy reconnects when the connection drops (audio during that time is not in the live transcription and is recorded in `live.dropped_ms` of `session.json`). If it cannot connect because of a permission or configuration error, only the live transcription stops and recording continues.
 - The Live API does not do speaker diarization (the remote side is shown only as "Remote"). Amazon Transcribe Streaming does speaker diarization on the remote track (`transcribe.diarization`) and shows `Remote (0)` (in `live-transcript.md`, "Remote 1" and "Remote 2"). For more accurate results, run `cappy transcribe` after recording (`--live --transcribe` does both).
@@ -170,7 +187,8 @@ Meeting apps keep using the microphone while you are muted in them, so cappy wou
 
 | Option | Description |
 | --- | --- |
-| `--provider gemini\|google\|transcribe\|none` | Default: `provider` of the profile (`gemini`). `google` is Speech-to-Text v2 (chirp_3), `transcribe` is Amazon Transcribe |
+| `--provider google\|aws\|none` | Cloud to transcribe with. Default: `transcribe.provider` of the profile (`google`) |
+| `--model <id>` | With `google`: `gemini-*` uses Gemini on Vertex AI, other models (e.g. `chirp_3`) use Speech-to-Text v2. Default: `transcribe.model` of the profile (`gemini-3.5-transcribe`) |
 | `--language ja-JP` | Default: `language` of the profile |
 | `--mix` | Send a single mix of the two tracks. About half the billed audio, but you and the remote side can no longer be told apart |
 | `--format md,json,srt` | Output formats |
@@ -180,7 +198,7 @@ Meeting apps keep using the microphone while you are muted in them, so cappy wou
 
 ### summarize
 
-Sends `transcript.json` to Claude / Gemini on Vertex AI, or to a model on Amazon Bedrock (`summary.provider = "bedrock"`), and writes `summary.md` with these sections: Overview / Decisions / Action items (a table of owner, task, due date and time) / Discussion points / Open issues and follow-ups (for a Japanese meeting the headings are in Japanese). Decisions and other items carry the time of the supporting statement, `[HH:MM:SS]`, so you can check the context in `transcript.md`.
+Sends `transcript.json` to Claude / Gemini on Vertex AI, or to a model on Amazon Bedrock (`summary.provider = "aws"`), and writes `summary.md` with these sections: Overview / Decisions / Action items (a table of owner, task, due date and time) / Discussion points / Open issues and follow-ups (for a Japanese meeting the headings are in Japanese). Decisions and other items carry the time of the supporting statement, `[HH:MM:SS]`, so you can check the context in `transcript.md`.
 
 | Option | Description |
 | --- | --- |
@@ -207,7 +225,43 @@ Sends `transcript.json` to Claude / Gemini on Vertex AI, or to a model on Amazon
 
 ## Configuration
 
-Write profiles in `~/.config/cappy/config.toml` (override with the `CAPPY_CONFIG` environment variable). See [`config.example.toml`](./config.example.toml) for an example. Without a config file, cappy uses the defaults of the `default` profile (provider = gemini, language = ja-JP, output_dir = ~/Recordings/cappy).
+Write profiles in `~/.config/cappy/config.toml` (override with the `CAPPY_CONFIG` environment variable). `cappy init` creates it interactively; see [`config.example.toml`](./config.example.toml) for all settings. Without a config file, cappy uses the defaults of the `default` profile (Gemini on Vertex AI for transcription and summary, language = ja-JP, output_dir = ~/Recordings/cappy).
+
+A profile is made of these tables:
+
+| Table | Contents |
+| --- | --- |
+| `[profiles.<name>]` | `language` (meeting language), `output_dir`, `disk_warn_mb`, `disk_stop_mb` |
+| `[profiles.<name>.google]` | Google Cloud account shared by transcription and summary: `project_id`, `bucket`, `delete_remote_after` |
+| `[profiles.<name>.aws]` | AWS account shared by transcription and summary: `profile`, `region`, `bucket`, `delete_remote_after` |
+| `[profiles.<name>.transcribe]` | Transcription: `provider` (`google` / `aws` / `none`), `model`, `location`, `diarization`, ... |
+| `[profiles.<name>.summary]` | Meeting summary: `provider` (`google` / `aws` / `none`), `model`, `region`, `auto`, ... |
+
+`provider` chooses the cloud (the account in `[google]` or `[aws]`), and `model` chooses what to use:
+
+| | `provider = "google"` | `provider = "aws"` |
+| --- | --- | --- |
+| Transcription | `model = "gemini-*"`: Gemini on Vertex AI (default `gemini-3.5-transcribe`)<br>other models (`chirp_3`, ...): Speech-to-Text v2 | Amazon Transcribe |
+| Summary | Claude / Gemini on Vertex AI (default `gemini-4-argon`) | Claude and other models on Amazon Bedrock (default `claude-opus-5-5`) |
+
+```toml
+[profiles.default]
+language = "ja-JP"
+
+[profiles.default.google]
+project_id = "my-project"
+bucket = "my-cappy-bucket"
+
+[profiles.default.transcribe]
+provider = "google"
+model = "gemini-3.5-transcribe"
+
+[profiles.default.summary]
+provider = "google"
+model = "gemini-4-argon"
+```
+
+`summary.provider` defaults to `transcribe.provider`. In `[transcribe]`, `model`, `location` and `chunk_minutes` apply to the service of `model` (Gemini or Speech-to-Text), and the other settings (`diarization`, `word_timestamps`, `max_speakers`, ...) apply to every service that has them, so `cappy transcribe --model chirp_3` or `--provider aws` keep working with the defaults of that service.
 
 Credentials are not written in the config file; cappy uses Google Application Default Credentials (ADC).
 
@@ -230,7 +284,7 @@ JSON
 gcloud storage buckets update gs://my-cappy-bucket --lifecycle-file lifecycle.json
 ```
 
-- Required permissions: Vertex AI (`roles/aiplatform.user`) and `storage.objects.create/get/list/delete` on the bucket. With `provider = "google"`, Speech-to-Text (e.g. `roles/speech.client`) is also required (and `gcloud services enable speech.googleapis.com`).
+- Required permissions: Vertex AI (`roles/aiplatform.user`) and `storage.objects.create/get/list/delete` on the bucket. With a Speech-to-Text model (e.g. `model = "chirp_3"`), Speech-to-Text (e.g. `roles/speech.client`) is also required (and `gcloud services enable speech.googleapis.com`).
 - Transcription uses `gemini-3.5-transcribe` on Vertex AI by default (`location = "global"`). Enable `aiplatform.googleapis.com` (same as the summary setup below).
 - The audio to send is placed in the bucket and passed as `gs://`. The Vertex AI (or Speech-to-Text) service agent must be able to read the bucket (usually not needed for a bucket in the same project).
 - `cappy doctor` checks that the credentials are valid and the API is accessible, and checks the bucket permissions, uniform bucket-level access and lifecycle.
@@ -250,20 +304,20 @@ gcloud projects add-iam-policy-binding my-project \
 - The global endpoint (`region = "global"`) is the default. To restrict where data is processed, use `us` / `eu` (multi-region). The available endpoints differ per model; check the model description in Model Garden (newer Claude models are not offered on single-region endpoints).
 - Billing comes from Google Cloud ([pricing](https://cloud.google.com/vertex-ai/generative-ai/pricing#claude-models)). Token usage is in `summary.input_tokens` / `output_tokens` of `session.json`.
 - `cappy doctor` checks access to the model with the free token counting API (`count-tokens:rawPredict` for Claude, `countTokens` for Gemini).
-- For meetings whose content must not be sent outside, set `[profiles.<name>.summary] provider = "none"` (profiles with `provider = "none"` also default to no summary).
+- For meetings whose content must not be sent outside, set `[profiles.<name>.summary] provider = "none"` (profiles with `transcribe.provider = "none"` also default to no summary).
 
 ### Transcription setup (Amazon Transcribe)
 
-```toml
-[profiles.default]
-provider = "transcribe"
+`provider = "aws"` in `[transcribe]` uses Amazon Transcribe.
 
+```toml
 [profiles.default.aws]
 region = "ap-northeast-1"     # Region of Transcribe and the bucket
 bucket = "my-cappy-bucket"    # S3 bucket that holds the audio temporarily (same Region)
 # delete_remote_after = true  # delete the audio in S3 and the Transcribe job after transcription
 
 [profiles.default.transcribe]
+provider = "aws"
 # diarization = true          # speaker diarization on the remote track
 # max_speakers = 10           # maximum number of speakers (2-30)
 # vocabulary_name = "cappy-terms"      # a custom vocabulary registered in advance (same Region and language)
@@ -293,7 +347,7 @@ aws s3api put-bucket-lifecycle-configuration --bucket my-cappy-bucket --lifecycl
 region = "ap-northeast-1"     # Region to call (default: AWS_REGION, then region of the AWS profile)
 
 [profiles.default.summary]
-provider = "bedrock"
+provider = "aws"              # default: the same as transcribe.provider
 region = "jp"                 # inference profile scope: global / jp / us / eu / au / apac, or a Region name
 model = "claude-opus-5-5"     # default: claude-opus-5-5. For Kimi K3.1: "global.moonshotai.kimi-k3.1"
 ```
@@ -368,9 +422,9 @@ All files are created with mode 0600. Logs also go to the unified log (subsystem
 - **Transcription with Gemini (default)**: the audio in the bucket is passed as `fileData` to `generateContent` of `gemini-3.5-transcribe` (v1beta1, `generationConfig.audioTranscriptionConfig`). With speaker diarization and timestamps, a request accepts up to 15 minutes, so the audio is split every 14 minutes by default, sent in parallel (up to 3), and merged with time offsets. The result of each chunk is saved in the session directory, so finished chunks are not sent again after an interruption. Segments are built from `parts[].audioTranscription` (`speakerLabel`, `words[].startOffset/endOffset`) in the response, and segments longer than 30 seconds are split at sentence ends or pauses. If diarization is rejected, the audio is sent again without it.
 - **Live transcription (Amazon Transcribe Streaming)**: cappy connects to `wss://transcribestreaming.<region>.amazonaws.com:8443/stream-transcription-websocket` with a SigV4 presigned URL (signature in the query, valid for 5 minutes) and sends audio as `AudioEvent` messages in the event stream format (prelude with lengths and CRC32, headers, payload, message CRC32). Results of `TranscriptEvent` with `IsPartial = false` become final segments, split where the `Speaker` of the words changes. The end is signaled with an empty `AudioEvent`. The service does not answer WebSocket pings, so connection failures are detected on the first receive. `BadRequestException` (except a timeout caused by silence) is treated as not fixable by reconnecting, and only the live transcription stops. If speaker diarization is rejected, cappy reconnects without it.
 - **Live transcription (Live API)**: cappy sends `setup` (`inputAudioTranscription`, `responseModalities: ["TEXT"]`) to the Live API (`wss://…/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`) and audio as `realtimeInput.audio` (`audio/pcm;rate=16000`). `serverContent.inputTranscription` is treated as final and `interimInputTranscription` as text still being recognized. `LiveAudioSink`, an `AudioSink`, receives the audio while recording.
-- **Amazon Transcribe results** (`provider = "transcribe"`): words and punctuation are taken from `results.items` of the result JSON and split into segments where the speaker (`speaker_label`, or `speaker_labels.segments` in the older format) changes, and at sentence ends, pauses (0.8 seconds) and length (30 seconds). Words are joined without spaces for Japanese and similar languages. The confidence is the average over the words.
-- **chirp_3 limits** (`provider = "google"`): according to the documentation, BatchRecognize accepts "about 1 hour, or about 20 minutes with word timestamps". So the file to send is split every 19 minutes by default, sent in one request, and merged with time offsets (change with `chunk_minutes`). When split, speaker labels may not match across chunks.
-- **Speaker diarization** (`provider = "google"`): chirp_3 supports Japanese speaker diarization (BatchRecognize only). It is enabled on the remote track; if the model rejects it (at submission or while running), cappy submits again without it and notes this in `transcription.jobs[].note` of `session.json`.
+- **Amazon Transcribe results** (`provider = "aws"`): words and punctuation are taken from `results.items` of the result JSON and split into segments where the speaker (`speaker_label`, or `speaker_labels.segments` in the older format) changes, and at sentence ends, pauses (0.8 seconds) and length (30 seconds). Words are joined without spaces for Japanese and similar languages. The confidence is the average over the words.
+- **chirp_3 limits** (Speech-to-Text): according to the documentation, BatchRecognize accepts "about 1 hour, or about 20 minutes with word timestamps". So the file to send is split every 19 minutes by default, sent in one request, and merged with time offsets (change with `chunk_minutes`). When split, speaker labels may not match across chunks.
+- **Speaker diarization** (Speech-to-Text): chirp_3 supports Japanese speaker diarization (BatchRecognize only). It is enabled on the remote track; if the model rejects it (at submission or while running), cappy submits again without it and notes this in `transcription.jobs[].note` of `session.json`.
 - **Summary**: `cappy summarize` chooses where to send the request by model name. Claude is called through the Messages API on Vertex AI (`streamRawPredict`, `anthropic_version = 2026-10-21`) with adaptive thinking and `effort`. Gemini is called with `streamGenerateContent?alt=sse` and `thinkingConfig.thinkingLevel`, and the thinking parts (`thought: true`) are not included in the output. Both are received as streams. The transcript is wrapped in `<transcript>`, and the model is told not to follow instructions inside it.
 - **UI language**: strings are written side by side in the code as `tr("English", ja: "日本語")` and chosen by `L10n.current` (`CAPPY_LANG`, `LC_ALL`, `LC_MESSAGES`, `LANG`; English by default). A resource bundle is not used because it would prevent distributing a single binary. Output files follow the meeting language through `UILanguage.forDocument(language)`. The usage description strings in Info.plist cannot be switched, so they contain both English and Japanese.
 - **System audio recording permission state**: there is no public API, so cappy calls `TCCAccessPreflight` / `TCCAccessRequest` of TCC.framework dynamically.

@@ -165,28 +165,28 @@ import Testing
     @Test func bedrockDefaults() throws {
         let p = try parse("""
         [profiles.a.summary]
-        provider = "bedrock"
+        provider = "aws"
         region = "jp"
         """)
-        #expect(p.summaryProvider == "bedrock")
+        #expect(p.summaryProvider == "aws")
         #expect(p.summary.model == "claude-opus-5-5")
         #expect(p.summary.region == "jp")
         #expect(p.summary.effectiveFallback(for: p.summary.model) == "claude-opus-4-8")
-        let v = try parse("[profiles.a.summary]\nprovider = \"vertex\"\n")
+        let v = try parse("[profiles.a.summary]\nprovider = \"google\"\n")
         #expect(v.summary.model == SummarySettings.defaultModel)
     }
 
     @Test func bedrockRejectsGemini() {
         #expect(throws: CappyError.self) {
-            try parse("[profiles.a.summary]\nprovider = \"bedrock\"\nmodel = \"gemini-4-argon\"\n")
+            try parse("[profiles.a.summary]\nprovider = \"aws\"\nmodel = \"gemini-4-argon\"\n")
         }
         #expect(throws: CappyError.self) {
-            try parse("[profiles.a.summary]\nprovider = \"bedrock\"\nfallback_model = \"gemini-3.5-flash\"\n")
+            try parse("[profiles.a.summary]\nprovider = \"aws\"\nfallback_model = \"gemini-3.5-flash\"\n")
         }
     }
 
     @Test func bedrockModelIDsOnlyForBedrock() throws {
-        let p = try parse("[profiles.a.summary]\nprovider = \"bedrock\"\nmodel = \"us.anthropic.claude-opus-5-5\"\n")
+        let p = try parse("[profiles.a.summary]\nprovider = \"aws\"\nmodel = \"us.anthropic.claude-opus-5-5\"\n")
         #expect(p.summary.model == "us.anthropic.claude-opus-5-5")
         #expect(throws: CappyError.self) {
             try parse("[profiles.a.summary]\nmodel = \"jp.anthropic.claude-opus-5-5\"\n")

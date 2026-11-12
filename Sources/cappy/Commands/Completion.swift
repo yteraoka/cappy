@@ -64,7 +64,7 @@ enum CompletionCandidates {
         let names = Set(config.profiles.keys).union(["default"]).sorted()
         return format(names.map { n in
             let p = config.profiles[n]
-            return (n, p.map { "provider=\($0.provider), summary=\($0.summaryProvider)" })
+            return (n, p.map { "transcribe=\($0.provider), summary=\($0.summaryProvider)" })
         })
     }
 
@@ -109,7 +109,8 @@ enum CompletionCandidates {
         return format(models.filter { seen.insert($0).inserted }.map { ($0, nil) })
     }
 
-    static let providers = ["gemini", "google", "transcribe", "none"]
+    static let providers = Profile.providers
+    static let transcribeModels = [GeminiSettings().model, GoogleSettings().model]
     static let efforts = ["low", "medium", "high", "xhigh", "max"]
     static let formats = ["md,json,srt", "md", "json", "srt", "md,json", "md,srt", "json,srt"]
     static let languages = ["ja-JP", "en-US", "en-GB", "zh-CN", "ko-KR"]

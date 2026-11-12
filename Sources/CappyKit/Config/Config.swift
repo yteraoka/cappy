@@ -26,8 +26,6 @@ public struct GoogleSettings: Sendable, Equatable {
 
 /// Vertex AI の Gemini による文字起こし（ファイル: generateContent、リアルタイム: Live API）
 public struct GeminiSettings: Sendable, Equatable {
-    /// 既定は google.project_id
-    public var projectID: String?
     public var location: String = "global"
     /// 録音済みファイルの文字起こしに使うモデル
     public var model: String = "gemini-3.5-transcribe"
@@ -47,9 +45,9 @@ public struct GeminiSettings: Sendable, Equatable {
     public var chunkSeconds: TimeInterval { TimeInterval(max(1, chunkMinutes) * 60) }
 }
 
-/// 会議の要約（Vertex AI の Claude / Gemini、Amazon Bedrock の Claude）
+/// 会議の要約（google: Vertex AI の Claude / Gemini、aws: Amazon Bedrock の Claude など）
 public struct SummarySettings: Sendable, Equatable {
-    /// vertex / bedrock / none。nil ならプロファイルの provider から決める（none なら none、それ以外は vertex）
+    /// google / aws / none。nil なら文字起こしと同じ（transcribe.provider）
     public var provider: String?
     /// 既定は google.project_id
     public var projectID: String?
@@ -72,9 +70,9 @@ public struct SummarySettings: Sendable, Equatable {
     public init() {}
 
     public static let defaultModel = "gemini-4-argon"
-    /// provider = bedrock で model を省略したときのモデル
+    /// provider = aws（Bedrock）で model を省略したときのモデル
     public static let defaultBedrockModel = "claude-opus-5-5"
-    public static let knownProviders: Set<String> = ["vertex", "bedrock", "none"]
+    public static let knownProviders: Set<String> = ["google", "aws", "none"]
     /// Bedrock の推論プロファイルの範囲として知られているもの（これ以外は警告だけ出す）
     public static let knownBedrockRoutings: Set<String> = ["global", "us", "eu", "jp", "au", "apac", "ca", "us-gov"]
 
@@ -105,10 +103,33 @@ public struct AWSSettings: Sendable, Equatable {
     }
 }
 
+/// 文字起こしに使うサービス（transcribe.provider と transcribe.model から決まる）
+public enum TranscriptionService: String, Sendable {
+    /// Vertex AI の Gemini（provider = google、model = gemini-*）
+    case gemini
+    /// Speech-to-Text v2（provider = google、model = chirp_3 など）
+    case speech
+    /// Amazon Transcribe（provider = aws）
+    case amazon
+    case none
+
+    /// 画面に出す名前
+    public var displayName: String {
+        switch self {
+        case .gemini: return "Gemini"
+        case .speech: return "Speech-to-Text"
+        case .amazon: return "Amazon Transcribe"
+        case .none: return "none"
+        }
+    }
+}
+
 public struct Profile: Sendable, Equatable {
     public var name: String
-    /// gemini（Vertex AI の Gemini）/ google（Speech-to-Text v2）/ transcribe（Amazon Transcribe）/ none
-    public var provider: String = "gemini"
+    /// 文字起こしのクラウド: google / aws / none
+    public var provider: String = "google"
+    /// transcribe.model（nil なら既定のモデル。google なら gemini-3.5-transcribe）
+    public var transcribeModel: String?
     public var language: String = "ja-JP"
     public var outputDir: String = "~/Recordings/cappy"
     /// 空き容量がこれを下回ったら警告（MB）
@@ -120,19 +141,25 @@ public struct Profile: Sendable, Equatable {
     public var summary = SummarySettings()
     /// [profiles.<name>.aws] があるときだけ設定される
     public var aws: AWSSettings?
-    /// Amazon Transcribe（provider = transcribe）
-    public var transcribe = TranscribeSettings()
+    /// Amazon Transcribe（provider = aws）
+    public var awsTranscribe = TranscribeSettings()
 
     public init(name: String) { self.name = name }
 
-    /// 実際に使う要約プロバイダ
-    public var summaryProvider: String {
-        if let p = summary.provider { return p }
-        return provider == "none" ? "none" : "vertex"
-    }
+    /// 実際に使う要約のクラウド（google / aws / none）。省略時は文字起こしと同じ
+    public var summaryProvider: String { summary.provider ?? provider }
 
-    /// Gemini の文字起こしに使う Google Cloud プロジェクト
-    public var geminiProjectID: String? { gemini.projectID ?? google.projectID }
+    /// 文字起こしに使うサービス
+    public var transcriptionService: TranscriptionService { Self.transcriptionService(provider: provider, model: transcribeModel) }
+
+    /// provider と model から文字起こしのサービスを決める（google では gemini- で始まるモデルが Gemini、それ以外が Speech-to-Text）
+    public static func transcriptionService(provider: String, model: String?) -> TranscriptionService {
+        switch provider {
+        case "google": return (model ?? GeminiSettings().model).hasPrefix("gemini") ? .gemini : .speech
+        case "aws": return .amazon
+        default: return .none
+        }
+    }
 
     /// 要約に使う Google Cloud プロジェクト
     public var summaryProjectID: String? { summary.projectID ?? google.projectID }
@@ -192,66 +219,91 @@ public struct CappyConfig: Sendable {
 
     private static func parseProfile(name: String, _ t: [String: TOMLValue]) throws -> Profile {
         var p = Profile(name: name)
-        func str(_ key: String, _ table: [String: TOMLValue], _ ctx: String) throws -> String? {
-            guard let v = table[key] else { return nil }
-            guard let s = v.string else { throw CappyError.usage(tr("\(ctx).\(key) must be a string", ja: "\(ctx).\(key) は文字列である必要があります")) }
-            return s
-        }
-        func bool(_ key: String, _ table: [String: TOMLValue], _ ctx: String) throws -> Bool? {
-            guard let v = table[key] else { return nil }
-            guard let b = v.bool else { throw CappyError.usage(tr("\(ctx).\(key) must be true or false", ja: "\(ctx).\(key) は true / false である必要があります")) }
-            return b
-        }
-        func int(_ key: String, _ table: [String: TOMLValue], _ ctx: String) throws -> Int? {
-            guard let v = table[key] else { return nil }
-            guard let i = v.int else { throw CappyError.usage(tr("\(ctx).\(key) must be an integer", ja: "\(ctx).\(key) は整数である必要があります")) }
-            return Int(i)
-        }
         let ctx = "profiles.\(name)"
-        if let v = try str("provider", t, ctx) { p.provider = v }
         if let v = try str("language", t, ctx) { p.language = v }
         if let v = try str("output_dir", t, ctx) { p.outputDir = v }
         if let v = try int("disk_warn_mb", t, ctx) { p.diskWarnMB = v }
         if let v = try int("disk_stop_mb", t, ctx) { p.diskStopMB = v }
+
+        // Google Cloud のアカウント（文字起こしと要約で共通）
         if let g = t["google"]?.table {
             let gctx = ctx + ".google"
             p.google.projectID = try str("project_id", g, gctx)
-            if let v = try str("location", g, gctx) { p.google.location = v }
             p.google.bucket = try str("bucket", g, gctx)
-            if let v = try str("model", g, gctx) { p.google.model = v }
             if let v = try bool("delete_remote_after", g, gctx) { p.google.deleteRemoteAfter = v }
-            if let v = try bool("word_timestamps", g, gctx) { p.google.wordTimestamps = v }
-            if let v = try bool("diarization", g, gctx) { p.google.diarization = v }
-            p.google.chunkMinutes = try int("chunk_minutes", g, gctx)
-            p.google.minSpeakers = try int("min_speakers", g, gctx)
-            p.google.maxSpeakers = try int("max_speakers", g, gctx)
+            warnUnknownKeys(g, ["project_id", "bucket", "delete_remote_after"], gctx)
         }
-        if let g = t["gemini"]?.table {
-            let gctx = ctx + ".gemini"
-            p.gemini.projectID = try str("project_id", g, gctx)
-            if let v = try str("location", g, gctx) { p.gemini.location = v }
-            if let v = try str("model", g, gctx) { p.gemini.model = v }
-            if let v = try str("live_model", g, gctx) { p.gemini.liveModel = v }
-            if let v = try int("chunk_minutes", g, gctx) {
-                guard (1...15).contains(v) else { throw CappyError.usage(tr("\(gctx).chunk_minutes must be between 1 and 15", ja: "\(gctx).chunk_minutes は 1〜15 にしてください")) }
-                p.gemini.chunkMinutes = v
+
+        // 文字起こし。model / location / chunk_minutes はモデルのサービス（Gemini か Speech-to-Text）に、
+        // diarization などはそれを持つすべてのサービスに当てる（cappy transcribe --model / --provider で切り替えても効くように）
+        if let tt = t["transcribe"]?.table {
+            let tctx = ctx + ".transcribe"
+            if let v = try str("provider", tt, tctx) { p.provider = v }
+            guard Profile.knownProviders.contains(p.provider) else {
+                throw CappyError.usage(tr("Invalid \(tctx).provider: \(p.provider) (\(Profile.providerList))", ja: "\(tctx).provider が不正です: \(p.provider)（\(Profile.providerList)）"))
             }
-            if let v = try bool("diarization", g, gctx) { p.gemini.diarization = v }
-            if let v = try bool("word_timestamps", g, gctx) { p.gemini.wordTimestamps = v }
-            if let v = g["custom_vocabulary"] {
-                guard let list = v.array?.compactMap(\.string), list.count == v.array?.count else {
-                    throw CappyError.usage(tr("\(gctx).custom_vocabulary must be an array of strings", ja: "\(gctx).custom_vocabulary は文字列の配列である必要があります"))
+            p.transcribeModel = try str("model", tt, tctx)
+            let service = p.transcriptionService
+            func googleOnly(_ key: String) -> CappyError {
+                CappyError.usage(tr("\(tctx).\(key) can be set only with provider = \"google\"", ja: "\(tctx).\(key) は provider = \"google\" のときだけ指定できます"))
+            }
+            if let v = p.transcribeModel {
+                switch service {
+                case .gemini: p.gemini.model = v
+                case .speech: p.google.model = v
+                default: throw googleOnly("model")
                 }
-                guard list.count <= 1000 else { throw CappyError.usage(tr("\(gctx).custom_vocabulary can have up to 1000 entries", ja: "\(gctx).custom_vocabulary は 1000 語までです")) }
+            }
+            if let v = try str("location", tt, tctx) {
+                switch service {
+                case .gemini: p.gemini.location = v
+                case .speech: p.google.location = v
+                default: throw googleOnly("location")
+                }
+            }
+            if let v = try int("chunk_minutes", tt, tctx) {
+                switch service {
+                case .gemini:
+                    guard (1...15).contains(v) else { throw CappyError.usage(tr("\(tctx).chunk_minutes must be between 1 and 15 for Gemini", ja: "Gemini では \(tctx).chunk_minutes は 1〜15 にしてください")) }
+                    p.gemini.chunkMinutes = v
+                case .speech: p.google.chunkMinutes = v
+                default: throw googleOnly("chunk_minutes")
+                }
+            }
+            if let v = try str("live_model", tt, tctx) { p.gemini.liveModel = v }
+            if let v = try bool("diarization", tt, tctx) {
+                p.gemini.diarization = v
+                p.google.diarization = v
+                p.awsTranscribe.diarization = v
+            }
+            if let v = try bool("word_timestamps", tt, tctx) {
+                p.gemini.wordTimestamps = v
+                p.google.wordTimestamps = v
+            }
+            if let v = try int("min_speakers", tt, tctx) { p.google.minSpeakers = v }
+            if let v = try int("max_speakers", tt, tctx) {
+                p.google.maxSpeakers = v
+                if (2...30).contains(v) {
+                    p.awsTranscribe.maxSpeakers = v
+                } else if service == .amazon {
+                    throw CappyError.usage(tr("\(tctx).max_speakers must be between 2 and 30 for Amazon Transcribe", ja: "Amazon Transcribe では \(tctx).max_speakers は 2〜30 にしてください"))
+                }
+            }
+            if let v = tt["custom_vocabulary"] {
+                guard let list = v.array?.compactMap(\.string), list.count == v.array?.count else {
+                    throw CappyError.usage(tr("\(tctx).custom_vocabulary must be an array of strings", ja: "\(tctx).custom_vocabulary は文字列の配列である必要があります"))
+                }
+                guard list.count <= 1000 else { throw CappyError.usage(tr("\(tctx).custom_vocabulary can have up to 1000 entries", ja: "\(tctx).custom_vocabulary は 1000 語までです")) }
                 p.gemini.customVocabulary = list
             }
-            let knownGemini: Set<String> = ["project_id", "location", "model", "live_model", "chunk_minutes",
-                                            "diarization", "word_timestamps", "custom_vocabulary"]
-            for key in g.keys where !knownGemini.contains(key) {
-                CappyLog.shared.warning(tr("Ignoring unknown setting \(gctx).\(key)", ja: "設定 \(gctx).\(key) は不明なキーのため無視します"))
-            }
+            p.awsTranscribe.vocabularyName = try str("vocabulary_name", tt, tctx)
+            p.awsTranscribe.languageModelName = try str("language_model_name", tt, tctx)
+            warnUnknownKeys(tt, ["provider", "model", "location", "chunk_minutes", "live_model", "diarization", "word_timestamps",
+                                 "min_speakers", "max_speakers", "custom_vocabulary", "vocabulary_name", "language_model_name"], tctx)
         }
-        if let m = t["summary"]?.table {
+
+        do {
+            let m = t["summary"]?.table ?? [:]
             let sctx = ctx + ".summary"
             p.summary.provider = try str("provider", m, sctx)
             p.summary.projectID = try str("project_id", m, sctx)
@@ -263,9 +315,9 @@ public struct CappyConfig: Sendable {
             if let v = try bool("auto", m, sctx) { p.summary.auto = v }
             p.summary.instructionsFile = try str("instructions_file", m, sctx)
             if let v = p.summary.provider, !SummarySettings.knownProviders.contains(v) {
-                throw CappyError.usage(tr("Invalid \(sctx).provider: \(v) (vertex / bedrock / none)", ja: "\(sctx).provider が不正です: \(v)（vertex / bedrock / none）"))
+                throw CappyError.usage(tr("Invalid \(sctx).provider: \(v) (google / aws / none)", ja: "\(sctx).provider が不正です: \(v)（google / aws / none）"))
             }
-            if p.summary.provider == "bedrock" {
+            if p.summaryProvider == "aws" {
                 if m["model"] == nil { p.summary.model = SummarySettings.defaultBedrockModel }
                 for (key, value) in [("model", p.summary.model), ("fallback_model", p.summary.fallbackModel ?? "")]
                 where SummaryModelFamily.of(value) == .gemini {
@@ -278,7 +330,7 @@ public struct CappyConfig: Sendable {
             } else {
                 for (key, value) in [("model", p.summary.model), ("fallback_model", p.summary.fallbackModel ?? "")]
                 where value.contains("anthropic.") || SummaryModelFamily.of(value) == .bedrockChat {
-                    throw CappyError.usage(tr("Invalid \(sctx).\(key): \(value) (Bedrock model IDs can be used only with provider = \"bedrock\")", ja: "\(sctx).\(key) が不正です: \(value)（Bedrock のモデル ID は provider = \"bedrock\" のときだけ使えます）"))
+                    throw CappyError.usage(tr("Invalid \(sctx).\(key): \(value) (Bedrock model IDs can be used only with provider = \"aws\")", ja: "\(sctx).\(key) が不正です: \(value)（Bedrock のモデル ID は provider = \"aws\" のときだけ使えます）"))
                 }
             }
             if !SummarySettings.knownEfforts.contains(p.summary.effort) {
@@ -291,43 +343,44 @@ public struct CappyConfig: Sendable {
             if p.summary.maxTokens < 1024 {
                 throw CappyError.usage(tr("\(sctx).max_tokens must be 1024 or more", ja: "\(sctx).max_tokens は 1024 以上にしてください"))
             }
-            let knownSummary: Set<String> = ["provider", "project_id", "region", "model", "fallback_model", "effort",
-                                             "max_tokens", "auto", "instructions_file"]
-            for key in m.keys where !knownSummary.contains(key) {
-                CappyLog.shared.warning(tr("Ignoring unknown setting \(sctx).\(key)", ja: "設定 \(sctx).\(key) は不明なキーのため無視します"))
-            }
+            warnUnknownKeys(m, ["provider", "project_id", "region", "model", "fallback_model", "effort",
+                                "max_tokens", "auto", "instructions_file"], sctx)
         }
         if let a = t["aws"]?.table {
             let actx = ctx + ".aws"
             p.aws = AWSSettings(profile: try str("profile", a, actx), region: try str("region", a, actx),
                                 bucket: try str("bucket", a, actx),
                                 deleteRemoteAfter: try bool("delete_remote_after", a, actx) ?? true)
-            for key in a.keys where !["profile", "region", "bucket", "delete_remote_after"].contains(key) {
-                CappyLog.shared.warning(tr("Ignoring unknown setting \(actx).\(key)", ja: "設定 \(actx).\(key) は不明なキーのため無視します"))
-            }
+            warnUnknownKeys(a, ["profile", "region", "bucket", "delete_remote_after"], actx)
         }
-        if let trTable = t["transcribe"]?.table {
-            let tctx = ctx + ".transcribe"
-            if let v = try bool("diarization", trTable, tctx) { p.transcribe.diarization = v }
-            if let v = try int("max_speakers", trTable, tctx) {
-                guard (2...30).contains(v) else { throw CappyError.usage(tr("\(tctx).max_speakers must be between 2 and 30", ja: "\(tctx).max_speakers は 2〜30 にしてください")) }
-                p.transcribe.maxSpeakers = v
-            }
-            p.transcribe.vocabularyName = try str("vocabulary_name", trTable, tctx)
-            p.transcribe.languageModelName = try str("language_model_name", trTable, tctx)
-            for key in trTable.keys where !["diarization", "max_speakers", "vocabulary_name", "language_model_name"].contains(key) {
-                CappyLog.shared.warning(tr("Ignoring unknown setting \(tctx).\(key)", ja: "設定 \(tctx).\(key) は不明なキーのため無視します"))
-            }
-        }
-        let known: Set<String> = ["provider", "language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "gemini", "summary",
-                                  "aws", "transcribe"]
-        for key in t.keys where !known.contains(key) {
+        warnUnknownKeys(t, ["language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "aws", "transcribe", "summary"], ctx)
+        return p
+    }
+
+    // MARK: 値の読み取り
+
+    private static func str(_ key: String, _ table: [String: TOMLValue], _ ctx: String) throws -> String? {
+        guard let v = table[key] else { return nil }
+        guard let s = v.string else { throw CappyError.usage(tr("\(ctx).\(key) must be a string", ja: "\(ctx).\(key) は文字列である必要があります")) }
+        return s
+    }
+
+    private static func bool(_ key: String, _ table: [String: TOMLValue], _ ctx: String) throws -> Bool? {
+        guard let v = table[key] else { return nil }
+        guard let b = v.bool else { throw CappyError.usage(tr("\(ctx).\(key) must be true or false", ja: "\(ctx).\(key) は true / false である必要があります")) }
+        return b
+    }
+
+    private static func int(_ key: String, _ table: [String: TOMLValue], _ ctx: String) throws -> Int? {
+        guard let v = table[key] else { return nil }
+        guard let i = v.int else { throw CappyError.usage(tr("\(ctx).\(key) must be an integer", ja: "\(ctx).\(key) は整数である必要があります")) }
+        return Int(i)
+    }
+
+    private static func warnUnknownKeys(_ table: [String: TOMLValue], _ known: Set<String>, _ ctx: String) {
+        for key in table.keys.sorted() where !known.contains(key) {
             CappyLog.shared.warning(tr("Ignoring unknown setting \(ctx).\(key)", ja: "設定 \(ctx).\(key) は不明なキーのため無視します"))
         }
-        if !Profile.knownProviders.contains(p.provider) {
-            throw CappyError.usage(tr("Invalid \(ctx).provider: \(p.provider) (gemini / google / transcribe / none)", ja: "\(ctx).provider が不正です: \(p.provider)（gemini / google / transcribe / none）"))
-        }
-        return p
     }
 
     /// プロファイルを取得する。設定ファイルがない場合の "default" は既定値で返す
@@ -343,5 +396,8 @@ public struct CappyConfig: Sendable {
 }
 
 extension Profile {
-    public static let knownProviders: Set<String> = ["gemini", "google", "transcribe", "none"]
+    /// 文字起こしのプロバイダ（表示順）
+    public static let providers = ["google", "aws", "none"]
+    public static let knownProviders = Set(providers)
+    public static var providerList: String { providers.joined(separator: " / ") }
 }

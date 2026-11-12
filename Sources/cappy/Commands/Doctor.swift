@@ -76,7 +76,7 @@ struct Doctor: AsyncParsableCommand {
         do {
             config = try CappyConfig.load()
             add(config.fileExists ? .ok : .warn, tr("Config file", ja: "設定ファイル"),
-                config.fileExists ? config.path.path : tr("\(config.path.path) does not exist (using defaults)", ja: "\(config.path.path) がありません（既定値を使います）"))
+                config.fileExists ? config.path.path : tr("\(config.path.path) does not exist (using defaults). Create it with `cappy init`", ja: "\(config.path.path) がありません（既定値を使います）。`cappy init` で作成できます"))
         } catch let e as CappyError {
             add(.fail, tr("Config file", ja: "設定ファイル"), e.message)
             finish(checks)
@@ -85,7 +85,7 @@ struct Doctor: AsyncParsableCommand {
         let profile: Profile
         do {
             profile = try config.profile(named: common.profile)
-            add(.ok, tr("Profile", ja: "プロファイル"), tr("\(profile.name) (provider=\(profile.provider), summary=\(profile.summaryProvider), language=\(profile.language))", ja: "\(profile.name)（provider=\(profile.provider), summary=\(profile.summaryProvider), language=\(profile.language)）"))
+            add(.ok, tr("Profile", ja: "プロファイル"), tr("\(profile.name) (transcribe=\(profile.provider) (\(profile.transcriptionService.displayName)), summary=\(profile.summaryProvider), language=\(profile.language))", ja: "\(profile.name)（transcribe=\(profile.provider)（\(profile.transcriptionService.displayName)）, summary=\(profile.summaryProvider), language=\(profile.language)）"))
         } catch let e as CappyError {
             add(.fail, tr("Profile", ja: "プロファイル"), e.message)
             finish(checks)
@@ -99,14 +99,11 @@ struct Doctor: AsyncParsableCommand {
         }
 
         await checkAWS(profile, add)
-        if profile.provider == "gemini" {
-            await checkGemini(profile, add)
-        } else if profile.provider == "google" {
-            await checkGoogle(profile, add)
-        } else if profile.provider == "transcribe" {
-            await checkTranscribe(profile, add)
-        } else {
-            add(.ok, tr("Transcription", ja: "文字起こし"), tr("provider = none (recording only)", ja: "provider = none（録音のみ）"))
+        switch profile.transcriptionService {
+        case .gemini: await checkGemini(profile, add)
+        case .speech: await checkGoogle(profile, add)
+        case .amazon: await checkTranscribe(profile, add)
+        case .none: add(.ok, tr("Transcription", ja: "文字起こし"), tr("provider = none (recording only)", ja: "provider = none（録音のみ）"))
         }
         await checkSummary(profile, add)
         finish(checks)
@@ -114,7 +111,7 @@ struct Doctor: AsyncParsableCommand {
 
     /// [profiles.<name>.aws] があるとき、認証情報を取得して STS の GetCallerIdentity で確かめる
     func checkAWS(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
-        guard profile.aws != nil || profile.summaryProvider == "bedrock" || profile.provider == "transcribe" else { return }
+        guard profile.aws != nil || profile.summaryProvider == "aws" || profile.provider == "aws" else { return }
         let settings = profile.aws ?? AWSSettings()
         let provider: AWSCredentialsProvider
         do {
@@ -155,11 +152,11 @@ struct Doctor: AsyncParsableCommand {
 
     func checkSummary(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
         let s = profile.summary
-        if profile.summaryProvider == "bedrock" {
+        if profile.summaryProvider == "aws" {
             await checkBedrockSummary(profile, add)
             return
         }
-        guard profile.summaryProvider == "vertex" else {
+        guard profile.summaryProvider == "google" else {
             add(.ok, tr("Summary", ja: "要約"), tr("provider = none (no summary)", ja: "provider = none（要約しない）"), .usage)
             return
         }
@@ -201,7 +198,7 @@ struct Doctor: AsyncParsableCommand {
         let title = "Amazon Transcribe"
         let provider: AmazonTranscribeProvider
         do {
-            guard let p = try ProviderFactory.make(name: "transcribe", profile: profile) as? AmazonTranscribeProvider else { return }
+            guard let p = try ProviderFactory.make(service: .amazon, profile: profile) as? AmazonTranscribeProvider else { return }
             provider = p
         } catch let e as CappyError {
             add(.fail, title, e.message + (e.hint.map { "\n" + $0 } ?? ""), e.status)
@@ -210,7 +207,7 @@ struct Doctor: AsyncParsableCommand {
             add(.fail, title, "\(error)", .transcription)
             return
         }
-        let t = profile.transcribe
+        let t = profile.awsTranscribe
         add(.ok, tr("Transcribe settings", ja: "Transcribe 設定"), "region=\(provider.region) bucket=\(provider.bucketName) language=\(profile.language)"
             + (t.diarization ? " diarization(max \(t.maxSpeakers))" : "")
             + (t.vocabularyName.map { " vocabulary=\($0)" } ?? "") + (t.languageModelName.map { " language_model=\($0)" } ?? ""), .usage)
@@ -391,7 +388,7 @@ struct Doctor: AsyncParsableCommand {
 
     func checkGemini(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
         let g = profile.gemini
-        guard let project = profile.geminiProjectID, let bucket = profile.google.bucket else {
+        guard let project = profile.google.projectID, let bucket = profile.google.bucket else {
             add(.fail, tr("Gemini settings", ja: "Gemini 設定"), tr("Set project_id and bucket in [profiles.\(profile.name).google]", ja: "project_id と bucket を [profiles.\(profile.name).google] に設定してください"), .usage)
             return
         }
