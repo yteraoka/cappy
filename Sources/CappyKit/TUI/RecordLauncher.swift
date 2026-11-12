@@ -131,9 +131,6 @@ public enum LaunchOperation: String, CaseIterable, Sendable {
         return allCases.filter { canSummarize || !$0.summarizes }
     }
 
-    /// 要約まで行う操作か（要約モデルを選ぶ行を出す）
-    public var summarizes: Bool { self == .summarize || self == .liveSummarize }
-
     /// プロファイルを選んだときの初期値（summary.auto なら要約まで）
     public static func preferred(for profile: Profile) -> LaunchOperation {
         let ops = available(for: profile)
@@ -432,7 +429,7 @@ public struct RecordLauncher: Sendable {
         case .profile: return profiles.map(Self.describe)
         case .operation: return operations.map(\.label)
         case .summaryModel:
-            var list = modelChoices.map(describeModel)
+            var list = modelChoices.map { describeModel($0) }
             switch modelList {
             case .loading?, nil: list.append(tr("Getting the available models…", ja: "使えるモデルを取得しています…"))
             case .failed(let m)?: list.append(tr("✗ Cannot get the models: \(m)", ja: "✗ モデルの一覧を取得できません: \(m)"))
