@@ -168,6 +168,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 - Choose an app and press Enter to start recording with those settings. The screen stays full-screen during the recording, conversion, transcription and summary, and shows the choices, the level meters or progress, and the messages (including live transcription captions). The equivalent `cappy record ...` is shown first.
 - The keys while recording are the same as `record` (Space mutes / unmutes the mic, Enter adds a marker; type some text first to give it a label).
 - `--profile` chooses the initial profile. On the choosing screen, q, Esc or Ctrl-C quits without doing anything.
+- If the screen is broken because the terminal shows ambiguous-width characters as wide, `--ascii` (or `CAPPY_TUI_ASCII=1`) draws the symbols (`▶ ● ─ │ → …` and so on) with ASCII.
 
 #### Past recordings
 

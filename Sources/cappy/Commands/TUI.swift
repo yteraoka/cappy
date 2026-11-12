@@ -44,6 +44,10 @@ struct TUI: AsyncParsableCommand {
         """)
     )
 
+    @Flag(help: ArgumentHelp(tr("Draw the symbols (▶ ● ─ │ → …) with ASCII, for terminals that show ambiguous-width characters as wide (also CAPPY_TUI_ASCII=1)",
+                                ja: "記号（▶ ● ─ │ → … など）を ASCII で描く。あいまい幅の文字を全角で表示する端末向け（CAPPY_TUI_ASCII=1 でも可）")))
+    var ascii = false
+
     @OptionGroup var common: CommonOptions
 
     func run() async throws {
@@ -61,9 +65,16 @@ struct TUI: AsyncParsableCommand {
         for p in launcher.profiles where !outputDirectories.contains(p.outputDirectoryURL.standardizedFileURL) {
             outputDirectories.append(p.outputDirectoryURL.standardizedFileURL)
         }
-        let app = TUIApp(launcher: launcher, outputDirectories: outputDirectories, refresh: Self.loadTargets)
+        let env = ProcessInfo.processInfo.environment["CAPPY_TUI_ASCII"] ?? ""
+        let app = TUIApp(launcher: launcher, outputDirectories: outputDirectories, refresh: Self.loadTargets,
+                         ascii: ascii || !["", "0", "false", "no"].contains(env.lowercased()))
         try app.open()
-        defer { app.close() }
+        // 画面を出している間のメッセージは、録音中でなくても画面の外に直接書かせない（#21）
+        Console.redirect(to: app)
+        defer {
+            Console.redirect(to: nil)
+            app.close()
+        }
         // 録音・文字起こし・要約が終わったら（エラーでも）選ぶ画面に戻り、続けて録音できる
         while let choice = await app.chooseTarget() {
             let record: Record
@@ -77,14 +88,12 @@ struct TUI: AsyncParsableCommand {
                              command: "$ cappy record " + choice.arguments.map(Self.shellQuote).joined(separator: " "))
             LiveCaptions.shared.reset()
             let directory = SessionDirectoryBox()
-            Console.redirect(to: app)
             var failure: Error?
             do {
                 try await record.execute(keyInput: app, onSession: { directory.set($0) })
             } catch {
                 failure = error
             }
-            Console.redirect(to: nil)
             app.finishSession(directory: directory.get(), error: failure.map(Self.describe))
         }
     }
@@ -126,7 +135,8 @@ private func tuiRestoreTerminal() {
     let (restored, app): (Bool, TUIApp?) = tuiLock.withLock {
         guard var t = tuiSavedTermios else { return (false, nil) }
         tuiSavedTermios = nil
-        FileHandle.standardOutput.write(Data("\u{1B}[0m\u{1B}[?25h\u{1B}[?1049l".utf8))
+        // 折り返しを戻し、カーソルを表示して、代替スクリーンから戻る
+        FileHandle.standardOutput.write(Data("\u{1B}[0m\u{1B}[?7h\u{1B}[?25h\u{1B}[?1049l".utf8))
         tcsetattr(STDIN_FILENO, TCSANOW, &t)
         let app = tuiActiveApp
         tuiActiveApp = nil
@@ -181,8 +191,12 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
 
     private static let maxLog = 5000
 
-    init(launcher: RecordLauncher, outputDirectories: [URL], refresh: @escaping @Sendable () -> [LaunchTarget]) {
+    /// 前回の画面との差分を作る（描画のスレッドだけが使う）
+    private var frameWriter: TUIFrameWriter
+
+    init(launcher: RecordLauncher, outputDirectories: [URL], refresh: @escaping @Sendable () -> [LaunchTarget], ascii: Bool = false) {
         self.launcher = launcher
+        frameWriter = TUIFrameWriter(ascii: ascii)
         browser = SessionBrowser(directories: outputDirectories)
         self.refresh = refresh
     }
@@ -211,8 +225,8 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
             tuiRestoreTerminal()
             throw CappyError.usage(tr("Cannot configure the terminal", ja: "端末を設定できません"))
         }
-        // 代替スクリーンに切り替え、カーソルを隠す
-        write("\u{1B}[?1049h\u{1B}[?25l")
+        // 代替スクリーンに切り替え、カーソルを隠し、行末での折り返しを止める（幅がずれても画面がずれないように）
+        write("\u{1B}[?1049h\u{1B}[?25l\u{1B}[?7l")
 
         // 録音の割り込み処理がない間（選ぶ画面・録音の準備中・終了後）の SIGTERM は、端末を戻して終了する
         signal(SIGTERM, SIG_IGN)
@@ -596,7 +610,9 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
 
     // MARK: 描画
 
-    private func draw(width: Int, height: Int, phase: InterruptController.Phase?) {
+    private func draw(width terminalWidth: Int, height: Int, phase: InterruptController.Phase?) {
+        // 右端の 1 桁は空けておく（TUIFrameWriter を参照）
+        let width = TUIFrameWriter.contentWidth(terminalWidth)
         let (lines, cursor): ([RecordLauncher.Line], (row: Int, column: Int)?) = lock.withLock {
             switch mode {
             case .launcher:
@@ -619,28 +635,9 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
                 return (screen.render(width: width, height: height), nil)
             }
         }
-        var out = "\u{1B}[H"
-        for (i, line) in lines.prefix(height).enumerated() {
-            for segment in line.segments {
-                let style: String
-                switch segment.style {
-                case .normal: style = ""
-                case .title: style = "\u{1B}[1m"
-                case .heading: style = "\u{1B}[1m"
-                case .selected: style = "\u{1B}[7m"
-                case .dim: style = "\u{1B}[2m"
-                }
-                out += style + segment.text + "\u{1B}[0m"
-            }
-            if i < min(lines.count, height) - 1 { out += "\r\n" }
-        }
-        out += "\u{1B}[J"
-        if let cursor {
-            out += "\u{1B}[\(cursor.row + 1);\(cursor.column + 1)H\u{1B}[?25h"
-        } else {
-            out += "\u{1B}[?25l"
-        }
-        write(out)
+        let frame = frameWriter.frame(lines, cursor: cursor.map { TUIFrameWriter.Cursor(row: $0.row, column: $0.column) },
+                                      width: terminalWidth, height: height)
+        if let frame { write(frame) }
     }
 
     /// 一番上の行: 「録音」と「過去の録音」のタブ
