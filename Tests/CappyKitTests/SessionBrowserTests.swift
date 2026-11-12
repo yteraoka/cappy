@@ -138,6 +138,41 @@ import Testing
         #expect(m.confirmDelete == 0)
     }
 
+    @Test func summarizeIsOfferedOnlyWithoutASummary() throws {
+        let root = try TestSupport.tempDir()
+        let done = try makeSession(in: root, "2026-11-12T2244_done", name: "done", started: "2026-11-12T13:44:00.000Z", audio: false)
+        let todo = try makeSession(in: root, "2026-11-11T1000_todo", name: "todo", started: "2026-11-11T01:00:00.000Z", summary: false, audio: false)
+        let live = try makeSession(in: root, "2026-11-10T1000_live", name: "live", started: "2026-11-10T01:00:00.000Z",
+                                   transcript: false, summary: false, audio: false)
+        _ = try makeSession(in: root, "2026-11-09T1000_none", name: "none", started: "2026-11-09T01:00:00.000Z",
+                            transcript: false, summary: false, audio: false)
+        for dir in [done, todo] { try Data("{}".utf8).write(to: dir.appendingPathComponent("transcript.json")) }
+        try Data("{}".utf8).write(to: live.appendingPathComponent("live-transcript.json"))
+
+        var b = SessionBrowser(directories: [root])
+        b.update(entries: SessionCatalog.scan([root], active: []))
+        #expect(b.entries.map(\.canSummarize) == [false, true, true, false])
+        #expect(b.entries[1].summarySource?.lastPathComponent == "transcript.json")
+        #expect(b.entries[2].summarySource?.lastPathComponent == "live-transcript.json")
+        #expect(!b.operations(for: b.entries[0]).contains(.summarize))
+        #expect(b.operations(for: b.entries[3]) == [.reveal, .delete])
+
+        // 要約がまだないセッションは、メニューの「要約を表示」の位置に「要約を作成」が出る
+        _ = b.handle(.down)
+        let e = try #require(b.selected)
+        #expect(b.operations(for: e) == [.viewTranscript, .summarize, .reveal, .delete])
+        // ショートカットはない（s は要約がないので何もしない）
+        #expect(b.handle(.char("s")) == nil)
+        _ = b.handle(.enter)
+        _ = b.handle(.down)
+        #expect(b.handle(.enter) == .summarize(e))
+
+        // 録音中のものは作らせない
+        var active = e
+        active.isActive = true
+        #expect(!active.canSummarize)
+    }
+
     @Test func sessionsBeingRecordedCannotBeDeleted() throws {
         let root = try TestSupport.tempDir()
         let dir = try makeSession(in: root, "2026-11-12T2244_now", name: "now", started: "2026-11-12T13:44:00.000Z", audio: false)

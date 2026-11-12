@@ -24,6 +24,7 @@ struct TUI: AsyncParsableCommand {
 
         Tab switches to the past recordings: show the transcript (t), live transcript (l) or summary (s),
         play both tracks mixed (p), open each track in the default player, show the folder in Finder (f),
+        create the summary of a session not summarized yet (from the menu; Ctrl-C interrupts it),
         or delete a session (d; asks first and moves the folder to the Trash).
         """, ja: """
         上の欄でプロファイル、録音後の操作（文字起こし・要約・リアルタイム文字起こし）、マイク、自動停止、
@@ -40,6 +41,7 @@ struct TUI: AsyncParsableCommand {
 
         Tab で過去の録音のページに切り替えます。文字起こし（t）・リアルタイム文字起こし（l）・要約（s）の表示、
         相手と自分を合わせた再生（p）、各トラックを再生アプリで開く、フォルダを Finder で開く（f）、
+        まだ要約していないセッションの要約の作成（メニューから。Ctrl-C で中断）、
         削除（d。確認してからフォルダをゴミ箱に移動）ができます。
         """)
     )
@@ -77,15 +79,23 @@ struct TUI: AsyncParsableCommand {
         }
         // 録音・文字起こし・要約が終わったら（エラーでも）選ぶ画面に戻り、続けて録音できる
         while let choice = await app.chooseTarget() {
+            let arguments: [String], details: [(label: String, value: String)]
+            switch choice {
+            case .summarize(let entry):
+                await Self.summarize(entry, app: app)
+                continue
+            case .record(let a, let d):
+                (arguments, details) = (a, d)
+            }
             let record: Record
             do {
-                record = try Record.parse(choice.arguments)
+                record = try Record.parse(arguments)
             } catch {
                 app.finishSession(directory: nil, error: Self.describe(error))
                 continue
             }
-            app.beginSession(details: choice.details,
-                             command: "$ cappy record " + choice.arguments.map(Self.shellQuote).joined(separator: " "))
+            app.beginSession(details: details,
+                             command: "$ cappy record " + arguments.map(Self.shellQuote).joined(separator: " "))
             LiveCaptions.shared.reset()
             let directory = SessionDirectoryBox()
             var failure: Error?
@@ -96,6 +106,38 @@ struct TUI: AsyncParsableCommand {
             }
             app.finishSession(directory: directory.get(), error: failure.map(Self.describe))
         }
+    }
+
+    /// 過去の録音のページから要約を作る（`cappy summarize` と同じ。プロファイルは録音したときのもの）。
+    /// Ctrl-C で中断して一覧に戻る
+    static func summarize(_ entry: SessionEntry, app: TUIApp) async {
+        let task = Task { () throws -> Void in
+            let store = try SessionStore.open(entry.directory)
+            let profile = try CappyConfig.load().profile(named: store.metadata.profile)
+            if profile.summaryProvider == "none" {
+                throw CappyError.usage(tr("The summary provider of profile \(profile.name) is none", ja: "プロファイル \(profile.name) の要約プロバイダが none です"),
+                                       hint: tr("Set provider in [profiles.\(profile.name).summary] to vertex or bedrock", ja: "[profiles.\(profile.name).summary] の provider を vertex か bedrock にしてください"))
+            }
+            let name = entry.title.isEmpty ? entry.directory.lastPathComponent : entry.title
+            app.beginSession(details: [(tr("Session", ja: "セッション"), name),
+                                       (tr("Profile", ja: "プロファイル"), profile.name),
+                                       (tr("Model", ja: "モデル"), profile.summary.model)],
+                             command: "$ cappy summarize " + shellQuote(entry.directory.path), job: .summarize)
+            CappyLog.shared.attach(sessionDirectory: entry.directory)
+            CappyLog.shared.info(tr("cappy \(CappyVersion.current) summarize started session=\(store.metadata.id)", ja: "cappy \(CappyVersion.current) summarize 開始 session=\(store.metadata.id)"))
+            defer { CappyLog.shared.detach() }
+            try await SummarizeRunner.run(store: store, profile: profile, request: .init(explicit: true))
+        }
+        app.setCancelJob { task.cancel() }
+        let result = await task.result
+        app.setCancelJob(nil)
+        var error: String?
+        if case .failure(let e) = result {
+            error = task.isCancelled ? tr("Interrupted. Create the summary again from the menu, or with `cappy summarize \(entry.directory.path)`",
+                                          ja: "中断しました。メニューか `cappy summarize \(entry.directory.path)` で作り直せます")
+                : describe(e)
+        }
+        app.finishSummary(directory: entry.directory, error: error)
     }
 
     static func loadTargets() -> [LaunchTarget] {
@@ -154,17 +196,22 @@ private func tuiRestoreTerminal() {
 /// キー入力と描画は専用のスレッドで行い、録音（Record.execute）は呼び出し側のタスクで動かす。
 /// 録音中は Console の表示を受け取って画面に出し（ConsoleSink）、キー入力を record に渡す（RecordKeyInput）。
 final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
-    struct Choice {
-        var arguments: [String]
-        var details: [(label: String, value: String)]
+    enum Choice {
+        /// アプリを選んで録音を始める
+        case record(arguments: [String], details: [(label: String, value: String)])
+        /// 過去の録音のページから要約を作る
+        case summarize(SessionEntry)
     }
 
     private enum Mode { case launcher, sessions, pager, session, viewingLog }
+    /// .session の画面で動かしているもの
+    enum Job { case record, summarize }
 
     private let lock = NSLock()
     private var launcher: RecordLauncher
     private let refresh: @Sendable () -> [LaunchTarget]
     private var mode = Mode.launcher
+    private var job = Job.record
     private var running = false
     private var dirty = true
     private let loopDone = DispatchSemaphore(value: 0)
@@ -187,6 +234,8 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
     private var lastResult: String?
     private var lastFailed = false
     private var keyHandler: (@Sendable (KeyInputParser.Event, String) -> Void)?
+    /// 録音以外の処理（要約）を Ctrl-C で中断する
+    private var cancelJob: (@Sendable () -> Void)?
     private var keyParser = KeyInputParser()
 
     private static let maxLog = 5000
@@ -275,8 +324,9 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
         }
     }
 
-    func beginSession(details: [(label: String, value: String)], command: String) {
+    func beginSession(details: [(label: String, value: String)], command: String, job: Job = .record) {
         lock.withLock {
+            self.job = job
             self.details = details
             log = []
             status = nil
@@ -306,6 +356,31 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
             keyHandler = nil
             launcherParser = TUIKeyParser()
             mode = .launcher
+            dirty = true
+        }
+    }
+
+    func setCancelJob(_ cancel: (@Sendable () -> Void)?) {
+        lock.withLock { cancelJob = cancel }
+    }
+
+    /// 過去の録音のページから始めた要約が終わった（または失敗した）。結果を一覧の上に出して、一覧に戻る
+    func finishSummary(directory: URL, error: String?) {
+        let entries = SessionCatalog.scan(lock.withLock { browser.directories })
+        lock.withLock {
+            let text: String
+            if let error {
+                text = "✗ " + error
+                allLog.append(tr("Error: \(error)", ja: "エラー: \(error)"))
+            } else {
+                text = tr("Summary created: \(directory.path)", ja: "要約を作成しました: \(directory.path)")
+            }
+            browser.update(entries: entries)
+            browser.notice = text
+            status = nil
+            cancelJob = nil
+            launcherParser = TUIKeyParser()
+            mode = .sessions
             dirty = true
         }
     }
@@ -506,6 +581,17 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
                     self.setSessionsNotice("✗ " + TUI.describe(error))
                 }
             }
+        case .summarize(let entry):
+            lock.withLock {
+                browser.notice = nil
+                details = []
+                log = []
+                status = nil
+                job = .summarize
+                mode = .session // 入力の扱いを処理中のものに切り替える（Ctrl-C で中断）
+                dirty = true
+            }
+            resolveChoice(.summarize(entry))
         case .playMix(let entry):
             setSessionsNotice(tr("Mixing the two tracks…", ja: "2 トラックをミックスしています…"))
             DispatchQueue.global().async { [weak self] in
@@ -567,6 +653,12 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
 
     /// Ctrl-C。録音の割り込み処理があればそこへ渡し（停止・変換の省略・中断）、なければ準備中なので中止する
     private func interrupt() {
+        if let cancel = lock.withLock({ cancelJob }) {
+            consoleClearStatus()
+            consolePrint(tr("Ctrl-C: interrupting…", ja: "Ctrl-C: 中断しています…"))
+            cancel()
+            return
+        }
         if let controller = InterruptController.current {
             controller.trigger(SIGINT)
             return
@@ -586,7 +678,8 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
                 choice = .some(nil)
             case .start(let args)?:
                 let details = launcher.selectedTarget.map { launcher.summary(for: $0) } ?? []
-                choice = .some(Choice(arguments: args, details: details))
+                choice = .some(.record(arguments: args, details: details))
+                job = .record
                 mode = .session // 入力の扱いを録音中のものに切り替える
             case .refresh?:
                 return true
@@ -626,7 +719,7 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
             case .pager:
                 return (pager?.render(width: width, height: height) ?? [], nil)
             case .session, .viewingLog:
-                let (title, help) = Self.titleAndHelp(mode: mode, phase: phase)
+                let (title, help) = Self.titleAndHelp(mode: mode, job: job, phase: phase)
                 var shownStatus = status
                 if mode == .viewingLog {
                     shownStatus = lastResult.map { (lastFailed ? "✗ " : "✓ ") + $0 }
@@ -656,10 +749,14 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
         return line
     }
 
-    private static func titleAndHelp(mode: Mode, phase: InterruptController.Phase?) -> (String, String) {
+    private static func titleAndHelp(mode: Mode, job: Job, phase: InterruptController.Phase?) -> (String, String) {
         if mode == .viewingLog {
             return (tr("Log of the last recording", ja: "前回の録音のログ"),
                     tr("Enter / q / l: back to the list", ja: "Enter / q / l: 一覧に戻る"))
+        }
+        if job == .summarize {
+            return (tr("Summarizing…", ja: "要約を作成しています…"),
+                    tr("Ctrl-C: interrupt and go back to the past recordings", ja: "Ctrl-C: 中断して過去の録音に戻る"))
         }
         switch phase {
         case nil:
