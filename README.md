@@ -111,6 +111,10 @@ cappy record --app us.zoom.xos --name weekly-sync --live
 # Summarize a transcribed session
 cappy summarize ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
+# Mute / unmute the mic of a running recording (from another terminal or a hotkey)
+cappy mic off
+cappy mic on
+
 # Repair a session that ended abnormally
 cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
@@ -126,6 +130,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 | `--pid <pid>` | Record by PID. Repeatable |
 | `--system` | Record all system output except cappy itself |
 | `--no-mic` / `--mic <UID>` | Disable microphone recording / choose the input device (default: the system default input, following changes) |
+| `--muted` | Start with the microphone muted (see "Muting the microphone") |
 | `--out <dir>` / `--name <title>` | Output directory / session name |
 | `--duration 90m` | Stop automatically after this duration (`1h30m`, `45s`, ... also work) |
 | `--wait` | Wait until the target starts playing audio |
@@ -136,9 +141,21 @@ cappy completion zsh > ~/.zfunc/_cappy
 | `--quiet` | Do not show the recording notice |
 | `-v, --verbose` | Also show dropped IOProc buffers and ring buffer usage |
 
-- Press Enter while recording to add a marker to `markers` in `session.json`. Type some text before Enter to give it a label.
+- Press Enter while recording to add a marker to `markers` in `session.json`. Type some text before Enter to give it a label (the text being typed is shown on the status line; Backspace deletes a character and Ctrl-U clears it). Press Space with nothing typed to mute the microphone (see "Muting the microphone").
+- While recording, cappy reads the terminal one key at a time and restores the terminal settings when recording stops. If cappy is killed (e.g. `kill -9`) and the terminal stops echoing, run `stty sane`.
 - Ctrl-C / SIGTERM stops recording, finalizes the CAF files and creates the files to send. A second Ctrl-C skips the conversion and exits (create them later with `recover`).
 - cappy stops and finalizes the recording right before the Mac sleeps. It does not resume automatically after waking up.
+
+#### Muting the microphone
+
+Meeting apps keep using the microphone while you are muted in them, so cappy would otherwise record (and transcribe) what you say or the sounds around you during that time. Mute cappy's microphone together with the meeting app.
+
+- Press Space in the terminal running `cappy record` to toggle the mute (only while nothing is typed; once you start typing a marker label, Space is part of the label). A full-width space from a Japanese input method works too.
+- From another terminal, a script or a hotkey: `cappy mic off` (mute), `cappy mic on` (unmute), `cappy mic toggle`, `cappy mic` (show the state). When several recordings are running, choose one with `--pid`.
+- `cappy record --muted` starts with the microphone muted.
+- While muted, the mic track is recorded as silence, so the track keeps its length and stays aligned with the remote track. The live transcription also receives silence. The muted periods are recorded in `mic_mutes` of `session.json`, and the status line shows `mic 🔇muted`.
+- cappy cannot read the mute state of Zoom, Meet or Teams (none of them make it available to other apps, and they typically keep the microphone open while muted). To keep the two in sync, bind one hotkey to both the meeting app's mute shortcut and `cappy mic toggle` (for example with Shortcuts, Raycast, Hammerspoon or BetterTouchTool), or mute in the meeting app and in cappy at the same time.
+- `cappy mic` finds the recording through a file in `$TMPDIR/cappy/` (`CAPPY_RUNTIME_DIR` to change it) and sends SIGUSR1 (mute) / SIGUSR2 (unmute) to it. It checks the process start time so that a reused PID never receives the signal.
 
 #### Live transcription (`--live`)
 
@@ -327,7 +344,7 @@ AWS_PROFILE=my-sso-profile cappy doctor
 
 ```text
 ~/Recordings/cappy/2026-11-11T1000_weekly-sync/   (0700)
-├── session.json       # metadata and processing state (tracks, gaps, markers, transcription ...)
+├── session.json       # metadata and processing state (tracks, gaps, markers, mic_mutes, transcription ...)
 ├── remote.caf         # remote side (tap), original recording (native format, Float32)
 ├── mic.caf            # you (microphone), original recording
 ├── remote.flac        # file to send (16 kHz, mono, 16 bit; WAV if FLAC is not available)
