@@ -105,6 +105,8 @@ final class CaptureEngine: @unchecked Sendable {
     let io: CaptureIO
     let outputUID: String
     let micUID: String?
+    /// 作成時の集約デバイスの公称サンプルレート（トラックの形式はこのレートにそろえる）
+    let sampleRate: Double
     private var procID: AudioDeviceIOProcID?
     private var running = false
     private var destroyed = false
@@ -137,18 +139,38 @@ final class CaptureEngine: @unchecked Sendable {
             throw CoreAudioError(status: st, what: "AudioHardwareCreateAggregateDevice")
         }
         self.aggregateID = aggID
+        self.sampleRate = Self.nominalSampleRate(aggID)
         do {
-            let (remote, mic) = try Self.resolveLayout(aggregate: aggID, tap: tap, outputUID: outputUID, micUID: micUID)
+            let (remote, mic) = try Self.resolveLayout(aggregate: aggID, tap: tap, outputUID: outputUID, micUID: micUID,
+                                                       deviceRate: sampleRate)
             io = CaptureIO(remote: remote, mic: mic, reason: reason)
         } catch {
             AudioHardwareDestroyAggregateDevice(aggID)
             throw error
         }
-        CappyLog.shared.info(tr("Created the aggregate device id=\(aggID) output=\(outputUID) mic=\(micUID ?? "-") ", ja: "集約デバイスを作成しました id=\(aggID) output=\(outputUID) mic=\(micUID ?? "-") ")
+        CappyLog.shared.info(tr("Created the aggregate device id=\(aggID) rate=\(Int(sampleRate)) output=\(outputUID) mic=\(micUID ?? "-") ", ja: "集約デバイスを作成しました id=\(aggID) rate=\(Int(sampleRate)) output=\(outputUID) mic=\(micUID ?? "-") ")
             + "remote=\(io.remote.map { Self.describe($0.format) } ?? "-") micfmt=\(io.mic.map { Self.describe($0.format) } ?? "-")")
     }
 
     deinit { destroy() }
+
+    /// 集約デバイスの公称サンプルレート（取れなければ 0）
+    static func nominalSampleRate(_ device: AudioObjectID) -> Double {
+        (try? CA.scalar(device, kAudioDevicePropertyNominalSampleRate, default: Float64(0))) ?? 0
+    }
+
+    /// 集約デバイスの現在の公称サンプルレート（録音中の変化の検出用）
+    var currentSampleRate: Double { Self.nominalSampleRate(aggregateID) }
+
+    /// ストリームの形式のサンプルレートを、実際に IOProc に届くレートに直す。
+    ///
+    /// 集約デバイスでは全ストリームが集約デバイスのクロック（メインのサブデバイス = 既定出力）で動き、
+    /// IOProc 1 回あたりのフレーム数もそろう。タップのストリームは、データは集約デバイスのレートに変換されているのに、
+    /// 形式（kAudioStreamPropertyVirtualFormat）はタップ本来のレート（通常 48 kHz）を返すことがある。
+    /// そのまま使うと、出力デバイスが 44.1 kHz のときに remote が 48 kHz と記録され、約 8.8% 速く再生される（#15）。
+    static func correctedSampleRate(stream: Double, device: Double) -> Double {
+        device > 0 ? device : stream
+    }
 
     static func describe(_ f: AVAudioFormat) -> String {
         "\(Int(f.sampleRate))Hz/\(f.channelCount)ch/\(f.isInterleaved ? "i" : "n")"
@@ -157,7 +179,7 @@ final class CaptureEngine: @unchecked Sendable {
     /// 集約デバイスの入力ストリームをトラックに対応付ける。
     /// ストリームはサブデバイス（リスト順）の入力ストリーム、続いてタップの順に並ぶ。
     static func resolveLayout(aggregate: AudioObjectID, tap: ProcessTap?, outputUID: String,
-                              micUID: String?) throws -> (TrackLayout?, TrackLayout?) {
+                              micUID: String?, deviceRate: Double) throws -> (TrackLayout?, TrackLayout?) {
         let streams = try CA.array(aggregate, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput, of: AudioStreamID.self)
         var formats: [AudioStreamBasicDescription] = []
         for s in streams {
@@ -198,6 +220,12 @@ final class CaptureEngine: @unchecked Sendable {
         func layout(_ index: Int?) throws -> TrackLayout? {
             guard let i = index else { return nil }
             var asbd = formats[i]
+            let rate = correctedSampleRate(stream: asbd.mSampleRate, device: deviceRate)
+            if rate != asbd.mSampleRate {
+                CappyLog.shared.info(tr("Stream \(i) reports \(Int(asbd.mSampleRate)) Hz but the aggregate device runs at \(Int(rate)) Hz; using \(Int(rate)) Hz",
+                                        ja: "stream \(i) の形式は \(Int(asbd.mSampleRate)) Hz ですが、集約デバイスは \(Int(rate)) Hz で動いているため \(Int(rate)) Hz として扱います"))
+                asbd.mSampleRate = rate
+            }
             guard let fmt = AVAudioFormat(streamDescription: &asbd) else {
                 throw CappyError.io(tr("Unsupported audio format (stream \(i))", ja: "未対応の音声フォーマットです（stream \(i)）"))
             }

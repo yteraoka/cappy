@@ -1,11 +1,13 @@
 import AVFoundation
+import CoreAudio
 import Foundation
 import Testing
 @testable import CappyKit
 
 /// 実機の Core Audio を使う結合テスト。
 ///   CAPPY_INTEGRATION=1      集約デバイスの作り直しとタイムライン（権限が未許可でも実行可、相手側は無音になる）
-///   CAPPY_INTEGRATION_TAP=1  afplay の音をタップし、元音声との相互相関で欠落とずれを確認（システムオーディオ録音の許可が必要）
+///   CAPPY_INTEGRATION_TAP=1  afplay の音をタップし、元音声との相互相関で欠落とずれを確認し、記録したサンプルレートが
+///                            実際のデータと合うかを確かめる（システムオーディオ録音の許可が必要）
 @Suite(.serialized) struct IntegrationTests {
     static var enabled: Bool { ProcessInfo.processInfo.environment["CAPPY_INTEGRATION"] == "1" }
     static var tapEnabled: Bool { ProcessInfo.processInfo.environment["CAPPY_INTEGRATION_TAP"] == "1" }
@@ -100,6 +102,55 @@ import Testing
         }
     }
 
+    /// 記録したサンプルレートが実際のデータのレートと一致する（#15: 出力デバイスが 44.1 kHz でも remote を 48 kHz と記録していた）。
+    /// 1 kHz のトーンを afplay で鳴らし、ミュートしたタップで録る（本人には聞こえない）。出力デバイスが 48 kHz 以外のときに意味がある
+    @Test(.enabled(if: IntegrationTests.tapEnabled))
+    func tapSampleRateMatchesData() async throws {
+        // 許可の状態は確認できないことがある（許可済みでも undetermined を返す）ため、音が録れたかで判断する
+        let dir = try TestSupport.tempDir()
+        let src = dir.appendingPathComponent("tone.caf")
+        try TestSupport.writeSineCAF(src, seconds: 3, sampleRate: 48_000, channels: 2, frequency: 1000, amplitude: 0.3)
+        let player = Process()
+        player.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
+        player.arguments = [src.path]
+        try player.run()
+        defer { if player.isRunning { player.terminate() } }
+        var object: AudioObjectID?
+        for _ in 0..<100 {
+            if let o = AudioProcesses.objectID(forPID: player.processIdentifier) { object = o; break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let o = try #require(object)
+        let outUID = try CA.string(try AudioDevices.defaultOutputDevice(), kAudioDevicePropertyDeviceUID)
+        let tap = try ProcessTap(mode: .processes([o]), muted: true)
+        let engine = try CaptureEngine(tap: tap, outputUID: outUID, micUID: nil, reason: nil)
+        defer { engine.destroy(); tap.destroy() }
+        let sink = ChannelZeroSink()
+        let writer = CaptureWriter(io: engine.io, sinks: [.remote: [sink]])
+        writer.start()
+        let started = Date()
+        try engine.start()
+        player.waitUntilExit()
+        engine.stop()
+        let wall = Date().timeIntervalSince(started)
+        await writer.stopAndDrain()
+
+        let rate = try #require(engine.io.remote).format.sampleRate
+        #expect(rate == engine.sampleRate, "remote \(rate) Hz / 集約デバイス \(engine.sampleRate) Hz")
+        // タイムライン（記録したレートで数えた長さ）が実時間と合う
+        #expect(abs(writer.elapsedSeconds - wall) < 0.15, "timeline \(writer.elapsedSeconds) s / wall \(wall) s")
+        // 記録したレートで読んだトーンの周波数が 1 kHz（ずれていれば 44.1 kHz の出力で 1088 Hz になる）
+        let x = sink.samples
+        let first = try #require(x.firstIndex { abs($0) > 0.1 }, "トーンが録れていません（システムオーディオ録音の許可を確認してください）")
+        let last = try #require(x.lastIndex { abs($0) > 0.1 })
+        let seg = x[(first + 2000)..<(last - 2000)]
+        var crossings = 0
+        var prev = seg.first!
+        for v in seg.dropFirst() { if (prev < 0) != (v < 0) { crossings += 1 }; prev = v }
+        let freq = Double(crossings) / 2 / Double(seg.count) * rate
+        #expect(abs(freq - 1000) < 10, "tone \(freq) Hz")
+    }
+
     func writeChirp(_ url: URL, seconds: Double) throws {
         let rate = 48_000.0
         let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false)!
@@ -125,4 +176,20 @@ import Testing
         try f.read(into: buf)
         return Array(UnsafeBufferPointer(start: buf.floatChannelData![0], count: Int(buf.frameLength)))
     }
+}
+
+/// 先頭チャンネルのサンプルを集める
+private final class ChannelZeroSink: AudioSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _samples: [Float] = []
+    var samples: [Float] { lock.withLock { _samples } }
+    var failure: Error? { nil }
+    func start(format: AVAudioFormat, track: TrackID) throws {}
+    func consume(_ buffer: AVAudioPCMBuffer, at hostTime: UInt64) {
+        guard let p = buffer.floatChannelData?[0] else { return }
+        let n = Int(buffer.frameLength), ch = Int(buffer.format.channelCount)
+        let chunk = buffer.format.isInterleaved ? (0..<n).map { p[$0 * ch] } : Array(UnsafeBufferPointer(start: p, count: n))
+        lock.withLock { _samples += chunk }
+    }
+    func finish() async throws {}
 }

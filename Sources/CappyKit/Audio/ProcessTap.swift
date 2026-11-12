@@ -13,11 +13,14 @@ final class ProcessTap: @unchecked Sendable {
     let id: AudioObjectID
     let uid: String
     private(set) var mode: Mode
+    /// 対象の音を本人に聞こえなくするか（テストで afplay の音を鳴らさずに録るため）
+    let muted: Bool
     private var destroyed = false
 
-    init(mode: Mode) throws {
+    init(mode: Mode, muted: Bool = false) throws {
         self.mode = mode
-        let desc = Self.makeDescription(mode)
+        self.muted = muted
+        let desc = Self.makeDescription(mode, muted: muted)
         var tapID = AudioObjectID(kAudioObjectUnknown)
         let st = AudioHardwareCreateProcessTap(desc, &tapID)
         guard st == noErr, tapID != kAudioObjectUnknown else {
@@ -35,7 +38,7 @@ final class ProcessTap: @unchecked Sendable {
 
     deinit { destroy() }
 
-    static func makeDescription(_ mode: Mode) -> CATapDescription {
+    static func makeDescription(_ mode: Mode, muted: Bool = false) -> CATapDescription {
         let desc: CATapDescription
         switch mode {
         case .processes(let ids):
@@ -45,7 +48,7 @@ final class ProcessTap: @unchecked Sendable {
         }
         desc.name = "cappy"
         desc.isPrivate = true          // 作成したプロセスからだけ見える
-        desc.muteBehavior = .unmuted   // 本人には通常どおり聞こえる
+        desc.muteBehavior = muted ? .muted : .unmuted   // 通常は本人にもそのまま聞こえる
         return desc
     }
 
@@ -56,7 +59,7 @@ final class ProcessTap: @unchecked Sendable {
 
     /// 対象プロセスを差し替える（kAudioTapPropertyDescription を上書き）。失敗したら false
     func update(mode newMode: Mode) -> Bool {
-        let desc = Self.makeDescription(newMode)
+        let desc = Self.makeDescription(newMode, muted: muted)
         var addr = CA.address(kAudioTapPropertyDescription)
         var ref: Unmanaged<CATapDescription> = .passUnretained(desc)
         let st = withUnsafeMutablePointer(to: &ref) { ptr in
