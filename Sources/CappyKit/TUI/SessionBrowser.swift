@@ -15,6 +15,13 @@ public struct SessionEntry: Equatable, Sendable {
     public var sendFiles: [TrackID: URL]
     /// 別のプロセスで録音中（削除させない）
     public var isActive = false
+    /// 要約の元にする文字起こし（transcript.json、なければ live-transcript.json）
+    public var summarySource: URL? = nil
+
+    /// 要約がまだなく、作れるか（文字起こしの結果があり、録音中でない）
+    public var canSummarize: Bool {
+        summary == nil && summarySource != nil && metadata != nil && !isActive
+    }
 
     public var title: String {
         if let n = metadata?.name, !n.isEmpty { return n }
@@ -118,11 +125,14 @@ public enum SessionCatalog {
             }
             guard !originals.isEmpty || fm.fileExists(atPath: metaURL.path) else { return nil }
         }
+        let summarySource = existing(TranscriptFormat.json.fileName)
+            ?? existing(TranscriptFormat.json.fileName(base: LiveTranscription.baseName))
         let started = meta?.startedAt.flatMap(TimeFormat.parseISO8601) ?? dateFromDirectoryName(dir.lastPathComponent)
         return SessionEntry(directory: dir, metadata: meta, startedAt: started,
                             transcript: existing("transcript.md"), liveTranscript: existing("live-transcript.md"),
                             summary: existing(meta?.summary?.file) ?? existing("summary.md"),
-                            originals: originals.compactMapValues { $0 }, sendFiles: sends.compactMapValues { $0 })
+                            originals: originals.compactMapValues { $0 }, sendFiles: sends.compactMapValues { $0 },
+                            summarySource: summarySource)
     }
 
     /// "2026-11-12T2244_name" → 日時
@@ -176,6 +186,8 @@ public struct SessionBrowser: Sendable {
 
     public enum Operation: Equatable, Sendable {
         case viewTranscript, viewLiveTranscript, viewSummary
+        /// 要約を作る（まだないとき）
+        case summarize
         case playMix, open(TrackID), reveal
         /// ゴミ箱に移す（確認してから）
         case delete
@@ -185,6 +197,7 @@ public struct SessionBrowser: Sendable {
             case .viewTranscript: return tr("Show the transcript", ja: "文字起こしを表示")
             case .viewLiveTranscript: return tr("Show the live transcript", ja: "リアルタイム文字起こしを表示")
             case .viewSummary: return tr("Show the summary", ja: "要約を表示")
+            case .summarize: return tr("Create the summary", ja: "要約を作成")
             case .playMix: return tr("Play both tracks mixed", ja: "相手と自分を合わせて再生")
             case .open(.remote): return tr("Open the remote audio", ja: "相手の音声を開く")
             case .open(.mic): return tr("Open the mic audio", ja: "自分の音声を開く")
@@ -203,7 +216,7 @@ public struct SessionBrowser: Sendable {
             case .playMix: return "p"
             case .reveal: return "f"
             case .delete: return "d"
-            case .open: return nil
+            case .open, .summarize: return nil
             }
         }
     }
@@ -217,6 +230,8 @@ public struct SessionBrowser: Sendable {
         case playMix(SessionEntry)
         /// 確認を経て、ゴミ箱に移す
         case trash(SessionEntry)
+        /// 要約を作る
+        case summarize(SessionEntry)
         case switchPage
         case refresh
         case quit
@@ -255,6 +270,7 @@ public struct SessionBrowser: Sendable {
         if e.transcript != nil { ops.append(.viewTranscript) }
         if e.liveTranscript != nil { ops.append(.viewLiveTranscript) }
         if e.summary != nil { ops.append(.viewSummary) }
+        if e.canSummarize { ops.append(.summarize) }
         if e.canPlayMix { ops.append(.playMix) }
         if e.audio(.remote) != nil { ops.append(.open(.remote)) }
         if e.audio(.mic) != nil { ops.append(.open(.mic)) }
@@ -269,6 +285,7 @@ public struct SessionBrowser: Sendable {
         case .viewTranscript: return e.transcript.map { .view(title: tr("Transcript — \(name)", ja: "文字起こし — \(name)"), url: $0) }
         case .viewLiveTranscript: return e.liveTranscript.map { .view(title: tr("Live transcript — \(name)", ja: "リアルタイム文字起こし — \(name)"), url: $0) }
         case .viewSummary: return e.summary.map { .view(title: tr("Summary — \(name)", ja: "要約 — \(name)"), url: $0) }
+        case .summarize: return e.canSummarize ? .summarize(e) : nil
         case .playMix: return .playMix(e)
         case .open(let t): return e.audio(t).map(Action.open)
         case .reveal: return .open(e.directory)
