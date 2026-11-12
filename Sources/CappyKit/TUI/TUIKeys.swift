@@ -132,12 +132,21 @@ public struct TUIKeyParser: Sendable {
 /// 端末での表示幅（東アジアの文字と絵文字を 2 桁として数える）
 public enum DisplayWidth {
     public static func of(_ s: String) -> Int {
-        s.unicodeScalars.reduce(0) { $0 + of($1) }
+        s.reduce(0) { $0 + of($1) }
+    }
+
+    /// 1 文字（書記素クラスタ）の幅。端末は 1 文字を基本の文字の幅で描き、結合文字（濁点・アクセントなど）は重ねる。
+    /// 絵文字として表示するもの（U+FE0F 付きの ⚠️、🔇 など）は 2 桁
+    public static func of(_ c: Character) -> Int {
+        let scalars = c.unicodeScalars
+        guard let first = scalars.first else { return 0 }
+        if scalars.contains(where: { $0.value == 0xFE0F }) || first.properties.isEmojiPresentation { return 2 }
+        return of(first)
     }
 
     public static func of(_ u: Unicode.Scalar) -> Int {
         let v = u.value
-        if v == 0xFE0F || v == 0x200D || (0x0300...0x036F).contains(v) { return 0 }
+        if v == 0xFE0F || v == 0x200D || (0x0300...0x036F).contains(v) || v == 0x3099 || v == 0x309A { return 0 }
         let wide = (0x1100...0x115F).contains(v) || (0x2E80...0xA4CF).contains(v) || (0xAC00...0xD7A3).contains(v)
             || (0xF900...0xFAFF).contains(v) || (0xFE30...0xFE4F).contains(v) || (0xFF00...0xFF60).contains(v)
             || (0xFFE0...0xFFE6).contains(v) || (0x1F300...0x1FAFF).contains(v)
@@ -150,7 +159,7 @@ public enum DisplayWidth {
         var out = ""
         var col = 0
         for ch in s {
-            let cw = of(String(ch))
+            let cw = of(ch)
             defer { col += cw }
             if col >= to { break }
             if col + cw <= from { continue }
@@ -172,7 +181,7 @@ public enum DisplayWidth {
             var line = ""
             var w = 0
             for ch in part {
-                let cw = of(String(ch))
+                let cw = of(ch)
                 if w + cw > width {
                     result.append(line)
                     line = ""
@@ -195,7 +204,7 @@ public enum DisplayWidth {
             return s + String(repeating: " ", count: width - of(s))
         }
         for ch in s {
-            let cw = of(String(ch))
+            let cw = of(ch)
             if w + cw > width - 1 { break }
             out.append(ch)
             w += cw
