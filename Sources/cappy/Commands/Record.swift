@@ -104,6 +104,12 @@ struct Record: AsyncParsableCommand {
     }
 
     func run() async throws {
+        try await execute()
+    }
+
+    /// 録音する。keyInput を渡すと、端末を自分で読まずにそこからキー入力を受け取る（cappy tui）。
+    /// onSession はセッションディレクトリを作った時点で呼ぶ
+    func execute(keyInput: RecordKeyInput? = nil, onSession: (@Sendable (URL) -> Void)? = nil) async throws {
         CappyLog.shared.verbose = common.verbose
         let profile = try common.loadProfile()
         let formats = try TranscriptFormat.parseList(format)
@@ -142,6 +148,7 @@ struct Record: AsyncParsableCommand {
         meta.profile = profile.name
         let store = SessionStore(directory: dir, metadata: meta)
         try store.save()
+        onSession?(dir)
         CappyLog.shared.attach(sessionDirectory: dir)
         CappyLog.shared.info(tr("cappy \(CappyVersion.current) record started session=\(meta.id) targets=\(TargetResolver.describe(spec))", ja: "cappy \(CappyVersion.current) record 開始 session=\(meta.id) targets=\(TargetResolver.describe(spec))"))
 
@@ -195,7 +202,7 @@ struct Record: AsyncParsableCommand {
         let trackList = store.metadata.tracks.map { tr("\($0.id.displayName) (\($0.id.rawValue))", ja: "\($0.id.displayName)（\($0.id.rawValue)）") }
             .joined(separator: tr(", ", ja: "・"))
         let statusLine = StatusLine()
-        let keys = startKeyReader(recorder, micControl: micControl, statusLine: statusLine)
+        let keys = startKeyReader(recorder, micControl: micControl, statusLine: statusLine, input: keyInput)
         defer { keys?.stop() }
         let tty = keys != nil
         let muteKey = tty && micControl.hasMic
@@ -371,8 +378,9 @@ struct Record: AsyncParsableCommand {
     }
 
     /// キー入力（Space でミュートの切り替え、Enter でマーカー）を読み始める。端末から入力できなければ nil
-    private func startKeyReader(_ recorder: Recorder, micControl: MicMuteController, statusLine: StatusLine) -> KeyReader? {
-        let reader = KeyReader { event, text in
+    private func startKeyReader(_ recorder: Recorder, micControl: MicMuteController, statusLine: StatusLine,
+                                input: RecordKeyInput?) -> KeyInputStopper? {
+        let handler: @Sendable (KeyInputParser.Event, String) -> Void = { event, text in
             switch event {
             case .toggleMute:
                 micControl.toggle()
@@ -386,6 +394,8 @@ struct Record: AsyncParsableCommand {
                 statusLine.setInput(text)
             }
         }
+        if let input { return input.start(onEvent: handler) ? input : nil }
+        let reader = KeyReader(onEvent: handler)
         return reader.start() ? reader : nil
     }
 

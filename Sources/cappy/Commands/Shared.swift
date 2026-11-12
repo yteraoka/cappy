@@ -143,8 +143,14 @@ final class InterruptController: @unchecked Sendable {
     private let onStop: @Sendable (String) -> Void
     var sessionPath = ""
 
+    /// いま動いている録音の割り込み処理（cappy tui が Ctrl-C を渡す先）
+    nonisolated(unsafe) private static weak var _current: InterruptController?
+    private static let currentLock = NSLock()
+    static var current: InterruptController? { currentLock.withLock { _current } }
+
     init(onStop: @escaping @Sendable (String) -> Void) {
         self.onStop = onStop
+        Self.currentLock.withLock { Self._current = self }
         for sig in [SIGINT, SIGTERM] {
             signal(sig, SIG_IGN)
             let src = DispatchSource.makeSignalSource(signal: sig, queue: .global())
@@ -157,6 +163,11 @@ final class InterruptController: @unchecked Sendable {
     var skipConversion: Bool { lock.withLock { _skipConversion } }
 
     func setPhase(_ p: Phase) { lock.withLock { phase = p } }
+
+    var currentPhase: Phase { lock.withLock { phase } }
+
+    /// シグナルを受けたときと同じように扱う（端末の Ctrl-C を自分で読む cappy tui から呼ぶ）
+    func trigger(_ sig: Int32) { handle(sig) }
 
     private func handle(_ sig: Int32) {
         let (p, n) = lock.withLock { () -> (Phase, Int) in
@@ -203,6 +214,11 @@ final class LiveCaptions: @unchecked Sendable {
                 latest = nil
             }
         }
+    }
+
+    /// 前の録音の字幕を消す（cappy tui で続けて録音するとき）
+    func reset() {
+        lock.withLock { latest = nil }
     }
 
     /// 末尾の maxLength 文字（長ければ先頭を省く）

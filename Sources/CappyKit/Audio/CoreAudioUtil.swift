@@ -147,6 +147,8 @@ public struct AudioProcessInfo: Sendable, Equatable {
     public var name: String
     public var isRunningOutput: Bool
     public var isRunningInput: Bool
+    /// /Applications などにあるアプリ（またはそのヘルパー）か。システムのデーモンなら false
+    public var isUserApp: Bool = true
 }
 
 public enum AudioProcesses {
@@ -162,7 +164,7 @@ public enum AudioProcesses {
         let out = ((try? CA.scalar(id, kAudioProcessPropertyIsRunningOutput, default: UInt32(0))) ?? 0) != 0
         let inp = ((try? CA.scalar(id, kAudioProcessPropertyIsRunningInput, default: UInt32(0))) ?? 0) != 0
         return AudioProcessInfo(objectID: id, pid: pid, bundleID: bundle, name: processName(pid),
-                                isRunningOutput: out, isRunningInput: inp)
+                                isRunningOutput: out, isRunningInput: inp, isUserApp: isUserApp(pid))
     }
 
     /// PID からプロセスオブジェクト ID（kAudioHardwarePropertyTranslatePIDToProcessObject）
@@ -174,6 +176,19 @@ public enum AudioProcesses {
         let st = AudioObjectGetPropertyData(CA.system, &addr, UInt32(MemoryLayout<pid_t>.size), &qualifier, &size, &result)
         guard st == noErr, result != kAudioObjectUnknown else { return nil }
         return result
+    }
+
+    /// 実行ファイルが /Applications・/System/Applications・~/Applications の .app の中にあるか
+    public static func isUserApp(_ pid: pid_t) -> Bool {
+        var buf = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return false }
+        return isUserAppPath(cString(buf))
+    }
+
+    static func isUserAppPath(_ path: String) -> Bool {
+        guard path.contains(".app/") else { return false }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return ["/Applications/", "/System/Applications/", home + "/Applications/"].contains { path.hasPrefix($0) }
     }
 
     public static func processName(_ pid: pid_t) -> String {
