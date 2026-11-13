@@ -13,10 +13,13 @@ public struct Summarizer: Sendable {
         public var maxTokens: Int
         public var language: String
         public var instructions: String?
+        /// 出力の構成（既定は組み込み）
+        public var template: SummaryTemplate
         public var force: Bool
 
         public init(model: String, fallbackModel: String?, effort: String, maxTokens: Int, language: String,
-                    instructions: String? = nil, force: Bool = false) {
+                    instructions: String? = nil, template: SummaryTemplate = .builtin, force: Bool = false) {
+            self.template = template
             self.model = model
             self.fallbackModel = fallbackModel
             self.effort = effort
@@ -79,13 +82,17 @@ public struct Summarizer: Sendable {
         }
         let digest = Self.digest(data)
         let outURL = store.url(for: Self.fileName)
+        let system = SummaryPrompt.system(language: options.language, extraInstructions: options.instructions, template: options.template)
+        let promptDigest = SummaryTemplate.digest(system)
+        // 依頼文（テンプレート・追加の指示）が変わったら作り直す。以前の版で作った要約（prompt_digest なし）は比べない
         if !options.force, let s = store.metadata.summary, s.state == .done, s.transcriptDigest == digest,
+           s.promptDigest == nil || s.promptDigest == promptDigest,
            FileManager.default.fileExists(atPath: outURL.path) {
             return .upToDate(outURL)
         }
 
         let request = SummaryRequest(
-            system: SummaryPrompt.system(language: options.language, extraInstructions: options.instructions),
+            system: system,
             userText: SummaryPrompt.user(doc: doc, meta: store.metadata),
             maxTokens: options.maxTokens, effort: options.effort)
 
@@ -93,6 +100,8 @@ public struct Summarizer: Sendable {
             var s = SummaryState(provider: client.providerName, model: options.model, region: client.region)
             s.state = .running
             s.transcriptDigest = digest
+            s.prompt = options.template.isBuiltin ? nil : options.template.name
+            s.promptDigest = promptDigest
             s.updatedAt = TimeFormat.iso8601(Date())
             m.summary = s
         }
@@ -147,7 +156,8 @@ public struct Summarizer: Sendable {
         }
 
         let markdown = Self.render(body: response.text, doc: doc, meta: store.metadata, response: response,
-                                   providerName: client.providerName, notes: notes)
+                                   providerName: client.providerName, notes: notes,
+                                   template: options.template.isBuiltin ? nil : options.template.name)
         try FileSecurity.writeAtomically(Data(markdown.utf8), to: outURL)
         try store.update { m in
             m.summary?.state = .done
@@ -165,7 +175,7 @@ public struct Summarizer: Sendable {
     }
 
     static func render(body: String, doc: TranscriptDocument, meta: SessionMetadata, response: SummaryResponse,
-                       providerName: String, notes: [String], timeZone: TimeZone = .current) -> String {
+                       providerName: String, notes: [String], template: String? = nil, timeZone: TimeZone = .current) -> String {
         // 会議の言語（transcript の language）で書く
         let L = UILanguage.forDocument(doc.language)
         var lines: [String] = []
@@ -181,6 +191,7 @@ public struct Summarizer: Sendable {
         let via = ["vertex": "Vertex AI", "bedrock": "Amazon Bedrock"][providerName] ?? providerName
         lines.append(tr(L, "- Summary: generated automatically by \(response.model) (\(via)). Check important points in transcript.md",
                         ja: "- 要約: \(response.model)（\(via)）による自動生成です。重要な内容は transcript.md で確認してください"))
+        if let template { lines.append(tr(L, "- Template: \(template)", ja: "- テンプレート: \(template)")) }
         for n in notes { lines.append(tr(L, "- Note: \(n)", ja: "- 注意: \(n)")) }
         lines.append("")
         lines.append(body)

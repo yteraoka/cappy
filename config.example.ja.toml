@@ -47,6 +47,7 @@ effort = "high"              # low / medium / high / xhigh / max（深いほど�
 # max_tokens = 32000
 auto = false                 # true なら transcribe の後に自動で要約する（--no-summarize で抑止）
 # instructions_file = "~/.config/cappy/summary-instructions.md"  # 要約の書き方の追加指示
+# prompt = "minutes"         # 構成のテンプレート（~/.config/cappy/prompts/minutes.md、または .md のパス。省略時は組み込みの default）
 
 # AWS のアカウント（文字起こし・要約の provider = "aws" で使う）
 # 認証情報は書かず、~/.aws/config のプロファイル（SSO・アクセスキー・credential_process など）を使う

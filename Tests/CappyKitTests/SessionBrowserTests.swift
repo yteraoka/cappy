@@ -166,7 +166,7 @@ import Testing
         _ = b.handle(.enter)
         _ = b.handle(.down)
         // 要約できるプロファイルが渡されていなければ、録音したときのプロファイルでそのまま始める
-        #expect(b.handle(.enter) == .summarize(e, profile: "default", model: nil, force: false))
+        #expect(b.handle(.enter) == .summarize(e, profile: "default", model: nil, prompt: nil, force: false))
 
         // 録音中のものは作らせない
         var active = e
@@ -221,7 +221,7 @@ import Testing
         b.setModelList(key: key, .success([SummaryModelOption(id: "claude-opus-5-5"), SummaryModelOption(id: "moonshotai.kimi-k3.1")]))
         #expect(b.formOptions().count == 2)
         #expect(b.summarizeForm?.index == 1)
-        #expect(b.handle(.enter) == .summarize(e, profile: "bedrock", model: "moonshotai.kimi-k3.1", force: false))
+        #expect(b.handle(.enter) == .summarize(e, profile: "bedrock", model: "moonshotai.kimi-k3.1", prompt: nil, force: false))
         #expect(b.summarizeForm == nil)
 
         // 2 回目は取得済みの一覧を使う。Esc でモデルからプロファイルに戻り、もう一度 Esc で閉じる
@@ -255,7 +255,7 @@ import Testing
         if case .loadModels(_, _)? = b.handle(.enter) {} else { Issue.record("no retry") }
         // 既定のモデルで始める
         _ = b.handle(.home)
-        #expect(b.handle(.enter) == .summarize(e, profile: "default", model: nil, force: false))
+        #expect(b.handle(.enter) == .summarize(e, profile: "default", model: nil, prompt: nil, force: false))
         // プロファイルが 1 つなら Esc で閉じる
         _ = b.handle(.enter)
         _ = b.handle(.down)
@@ -280,7 +280,7 @@ import Testing
         #expect(b.summarizeForm?.force == true)
         b.setModelList(key: key, .success([SummaryModelOption(id: "gemini-3.5-flash")]))
         _ = b.handle(.down)
-        #expect(b.handle(.enter) == .summarize(e, profile: "default", model: "gemini-3.5-flash", force: true))
+        #expect(b.handle(.enter) == .summarize(e, profile: "default", model: "gemini-3.5-flash", prompt: nil, force: true))
     }
 
     @Test func sessionsBeingRecordedCannotBeDeleted() throws {

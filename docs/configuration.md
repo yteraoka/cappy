@@ -30,7 +30,7 @@ A profile is made of these tables:
 | `[profiles.<name>.google]` | Google Cloud account shared by transcription and summary: `project_id`, `bucket`, `delete_remote_after` |
 | `[profiles.<name>.aws]` | AWS account shared by transcription and summary: `profile`, `region`, `bucket`, `delete_remote_after` |
 | `[profiles.<name>.transcribe]` | Transcription: `provider` (`google` / `aws` / `none`), `model`, `location`, `diarization`, ... |
-| `[profiles.<name>.summary]` | Meeting summary: `provider` (`google` / `aws` / `none`), `model`, `region`, `auto`, ... |
+| `[profiles.<name>.summary]` | Meeting summary: `provider` (`google` / `aws` / `none`), `model`, `region`, `auto`, `prompt` (summary template; see [usage](./usage.md#summary-templates)), ... |
 
 `provider` chooses the cloud (the account in `[google]` or `[aws]`), and `model` chooses what to use:
 

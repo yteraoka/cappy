@@ -239,7 +239,7 @@ public struct SessionBrowser: Sendable {
         /// 確認を経て、ゴミ箱に移す
         case trash(SessionEntry)
         /// 要約を作る（profile: 使うプロファイル、model: nil ならプロファイルの summary.model、force: 作り直す）
-        case summarize(SessionEntry, profile: String, model: String?, force: Bool)
+        case summarize(SessionEntry, profile: String, model: String?, prompt: String?, force: Bool)
         /// 要約モデルの一覧を取得する（終わったら setModelList を呼ぶ）
         case loadModels(key: String, profile: Profile)
         case switchPage
@@ -259,26 +259,31 @@ public struct SessionBrowser: Sendable {
 
     /// 要約に使えるプロファイル（設定ファイルのもの。summary.provider が none のものは選ばせない）
     public var profiles: [Profile]
+    /// 要約のテンプレートの名前（SummaryTemplate.available()。default だけならテンプレートは選ばせない）
+    public var prompts: [String]
     /// 取得した要約モデルの一覧（SummaryModelCatalog.cacheKey ごと）
     public private(set) var modelLists: [String: RecordLauncher.ModelList] = [:]
 
     /// 要約を作る前に、プロファイル → モデルの順に選ぶウィンドウ
     public struct SummarizeForm: Equatable, Sendable {
-        public enum Step: Equatable, Sendable { case profile, model }
+        public enum Step: Equatable, Sendable { case profile, model, prompt }
         public var entry: SessionEntry
         /// 作り直すか
         public var force: Bool
         public var step: Step
         /// summaryProfiles の中で選んだプロファイル
         public var profileIndex: Int
+        /// 選んだモデル（nil はプロファイルの既定。テンプレートを選ぶ段階で使う）
+        public var model: String? = nil
         /// ウィンドウの中で選んでいる位置
         public var index: Int
     }
     public private(set) var summarizeForm: SummarizeForm?
 
-    public init(directories: [URL], profiles: [Profile] = []) {
+    public init(directories: [URL], profiles: [Profile] = [], prompts: [String] = []) {
         self.directories = directories
         self.profiles = profiles
+        self.prompts = prompts
     }
 
     public var summaryProfiles: [Profile] { profiles.filter { $0.summaryProvider != "none" } }
@@ -358,7 +363,7 @@ public struct SessionBrowser: Sendable {
         let list = summaryProfiles
         guard !list.isEmpty else {
             // 要約できるプロファイルがない: 録音したときのプロファイルで試み、その理由を表示させる
-            return .summarize(e, profile: e.metadata?.profile ?? "default", model: nil, force: force)
+            return .summarize(e, profile: e.metadata?.profile ?? "default", model: nil, prompt: nil, force: force)
         }
         let p = list.firstIndex { $0.name == e.metadata?.profile } ?? 0
         if list.count == 1 {
@@ -406,6 +411,16 @@ public struct SessionBrowser: Sendable {
         return RecordLauncher.modelChoiceList(default: p.summary.model, list: formModelList(), selected: nil)
     }
 
+    /// 選んだプロファイルの既定のテンプレート
+    private var formDefaultPrompt: String {
+        formProfile?.summary.prompt.flatMap { $0.isEmpty ? nil : $0 } ?? SummaryTemplate.builtinName
+    }
+
+    /// テンプレートの選択肢（nil はプロファイルの既定）
+    func formPromptChoices() -> [String?] {
+        [nil] + prompts.filter { $0 != formDefaultPrompt }.map { Optional($0) }
+    }
+
     /// ウィンドウに出す選択肢
     func formOptions() -> [String] {
         guard let f = summarizeForm else { return [] }
@@ -418,6 +433,8 @@ public struct SessionBrowser: Sendable {
         case .model:
             guard let p = formProfile else { return [] }
             return RecordLauncher.modelOptionLabels(default: p.summary.model, list: formModelList(), selected: nil)
+        case .prompt:
+            return formPromptChoices().map { $0 ?? tr("\(formDefaultPrompt) (profile default)", ja: "\(formDefaultPrompt)（プロファイルの既定）") }
         }
     }
 
@@ -449,8 +466,16 @@ public struct SessionBrowser: Sendable {
                 let choices = formModelChoices()
                 guard let p = formProfile else { return nil }
                 if choices.indices.contains(f.index) {
+                    // 自分で作ったテンプレートがあれば、次にテンプレートを選ぶ
+                    if prompts.count > 1 {
+                        f.model = choices[f.index]
+                        f.step = .prompt
+                        f.index = 0
+                        summarizeForm = f
+                        return nil
+                    }
                     summarizeForm = nil
-                    return .summarize(f.entry, profile: p.name, model: choices[f.index], force: f.force)
+                    return .summarize(f.entry, profile: p.name, model: choices[f.index], prompt: nil, force: f.force)
                 }
                 // 取得に失敗した行で Enter: 取り直す
                 if case .failed(_)? = formModelList() {
@@ -458,10 +483,18 @@ public struct SessionBrowser: Sendable {
                     return modelLoadAction()
                 }
                 return nil
+            case .prompt:
+                let choices = formPromptChoices()
+                guard let p = formProfile, choices.indices.contains(f.index) else { return nil }
+                summarizeForm = nil
+                return .summarize(f.entry, profile: p.name, model: f.model, prompt: choices[f.index], force: f.force)
             }
         case .escape, .left, .char("q"), .char("Q"):
-            // モデルからはプロファイルに戻る（プロファイルが 1 つなら閉じる）
-            if f.step == .model && summaryProfiles.count > 1 {
+            // テンプレートからはモデルに、モデルからはプロファイルに戻る（プロファイルが 1 つなら閉じる）
+            if f.step == .prompt {
+                f.step = .model
+                f.index = formModelChoices().firstIndex(of: f.model) ?? 0
+            } else if f.step == .model && summaryProfiles.count > 1 {
                 f.step = .profile
                 f.index = f.profileIndex
             } else {
@@ -605,6 +638,8 @@ public struct SessionBrowser: Sendable {
             switch f.step {
             case .profile:
                 title = tr("\(verb) \"\(name)\": profile", ja: "「\(name)」を\(verb): プロファイル")
+            case .prompt:
+                title = tr("\(verb) \"\(name)\": template", ja: "「\(name)」を\(verb): テンプレート")
             case .model:
                 title = tr("\(verb) \"\(name)\": model (\(formProfile?.name ?? "-"))", ja: "「\(name)」を\(verb): モデル（\(formProfile?.name ?? "-")）")
             }

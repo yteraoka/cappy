@@ -161,7 +161,7 @@ public enum LaunchMic: CaseIterable, Sendable {
 
 /// `cappy tui` の画面の状態。キー入力を受けて、録音を始めるときは record の引数を返す
 public struct RecordLauncher: Sendable {
-    public enum Field: CaseIterable, Sendable { case profile, operation, summaryModel, mic, duration, name }
+    public enum Field: CaseIterable, Sendable { case profile, operation, summaryModel, summaryPrompt, mic, duration, name }
 
     /// 要約モデルの一覧の取得状況（取得先ごと。SummaryModelCatalog.cacheKey）
     public enum ModelList: Equatable, Sendable {
@@ -229,7 +229,13 @@ public struct RecordLauncher: Sendable {
     }
     public private(set) var picker: Picker?
 
-    public init(profiles: [Profile], initialProfile: String? = nil) {
+    /// 要約のテンプレートの名前（SummaryTemplate.available()。default だけなら行を出さない）
+    public private(set) var prompts: [String]
+    /// 要約に使うテンプレート（nil ならプロファイルの summary.prompt）
+    public private(set) var summaryPrompt: String?
+
+    public init(profiles: [Profile], initialProfile: String? = nil, prompts: [String] = []) {
+        self.prompts = prompts
         let list = profiles.isEmpty ? [Profile(name: "default")] : profiles
         let index = initialProfile.flatMap { n in list.firstIndex { $0.name == n } } ?? 0
         self.profiles = list
@@ -237,14 +243,30 @@ public struct RecordLauncher: Sendable {
         let p = list[index]
         operations = LaunchOperation.available(for: p)
         operation = LaunchOperation.preferred(for: p)
-        cursor = Self.fields(for: operation).count
+        cursor = Self.fields(for: operation, prompts: prompts).count
     }
 
-    /// 表示する設定の行（要約モデルは要約まで行う操作のときだけ）
-    public var fields: [Field] { Self.fields(for: operation) }
+    /// 表示する設定の行（要約モデルは要約まで行う操作のときだけ。テンプレートはさらに、自分で作ったものがあるときだけ）
+    public var fields: [Field] { Self.fields(for: operation, prompts: prompts) }
 
-    static func fields(for operation: LaunchOperation) -> [Field] {
-        Field.allCases.filter { $0 != .summaryModel || operation.summarizes }
+    static func fields(for operation: LaunchOperation, prompts: [String]) -> [Field] {
+        Field.allCases.filter { f in
+            switch f {
+            case .summaryModel: return operation.summarizes
+            case .summaryPrompt: return operation.summarizes && prompts.count > 1
+            default: return true
+            }
+        }
+    }
+
+    /// プロファイルの既定のテンプレート
+    var defaultPrompt: String { profile.summary.prompt.flatMap { $0.isEmpty ? nil : $0 } ?? SummaryTemplate.builtinName }
+
+    /// テンプレートの選択肢（nil はプロファイルの既定）
+    var promptChoices: [String?] { [nil] + prompts.filter { $0 != defaultPrompt }.map { Optional($0) } }
+
+    func describePrompt(_ p: String?) -> String {
+        p ?? tr("\(defaultPrompt) (profile default)", ja: "\(defaultPrompt)（プロファイルの既定）")
     }
 
     /// 設定ファイルのプロファイルを default を先頭に並べる
@@ -292,6 +314,9 @@ public struct RecordLauncher: Sendable {
             (label(of: .operation), value(of: .operation)),
         ]
         if operation.summarizes { rows.append((label(of: .summaryModel), effectiveSummaryModel)) }
+        if operation.summarizes && (summaryPrompt != nil || defaultPrompt != SummaryTemplate.builtinName) {
+            rows.append((label(of: .summaryPrompt), summaryPrompt ?? defaultPrompt))
+        }
         rows.append((label(of: .mic), value(of: .mic)))
         if duration != nil { rows.append((label(of: .duration), value(of: .duration))) }
         let n = name.trimmingCharacters(in: .whitespaces)
@@ -303,6 +328,7 @@ public struct RecordLauncher: Sendable {
     public func arguments(for target: LaunchTarget) -> [String] {
         var args = target.arguments + ["--profile", profile.name] + operation.arguments + mic.arguments
         if operation.summarizes, let summaryModel, summaryModel != profile.summary.model { args += ["--summary-model", summaryModel] }
+        if operation.summarizes, let summaryPrompt, summaryPrompt != defaultPrompt { args += ["--summary-prompt", summaryPrompt] }
         if let duration { args += ["--duration", duration] }
         let n = name.trimmingCharacters(in: .whitespaces)
         if !n.isEmpty { args += ["--name", n] }
@@ -430,6 +456,7 @@ public struct RecordLauncher: Sendable {
         case .operation: return operations.map(\.label)
         case .summaryModel:
             return Self.modelOptionLabels(default: profile.summary.model, list: modelList, selected: summaryModel)
+        case .summaryPrompt: return promptChoices.map { describePrompt($0) }
         case .mic: return LaunchMic.allCases.map(\.label)
         case .duration: return Self.durations.map(Self.describeDuration)
         case .name: return []
@@ -441,6 +468,7 @@ public struct RecordLauncher: Sendable {
         case .profile: return profileIndex
         case .operation: return operations.firstIndex(of: operation) ?? 0
         case .summaryModel: return modelChoices.firstIndex(of: summaryModel) ?? 0
+        case .summaryPrompt: return promptChoices.firstIndex(of: summaryPrompt) ?? 0
         case .mic: return LaunchMic.allCases.firstIndex(of: mic) ?? 0
         case .duration: return durationIndex
         case .name: return 0
@@ -460,8 +488,11 @@ public struct RecordLauncher: Sendable {
             if !operations.contains(operation) { operation = LaunchOperation.preferred(for: profile) }
             // 取得先が変わったら、プロファイルの既定のモデルに戻す
             if modelListKey != before || !modelChoices.contains(summaryModel) { summaryModel = nil }
+            // 新しいプロファイルの既定と同じテンプレートなら、既定に戻す
+            if !promptChoices.contains(summaryPrompt) { summaryPrompt = nil }
         case .operation: operation = operations[i]
         case .summaryModel: summaryModel = modelChoices[i]
+        case .summaryPrompt: summaryPrompt = promptChoices[i]
         case .mic: mic = LaunchMic.allCases[i]
         case .duration: durationIndex = i
         case .name: break
@@ -601,6 +632,7 @@ public struct RecordLauncher: Sendable {
         case .profile: return tr("Profile", ja: "プロファイル")
         case .operation: return tr("Operation", ja: "操作")
         case .summaryModel: return tr("Summary model", ja: "要約モデル")
+        case .summaryPrompt: return tr("Summary template", ja: "要約テンプレート")
         case .mic: return tr("Mic", ja: "マイク")
         case .duration: return tr("Auto stop", ja: "自動停止")
         case .name: return tr("Session name", ja: "セッション名")
@@ -612,6 +644,7 @@ public struct RecordLauncher: Sendable {
         case .profile: return Self.describe(profile)
         case .operation: return operation.label
         case .summaryModel: return describeModel(summaryModel)
+        case .summaryPrompt: return describePrompt(summaryPrompt)
         case .mic: return mic.label
         case .duration: return Self.describeDuration(duration)
         case .name: return name

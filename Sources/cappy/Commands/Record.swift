@@ -76,6 +76,11 @@ struct Record: AsyncParsableCommand {
             completion: .custom { _, _, _ in CompletionCandidates.models() })
     var summaryModel: String?
 
+    @Option(name: .customLong("summary-prompt"),
+            help: ArgumentHelp(tr("Template for the summary (a name in prompts/ or a path; default: summary.prompt of the profile)", ja: "要約のテンプレート（prompts/ の名前かパス。既定はプロファイルの summary.prompt）")),
+            completion: .custom { _, _, _ in CompletionCandidates.prompts() })
+    var summaryPrompt: String?
+
     @Flag(help: ArgumentHelp(tr("Transcribe in real time while recording (transcribe.live_model on Vertex AI, or Amazon Transcribe Streaming when transcribe.provider = aws; results go to live-transcript.*)", ja: "録音しながらリアルタイムで文字起こしする（Vertex AI の transcribe.live_model、transcribe.provider = aws なら Amazon Transcribe Streaming。結果は live-transcript.*）")))
     var live = false
 
@@ -122,6 +127,10 @@ struct Record: AsyncParsableCommand {
         CappyLog.shared.verbose = common.verbose
         let profile = try common.loadProfile()
         let formats = try TranscriptFormat.parseList(format)
+        // 録音が終わってから気づかないよう、要約のテンプレートは先に読めるか確かめる
+        if summarize ?? profile.summary.auto, transcribe || live {
+            _ = try SummaryTemplate.load(summaryPrompt ?? profile.summary.prompt)
+        }
         let maxDuration = try duration.map(DurationParser.parse)
         let spec = RecordTargetSpec(bundleIDs: apps, pids: pids, system: system)
 
@@ -227,7 +236,7 @@ struct Record: AsyncParsableCommand {
                 continuation.yield(.stop("duration"))
             }
         }
-        let statusTimer = startStatusLine(recorder, statusLine)
+        let statusTimer = startStatusLine(recorder, statusLine, targets: TargetResolver.describe(spec))
 
         // 停止要因を待つ
         var fatal: CappyError?
@@ -267,7 +276,8 @@ struct Record: AsyncParsableCommand {
         let meta2 = store.metadata
         printSummary(meta2)
         if recorder.silentTracks.contains(.remote) {
-            Console.print(tr("Warning: the remote track was completely silent. The target app may not have played any audio, or ", ja: "警告: 相手側（remote）が完全に無音でした。対象アプリが音を出していなかったか、")
+            let targets = TargetResolver.describe(spec)
+            Console.print(tr("Warning: the remote track was completely silent. The recording target (\(targets)) may be wrong or may not have played any audio, or ", ja: "警告: 相手側（remote）が完全に無音でした。録音対象（\(targets)）が間違っているか音を出していなかったか、")
                 + tr("system audio recording may not be allowed (`cappy doctor`)", ja: "システムオーディオ録音が許可されていない可能性があります（`cappy doctor`）"))
         }
         if recorder.silentTracks.contains(.mic) && !Self.mutedThroughout(meta2) {
@@ -299,19 +309,26 @@ struct Record: AsyncParsableCommand {
             if let s = t.sendFile { Console.print("  \(dir.appendingPathComponent(s).path)") }
         }
 
-        if transcribe {
+        // すべてのトラックが完全に無音なら、送っても結果は空なので文字起こしと要約は行わない
+        let nothingToTranscribe = !SilenceCheck.hasAudio(tracks: store.metadata.tracks.map(\.id), silent: recorder.silentTracks)
+        if transcribe && nothingToTranscribe {
+            CappyLog.shared.warning(tr("Skipped the transcription because all tracks were completely silent", ja: "すべてのトラックが完全に無音だったため、文字起こしを省略しました"))
+            Console.print(tr("⚠️  All recorded tracks were completely silent, so the transcription\((summarize ?? profile.summary.auto) ? " and the summary" : "") was skipped.", ja: "⚠️  録音したトラックがすべて完全に無音だったため、文字起こし\((summarize ?? profile.summary.auto) ? "と要約" : "")を行いませんでした。")
+                + tr(" Check the recording target (\(TargetResolver.describe(spec))).", ja: "録音対象（\(TargetResolver.describe(spec))）を確認してください。"))
+            Console.print(tr("To transcribe anyway: cappy transcribe \(dir.path)", ja: "それでも文字起こしする場合: cappy transcribe \(dir.path)"))
+        } else if transcribe {
             interrupts.setPhase(.transcribing)
             try await TranscribeRunner.run(store: store, profile: profile, request: .init(
                 providerName: nil, language: nil, mix: mix, formats: formats, force: false, keepRemote: false))
             if (summarize ?? profile.summary.auto) && profile.provider != "none" {
                 interrupts.setPhase(.summarizing)
-                try await SummarizeRunner.run(store: store, profile: profile, request: .init(model: summaryModel, explicit: summarize == true))
+                try await SummarizeRunner.run(store: store, profile: profile, request: .init(model: summaryModel, prompt: summaryPrompt, explicit: summarize == true))
             }
         } else {
             if !liveURLs.isEmpty && (summarize ?? profile.summary.auto) {
                 // リアルタイム文字起こしの結果から要約する
                 interrupts.setPhase(.summarizing)
-                try await SummarizeRunner.run(store: store, profile: profile, request: .init(model: summaryModel, explicit: summarize == true))
+                try await SummarizeRunner.run(store: store, profile: profile, request: .init(model: summaryModel, prompt: summaryPrompt, explicit: summarize == true))
             }
             Console.print(tr("Transcribe: cappy transcribe \(dir.path)", ja: "文字起こし: cappy transcribe \(dir.path)"))
         }
@@ -366,13 +383,27 @@ struct Record: AsyncParsableCommand {
         }
     }
 
-    private func startStatusLine(_ recorder: Recorder, _ statusLine: StatusLine) -> DispatchSourceTimer {
+    /// ステータス行を 0.5 秒ごとに更新する。相手側（remote）が録音開始からずっと無音なら警告も出す
+    private func startStatusLine(_ recorder: Recorder, _ statusLine: StatusLine, targets: String) -> DispatchSourceTimer {
         let timer = DispatchSource.makeTimerSource(queue: .global())
         timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
         let hasMic = !noMic
+        let silence = RemoteSilenceBox()
         timer.setEventHandler {
             let s = recorder.status()
+            switch silence.update(elapsed: s.elapsed, overallPeak: recorder.overallPeaks[.remote]) {
+            case .stillSilent?:
+                let minutes = Int(SilenceCheck.remoteWarnAfter / 60)
+                CappyLog.shared.warning(tr("No remote audio for \(minutes) min since the recording started targets=\(targets)", ja: "録音開始から \(minutes) 分間、相手側の音声がありません targets=\(targets)"))
+                Console.print(tr("⚠️  No audio from the remote side for \(minutes) min since the recording started. Check that the recording target (\(targets)) is the meeting app and that it is playing audio.", ja: "⚠️  録音開始から \(minutes) 分間、相手側（remote）の音声がまったくありません。録音対象（\(targets)）が会議のアプリで、音を出しているか確認してください。"))
+            case .soundDetected?:
+                CappyLog.shared.info(tr("Remote audio detected", ja: "相手側の音声を検出しました"))
+                Console.print(tr("Remote audio detected", ja: "相手側（remote）の音声を検出しました"))
+            case nil:
+                break
+            }
             var line = tr("● REC \(TimeFormat.elapsed(s.elapsed))  remote \(LevelMeter.bar(s.peaks[.remote]))", ja: "● 録音中 \(TimeFormat.elapsed(s.elapsed))  相手 \(LevelMeter.bar(s.peaks[.remote]))")
+            if silence.isWarning { line += tr(" ⚠️ no audio", ja: " ⚠️ 音声なし") }
             if hasMic {
                 line += s.micMuted ? tr("  mic 🔇muted", ja: "  自分 🔇ミュート")
                                    : tr("  mic \(LevelMeter.bar(s.peaks[.mic]))", ja: "  自分 \(LevelMeter.bar(s.peaks[.mic]))")
@@ -429,6 +460,18 @@ struct Record: AsyncParsableCommand {
         line += tr(")", ja: "）")
         Console.print(line)
     }
+}
+
+/// ステータス行のタイマーから使う RemoteSilenceWatch
+final class RemoteSilenceBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var watch = RemoteSilenceWatch()
+
+    func update(elapsed: TimeInterval, overallPeak: Float?) -> RemoteSilenceWatch.Event? {
+        lock.withLock { watch.update(elapsed: elapsed, overallPeak: overallPeak) }
+    }
+
+    var isWarning: Bool { lock.withLock { watch.isWarning } }
 }
 
 /// 録音中のステータス行（0.5 秒ごとの表示に、入力中のラベルを添える）

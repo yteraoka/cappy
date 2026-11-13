@@ -489,6 +489,9 @@ public final class Recorder: @unchecked Sendable {
                               ringUsage: s.ringUsage, gaps: s.gaps, micMuted: isMicMuted)
     }
 
+    /// 録音開始からのトラックごとのピーク（無音の検出用。まだデータのないトラックは含まない）
+    public var overallPeaks: [TrackID: Float] { writer?.overallPeaks ?? [:] }
+
     /// マイクのトラックを録音しているか（ミュートの対象があるか）
     public var hasMicTrack: Bool { control.sync { fileSinks[.mic] != nil } }
 
