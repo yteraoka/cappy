@@ -63,6 +63,8 @@ cappy completion zsh > ~/.zfunc/_cappy
 - While recording, cappy reads the terminal one key at a time and restores the terminal settings when recording stops. If cappy is killed (e.g. `kill -9`) and the terminal stops echoing, run `stty sane`.
 - Ctrl-C / SIGTERM stops recording, finalizes the CAF files and creates the files to send. A second Ctrl-C skips the conversion and exits (create them later with `recover`).
 - cappy stops and finalizes the recording right before the Mac sleeps. It does not resume automatically after waking up.
+- If the remote track has had no sound at all 1 minute after the recording started, cappy warns that the recording target may be wrong (for example an app that plays no audio) and shows `⚠️ no audio` on the status line until sound arrives.
+- If every recorded track was completely silent, cappy skips the transcription and the summary even with `--transcribe` / `--summarize`, because the result would be empty. Run `cappy transcribe <directory>` to transcribe anyway.
 
 ### Muting the microphone
 
