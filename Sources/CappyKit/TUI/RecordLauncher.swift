@@ -429,13 +429,7 @@ public struct RecordLauncher: Sendable {
         case .profile: return profiles.map(Self.describe)
         case .operation: return operations.map(\.label)
         case .summaryModel:
-            var list = modelChoices.map { describeModel($0) }
-            switch modelList {
-            case .loading?, nil: list.append(tr("Checking the available models…", ja: "使えるモデルを確認しています…"))
-            case .failed(let m)?: list.append(tr("✗ Cannot get the models: \(m)", ja: "✗ モデルの一覧を取得できません: \(m)"))
-            case .loaded(_)?: break
-            }
-            return list
+            return Self.modelOptionLabels(default: profile.summary.model, list: modelList, selected: summaryModel)
         case .mic: return LaunchMic.allCases.map(\.label)
         case .duration: return Self.durations.map(Self.describeDuration)
         case .name: return []
@@ -627,26 +621,41 @@ public struct RecordLauncher: Sendable {
     /// 要約に実際に使うモデル
     public var effectiveSummaryModel: String { summaryModel ?? profile.summary.model }
 
-    /// 選択肢の値（nil はプロファイルの既定）。一覧を取得したら、既定と同じものを除いて後ろに並べる
-    var modelChoices: [String?] {
-        var list: [String?] = [nil]
-        if case .loaded(let models)? = modelList {
-            list += models.map(\.id).filter { $0 != profile.summary.model }.map { Optional($0) }
+    var modelChoices: [String?] { Self.modelChoiceList(default: profile.summary.model, list: modelList, selected: summaryModel) }
+
+    func describeModel(_ model: String?) -> String { Self.modelLabel(model, default: profile.summary.model, list: modelList) }
+
+    /// 選択肢の値（nil はプロファイルの既定 def）。一覧を取得したら、既定と同じものを除いて後ろに並べる
+    static func modelChoiceList(default def: String, list: ModelList?, selected: String?) -> [String?] {
+        var choices: [String?] = [nil]
+        if case .loaded(let models)? = list {
+            choices += models.map(\.id).filter { $0 != def }.map { Optional($0) }
         }
         // 一覧にないモデルを選んでいた場合（取得し直して消えたなど）も残す
-        if let summaryModel, !list.contains(summaryModel) { list.append(summaryModel) }
-        return list
+        if let selected, !choices.contains(selected) { choices.append(selected) }
+        return choices
     }
 
-    func describeModel(_ model: String?) -> String {
+    static func modelLabel(_ model: String?, default def: String, list: ModelList?) -> String {
         guard let model else {
-            return tr("\(profile.summary.model) (profile default)", ja: "\(profile.summary.model)（プロファイルの既定）")
+            return tr("\(def) (profile default)", ja: "\(def)（プロファイルの既定）")
         }
-        guard case .loaded(let models)? = modelList, let m = models.first(where: { $0.id == model }) else { return model }
+        guard case .loaded(let models)? = list, let m = models.first(where: { $0.id == model }) else { return model }
         var text = model
         if let name = m.name, !name.isEmpty, name.lowercased() != model.lowercased() { text += "  (\(name))" }
         if !m.verified { text += tr("  ? not verified", ja: "  ？未確認") }
         return text
+    }
+
+    /// 選択肢の表示。取得中・取得の失敗は最後の行（選べない）で知らせる
+    static func modelOptionLabels(default def: String, list: ModelList?, selected: String?) -> [String] {
+        var options = modelChoiceList(default: def, list: list, selected: selected).map { modelLabel($0, default: def, list: list) }
+        switch list {
+        case .loading?, nil: options.append(tr("Checking the available models…", ja: "使えるモデルを確認しています…"))
+        case .failed(let m)?: options.append(tr("✗ Cannot get the models: \(m)", ja: "✗ モデルの一覧を取得できません: \(m)"))
+        case .loaded(_)?: break
+        }
+        return options
     }
 
     /// 今のプロファイルの一覧の取得先

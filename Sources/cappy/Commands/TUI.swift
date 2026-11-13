@@ -25,7 +25,8 @@ struct TUI: AsyncParsableCommand {
 
         Tab switches to the past recordings: show the transcript (t), live transcript (l) or summary (s),
         play both tracks mixed (p), open each track in the default player, show the folder in Finder (f),
-        create the summary of a session not summarized yet (from the menu; Ctrl-C interrupts it),
+        create the summary of a session, or create it again, choosing the profile and the model
+        (from the menu; Ctrl-C interrupts it),
         or delete a session (d; asks first and moves the folder to the Trash).
         """, ja: """
         上の欄でプロファイル、録音後の操作（文字起こし・要約・リアルタイム文字起こし）、要約モデル（要約するとき。
@@ -43,7 +44,7 @@ struct TUI: AsyncParsableCommand {
 
         Tab で過去の録音のページに切り替えます。文字起こし（t）・リアルタイム文字起こし（l）・要約（s）の表示、
         相手と自分を合わせた再生（p）、各トラックを再生アプリで開く、フォルダを Finder で開く（f）、
-        まだ要約していないセッションの要約の作成（メニューから。Ctrl-C で中断）、
+        プロファイルとモデルを選んでの要約の作成・作り直し（メニューから。Ctrl-C で中断）、
         削除（d。確認してからフォルダをゴミ箱に移動）ができます。
         """)
     )
@@ -83,8 +84,8 @@ struct TUI: AsyncParsableCommand {
         while let choice = await app.chooseTarget() {
             let arguments: [String], details: [(label: String, value: String)]
             switch choice {
-            case .summarize(let entry):
-                await Self.summarize(entry, app: app)
+            case .summarize(let entry, let profile, let model, let force):
+                await Self.summarize(entry, profileName: profile, model: model, force: force, app: app)
                 continue
             case .record(let a, let d):
                 (arguments, details) = (a, d)
@@ -110,25 +111,31 @@ struct TUI: AsyncParsableCommand {
         }
     }
 
-    /// 過去の録音のページから要約を作る（`cappy summarize` と同じ。プロファイルは録音したときのもの）。
+    /// 過去の録音のページから要約を作る（`cappy summarize` と同じ。プロファイルとモデルはウィンドウで選んだもの）。
     /// Ctrl-C で中断して一覧に戻る
-    static func summarize(_ entry: SessionEntry, app: TUIApp) async {
+    static func summarize(_ entry: SessionEntry, profileName: String, model: String?, force: Bool, app: TUIApp) async {
         let task = Task { () throws -> Void in
             let store = try SessionStore.open(entry.directory)
-            let profile = try CappyConfig.load().profile(named: store.metadata.profile)
+            let profile = try CappyConfig.load().profile(named: profileName)
             if profile.summaryProvider == "none" {
                 throw CappyError.usage(tr("The summary provider of profile \(profile.name) is none", ja: "プロファイル \(profile.name) の要約プロバイダが none です"),
                                        hint: tr("Set provider in [profiles.\(profile.name).summary] to vertex or bedrock", ja: "[profiles.\(profile.name).summary] の provider を vertex か bedrock にしてください"))
             }
             let name = entry.title.isEmpty ? entry.directory.lastPathComponent : entry.title
+            // プロファイルの既定と同じモデルなら --model は付けない
+            let chosen = model.flatMap { $0 == profile.summary.model ? nil : $0 }
+            var args = ["--profile", profile.name]
+            if let chosen { args += ["--model", chosen] }
+            if force { args.append("--force") }
+            args.append(entry.directory.path)
             app.beginSession(details: [(tr("Session", ja: "セッション"), name),
                                        (tr("Profile", ja: "プロファイル"), profile.name),
-                                       (tr("Model", ja: "モデル"), profile.summary.model)],
-                             command: "$ cappy summarize " + shellQuote(entry.directory.path), job: .summarize)
+                                       (tr("Model", ja: "モデル"), chosen ?? profile.summary.model)],
+                             command: "$ cappy summarize " + args.map(shellQuote).joined(separator: " "), job: .summarize)
             CappyLog.shared.attach(sessionDirectory: entry.directory)
             CappyLog.shared.info(tr("cappy \(CappyVersion.current) summarize started session=\(store.metadata.id)", ja: "cappy \(CappyVersion.current) summarize 開始 session=\(store.metadata.id)"))
             defer { CappyLog.shared.detach() }
-            try await SummarizeRunner.run(store: store, profile: profile, request: .init(explicit: true))
+            try await SummarizeRunner.run(store: store, profile: profile, request: .init(force: force, model: chosen, explicit: true))
         }
         app.setCancelJob { task.cancel() }
         let result = await task.result
@@ -202,7 +209,7 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
         /// アプリを選んで録音を始める
         case record(arguments: [String], details: [(label: String, value: String)])
         /// 過去の録音のページから要約を作る
-        case summarize(SessionEntry)
+        case summarize(SessionEntry, profile: String, model: String?, force: Bool)
     }
 
     private enum Mode { case launcher, sessions, pager, session, viewingLog }
@@ -248,7 +255,7 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
     init(launcher: RecordLauncher, outputDirectories: [URL], refresh: @escaping @Sendable () -> [LaunchTarget], ascii: Bool = false) {
         self.launcher = launcher
         frameWriter = TUIFrameWriter(ascii: ascii)
-        browser = SessionBrowser(directories: outputDirectories)
+        browser = SessionBrowser(directories: outputDirectories, profiles: launcher.profiles)
         self.refresh = refresh
     }
 
@@ -583,7 +590,9 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
                     self.setSessionsNotice("✗ " + TUI.describe(error))
                 }
             }
-        case .summarize(let entry):
+        case .loadModels(let key, let profile):
+            loadModels(key: key, profile: profile)
+        case .summarize(let entry, let profile, let model, let force):
             lock.withLock {
                 browser.notice = nil
                 details = []
@@ -593,7 +602,7 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
                 mode = .session // 入力の扱いを処理中のものに切り替える（Ctrl-C で中断）
                 dirty = true
             }
-            resolveChoice(.summarize(entry))
+            resolveChoice(.summarize(entry, profile: profile, model: model, force: force))
         case .playMix(let entry):
             setSessionsNotice(tr("Mixing the two tracks…", ja: "2 トラックをミックスしています…"))
             DispatchQueue.global().async { [weak self] in
@@ -719,8 +728,10 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
                 result = .failure(error)
             }
             guard let self else { return }
+            // 録音の画面と過去の録音のページで、同じ取得先の一覧を使う
             self.lock.withLock {
                 self.launcher.setModelList(key: key, result)
+                self.browser.setModelList(key: key, result)
                 self.dirty = true
             }
         }

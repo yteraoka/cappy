@@ -48,6 +48,7 @@ Enter opens a menu of actions. The common ones also run directly with a key in t
 | `l` | Show the live transcript (`live-transcript.md`) |
 | `s` | Show the summary (`summary.md`) |
 | Menu only | Create the summary (only for sessions transcribed but not summarized yet) |
+| Menu only | Create the summary again (sessions already summarized; for example with another profile or model) |
 | `p` | Play both tracks together (mixes the two files to send and opens it in the default player) |
 | Menu only | Open the remote / mic audio (the original CAF, or the file to send if there is none) |
 | `f` | Show the folder in Finder |
@@ -57,7 +58,10 @@ Enter opens a menu of actions. The common ones also run directly with a key in t
 - The text view scrolls (↑↓, Space / b for pages, g / G for top / bottom, q back to the list).
 - Audio is handed to the default app (usually QuickTime Player) with `open`. The mix is created in a temporary directory (`$TMPDIR/cappy-playback/`) and reused next time. For a session transcribed with `--mix`, the mix made then is opened.
 - Actions whose files do not exist (such as the transcript of a session not transcribed yet) are not shown.
-- Creating the summary does the same as `cappy summarize` with the profile the session was recorded with (`transcript.json`, or `live-transcript.json` if there is none). The progress is shown on the full screen, and the list comes back when it is finished. Ctrl-C interrupts it and goes back to the list.
+- To create the summary (or create it again), choose the profile first, then the model (Enter goes on, Esc goes back).
+  - The profiles are those whose `summary.provider` is not `none`. The profile the session was recorded with is chosen first; when only one profile can be chosen, it starts from the model.
+  - As with "Summary model" on the recording page, the models are fetched with the API and only those that can actually be used are shown (while loading, you can still start with the profile's default model at the top). The fetched lists are shared with the recording page.
+  - Then it does the same as `cappy summarize --profile <name> [--model <id>] [--force] <dir>` (from `transcript.json`, or `live-transcript.json` if there is none). Creating it again uses `--force` and rewrites `summary.md`. The progress is shown on the full screen, and the list comes back when it is finished. Ctrl-C interrupts it and goes back to the list.
 - Deleting asks first ("Cancel" is chosen at first; choose "Move to the Trash" and press Enter, or press `y`). The folder goes to the Trash rather than being removed, so it can be restored from Finder. The temporary mix made for playback is removed too. A session being recorded in another terminal cannot be deleted. Audio left in Cloud Storage or S3 is not deleted (it is normally deleted after transcription).
 
 ### Stopping and interrupting
