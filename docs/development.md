@@ -1,0 +1,33 @@
+# Development
+
+English | [日本語](./development.ja.md)
+
+## Testing
+
+```bash
+make test                   # unit tests (format conversion, merging, session.json, provider responses, summary requests and responses, HTTP stubs, ...)
+make integration-test       # recreating the aggregate device and checking the timeline on a real device
+make integration-test TAP=1 # tap afplay by PID and check gaps and drift by cross-correlation with the source (requires system audio recording permission)
+# Stream a 16 kHz audio file to the real Amazon Transcribe Streaming in real time (billed; CAPPY_AWS_LIVE_SPEAKERS=0 disables diarization)
+AWS_PROFILE=my-profile CAPPY_AWS_LIVE_TEST=/path/to/remote.flac swift test --filter TranscribeStreamingIntegrationTests
+```
+
+## Implementation notes
+
+- **Implementation language**: cappy is written in Swift rather than Go. The Process Tap API uses an Objective-C class (`CATapDescription`), and the IOProc is called on a real-time thread. With Go (cgo), that thread cannot enter the runtime, and GC pauses cannot be avoided (Swift 6 + SwiftPM + swift-argument-parser).
+- **`tapautostart` is disabled**: when enabled, the aggregate device does not start IO until the tap target plays audio, so the microphone cannot be recorded in the meantime (confirmed on a real device).
+- **Stream mapping**: the input streams of the aggregate device are ordered "sub-devices (in list order), then the tap" (confirmed on a real device). Input streams of the output device are skipped.
+- **Following changes while recording**: when the target app gets new audio processes, cappy first replaces the tap targets with `kAudioTapPropertyDescription`. If that fails (it can return `'!hog'` on real devices), it recreates the device and records the gap in `gaps`. Nothing is done when processes only go away. The aggregate device is recreated when the default output or input device changes, and when the IOProc stops for more than 6 seconds. Gaps are filled with silence on both tracks, so the tracks never drift from each other or from real time.
+- **Transcription with Gemini (default)**: the audio in the bucket is passed as `fileData` to `generateContent` of `gemini-3.5-transcribe` (v1beta1, `generationConfig.audioTranscriptionConfig`). With speaker diarization and timestamps, a request accepts up to 15 minutes, so the audio is split every 14 minutes by default, sent in parallel (up to 3), and merged with time offsets. The result of each chunk is saved in the session directory, so finished chunks are not sent again after an interruption. Segments are built from `parts[].audioTranscription` (`speakerLabel`, `words[].startOffset/endOffset`) in the response, and segments longer than 30 seconds are split at sentence ends or pauses. If diarization is rejected, the audio is sent again without it.
+- **Live transcription (Amazon Transcribe Streaming)**: cappy connects to `wss://transcribestreaming.<region>.amazonaws.com:8443/stream-transcription-websocket` with a SigV4 presigned URL (signature in the query, valid for 5 minutes) and sends audio as `AudioEvent` messages in the event stream format (prelude with lengths and CRC32, headers, payload, message CRC32). Results of `TranscriptEvent` with `IsPartial = false` become final segments, split where the `Speaker` of the words changes. The end is signaled with an empty `AudioEvent`. The service does not answer WebSocket pings, so connection failures are detected on the first receive. `BadRequestException` (except a timeout caused by silence) is treated as not fixable by reconnecting, and only the live transcription stops. If speaker diarization is rejected, cappy reconnects without it.
+- **Live transcription (Live API)**: cappy sends `setup` (`inputAudioTranscription`, `responseModalities: ["TEXT"]`) to the Live API (`wss://…/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`) and audio as `realtimeInput.audio` (`audio/pcm;rate=16000`). `serverContent.inputTranscription` is treated as final and `interimInputTranscription` as text still being recognized. `LiveAudioSink`, an `AudioSink`, receives the audio while recording.
+- **Amazon Transcribe results** (`provider = "aws"`): words and punctuation are taken from `results.items` of the result JSON and split into segments where the speaker (`speaker_label`, or `speaker_labels.segments` in the older format) changes, and at sentence ends, pauses (0.8 seconds) and length (30 seconds). Words are joined without spaces for Japanese and similar languages. The confidence is the average over the words.
+- **chirp_3 limits** (Speech-to-Text): according to the documentation, BatchRecognize accepts "about 1 hour, or about 20 minutes with word timestamps". So the file to send is split every 19 minutes by default, sent in one request, and merged with time offsets (change with `chunk_minutes`). When split, speaker labels may not match across chunks.
+- **Speaker diarization** (Speech-to-Text): chirp_3 supports Japanese speaker diarization (BatchRecognize only). It is enabled on the remote track; if the model rejects it (at submission or while running), cappy submits again without it and notes this in `transcription.jobs[].note` of `session.json`.
+- **Summary**: `cappy summarize` chooses where to send the request by model name. Claude is called through the Messages API on Vertex AI (`streamRawPredict`, `anthropic_version = 2026-10-21`) with adaptive thinking and `effort`. Gemini is called with `streamGenerateContent?alt=sse` and `thinkingConfig.thinkingLevel`, and the thinking parts (`thought: true`) are not included in the output. Both are received as streams. The transcript is wrapped in `<transcript>`, and the model is told not to follow instructions inside it.
+- **UI language**: strings are written side by side in the code as `tr("English", ja: "日本語")` and chosen by `L10n.current` (`CAPPY_LANG`, `LC_ALL`, `LC_MESSAGES`, `LANG`; English by default). A resource bundle is not used because it would prevent distributing a single binary. Output files follow the meeting language through `UILanguage.forDocument(language)`. The usage description strings in Info.plist cannot be switched, so they contain both English and Japanese.
+- **System audio recording permission state**: there is no public API, so cappy calls `TCCAccessPreflight` / `TCCAccessRequest` of TCC.framework dynamically.
+
+## Architecture notes
+
+The writer delivers audio to "sinks" that implement the `AudioSink` protocol. The original recording goes to `FileSink` and live transcription to `LiveAudioSink`. Both receive the same audio taken from the ring buffer (with gaps filled with silence), so times are aligned across the whole recording.
