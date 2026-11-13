@@ -23,6 +23,11 @@ public struct SessionEntry: Equatable, Sendable {
         summary == nil && summarySource != nil && metadata != nil && !isActive
     }
 
+    /// 要約があり、作り直せるか（別のプロファイル・モデルで作り直すなど）
+    public var canResummarize: Bool {
+        summary != nil && summarySource != nil && metadata != nil && !isActive
+    }
+
     public var title: String {
         if let n = metadata?.name, !n.isEmpty { return n }
         // "2026-11-12T2244_weekly-sync" の名前の部分
@@ -188,6 +193,8 @@ public struct SessionBrowser: Sendable {
         case viewTranscript, viewLiveTranscript, viewSummary
         /// 要約を作る（まだないとき）
         case summarize
+        /// 要約を作り直す（あるとき）
+        case resummarize
         case playMix, open(TrackID), reveal
         /// ゴミ箱に移す（確認してから）
         case delete
@@ -198,6 +205,7 @@ public struct SessionBrowser: Sendable {
             case .viewLiveTranscript: return tr("Show the live transcript", ja: "リアルタイム文字起こしを表示")
             case .viewSummary: return tr("Show the summary", ja: "要約を表示")
             case .summarize: return tr("Create the summary", ja: "要約を作成")
+            case .resummarize: return tr("Create the summary again", ja: "要約を作り直す")
             case .playMix: return tr("Play both tracks mixed", ja: "相手と自分を合わせて再生")
             case .open(.remote): return tr("Open the remote audio", ja: "相手の音声を開く")
             case .open(.mic): return tr("Open the mic audio", ja: "自分の音声を開く")
@@ -216,7 +224,7 @@ public struct SessionBrowser: Sendable {
             case .playMix: return "p"
             case .reveal: return "f"
             case .delete: return "d"
-            case .open, .summarize: return nil
+            case .open, .summarize, .resummarize: return nil
             }
         }
     }
@@ -230,8 +238,10 @@ public struct SessionBrowser: Sendable {
         case playMix(SessionEntry)
         /// 確認を経て、ゴミ箱に移す
         case trash(SessionEntry)
-        /// 要約を作る
-        case summarize(SessionEntry)
+        /// 要約を作る（profile: 使うプロファイル、model: nil ならプロファイルの summary.model、force: 作り直す）
+        case summarize(SessionEntry, profile: String, model: String?, force: Bool)
+        /// 要約モデルの一覧を取得する（終わったら setModelList を呼ぶ）
+        case loadModels(key: String, profile: Profile)
         case switchPage
         case refresh
         case quit
@@ -247,9 +257,31 @@ public struct SessionBrowser: Sendable {
     public var notice: String?
     public var directories: [URL]
 
-    public init(directories: [URL]) {
-        self.directories = directories
+    /// 要約に使えるプロファイル（設定ファイルのもの。summary.provider が none のものは選ばせない）
+    public var profiles: [Profile]
+    /// 取得した要約モデルの一覧（SummaryModelCatalog.cacheKey ごと）
+    public private(set) var modelLists: [String: RecordLauncher.ModelList] = [:]
+
+    /// 要約を作る前に、プロファイル → モデルの順に選ぶウィンドウ
+    public struct SummarizeForm: Equatable, Sendable {
+        public enum Step: Equatable, Sendable { case profile, model }
+        public var entry: SessionEntry
+        /// 作り直すか
+        public var force: Bool
+        public var step: Step
+        /// summaryProfiles の中で選んだプロファイル
+        public var profileIndex: Int
+        /// ウィンドウの中で選んでいる位置
+        public var index: Int
     }
+    public private(set) var summarizeForm: SummarizeForm?
+
+    public init(directories: [URL], profiles: [Profile] = []) {
+        self.directories = directories
+        self.profiles = profiles
+    }
+
+    public var summaryProfiles: [Profile] { profiles.filter { $0.summaryProvider != "none" } }
 
     public var selected: SessionEntry? { entries.indices.contains(cursor) ? entries[cursor] : nil }
 
@@ -271,6 +303,7 @@ public struct SessionBrowser: Sendable {
         if e.liveTranscript != nil { ops.append(.viewLiveTranscript) }
         if e.summary != nil { ops.append(.viewSummary) }
         if e.canSummarize { ops.append(.summarize) }
+        if e.canResummarize { ops.append(.resummarize) }
         if e.canPlayMix { ops.append(.playMix) }
         if e.audio(.remote) != nil { ops.append(.open(.remote)) }
         if e.audio(.mic) != nil { ops.append(.open(.mic)) }
@@ -285,7 +318,8 @@ public struct SessionBrowser: Sendable {
         case .viewTranscript: return e.transcript.map { .view(title: tr("Transcript — \(name)", ja: "文字起こし — \(name)"), url: $0) }
         case .viewLiveTranscript: return e.liveTranscript.map { .view(title: tr("Live transcript — \(name)", ja: "リアルタイム文字起こし — \(name)"), url: $0) }
         case .viewSummary: return e.summary.map { .view(title: tr("Summary — \(name)", ja: "要約 — \(name)"), url: $0) }
-        case .summarize: return e.canSummarize ? .summarize(e) : nil
+        case .summarize: return e.canSummarize ? startSummarize(e, force: false) : nil
+        case .resummarize: return e.canResummarize ? startSummarize(e, force: true) : nil
         case .playMix: return .playMix(e)
         case .open(let t): return e.audio(t).map(Action.open)
         case .reveal: return .open(e.directory)
@@ -316,7 +350,133 @@ public struct SessionBrowser: Sendable {
         }
     }
 
+    // MARK: 要約のプロファイルとモデル
+
+    /// 要約のプロファイル・モデルを選ぶウィンドウを開く。初めは録音したときのプロファイルを選んでおき、
+    /// 選べるプロファイルが 1 つならモデルから選ぶ
+    mutating func startSummarize(_ e: SessionEntry, force: Bool) -> Action? {
+        let list = summaryProfiles
+        guard !list.isEmpty else {
+            // 要約できるプロファイルがない: 録音したときのプロファイルで試み、その理由を表示させる
+            return .summarize(e, profile: e.metadata?.profile ?? "default", model: nil, force: force)
+        }
+        let p = list.firstIndex { $0.name == e.metadata?.profile } ?? 0
+        if list.count == 1 {
+            summarizeForm = SummarizeForm(entry: e, force: force, step: .model, profileIndex: 0, index: 0)
+            return modelLoadAction()
+        }
+        summarizeForm = SummarizeForm(entry: e, force: force, step: .profile, profileIndex: p, index: p)
+        return nil
+    }
+
+    /// 選んでいるプロファイル（ウィンドウを開いていなければ nil）
+    public var formProfile: Profile? {
+        guard let f = summarizeForm, summaryProfiles.indices.contains(f.profileIndex) else { return nil }
+        return summaryProfiles[f.profileIndex]
+    }
+
+    /// モデルを選ぶ段階で、一覧をまだ取得していなければ取得を始める（取得中にする）
+    mutating func modelLoadAction() -> Action? {
+        guard let f = summarizeForm, f.step == .model, let p = formProfile else { return nil }
+        let key = SummaryModelCatalog.cacheKey(for: p)
+        guard modelLists[key] == nil else { return nil }
+        modelLists[key] = .loading
+        return .loadModels(key: key, profile: p)
+    }
+
+    /// 取得した一覧（または失敗の理由）を入れる
+    public mutating func setModelList(key: String, _ result: Result<[SummaryModelOption], Error>) {
+        switch result {
+        case .success(let models): modelLists[key] = .loaded(models)
+        case .failure(let e): modelLists[key] = .failed(RecordLauncher.describeModelError(e))
+        }
+        if var f = summarizeForm, f.step == .model {
+            f.index = min(f.index, max(0, formOptions().count - 1))
+            summarizeForm = f
+        }
+    }
+
+    private func formModelList() -> RecordLauncher.ModelList? {
+        formProfile.flatMap { modelLists[SummaryModelCatalog.cacheKey(for: $0)] }
+    }
+
+    /// 選べるモデル（nil はプロファイルの既定）
+    func formModelChoices() -> [String?] {
+        guard let p = formProfile else { return [] }
+        return RecordLauncher.modelChoiceList(default: p.summary.model, list: formModelList(), selected: nil)
+    }
+
+    /// ウィンドウに出す選択肢
+    func formOptions() -> [String] {
+        guard let f = summarizeForm else { return [] }
+        switch f.step {
+        case .profile:
+            return summaryProfiles.map { p in
+                let via = p.summaryProvider == "aws" ? "Bedrock" : "Vertex AI"
+                return "\(p.name)  (\(via), \(p.summary.model))"
+            }
+        case .model:
+            guard let p = formProfile else { return [] }
+            return RecordLauncher.modelOptionLabels(default: p.summary.model, list: formModelList(), selected: nil)
+        }
+    }
+
+    /// ウィンドウを開いている間のキー。↑↓ で選び、Enter で次へ（モデルなら要約を始める）、Esc で戻る
+    private mutating func handleForm(_ key: TUIKey, _ form: SummarizeForm) -> Action? {
+        var f = form
+        let count = formOptions().count
+        switch key {
+        case .interrupt:
+            return .quit
+        case .up, .backTab, .char("k"):
+            f.index = max(0, f.index - 1)
+        case .down, .tab, .char("j"):
+            f.index = min(max(0, count - 1), f.index + 1)
+        case .home, .pageUp:
+            f.index = 0
+        case .end, .pageDown:
+            f.index = max(0, count - 1)
+        case .enter:
+            switch f.step {
+            case .profile:
+                guard summaryProfiles.indices.contains(f.index) else { return nil }
+                f.profileIndex = f.index
+                f.step = .model
+                f.index = 0
+                summarizeForm = f
+                return modelLoadAction()
+            case .model:
+                let choices = formModelChoices()
+                guard let p = formProfile else { return nil }
+                if choices.indices.contains(f.index) {
+                    summarizeForm = nil
+                    return .summarize(f.entry, profile: p.name, model: choices[f.index], force: f.force)
+                }
+                // 取得に失敗した行で Enter: 取り直す
+                if case .failed(_)? = formModelList() {
+                    modelLists[SummaryModelCatalog.cacheKey(for: p)] = nil
+                    return modelLoadAction()
+                }
+                return nil
+            }
+        case .escape, .left, .char("q"), .char("Q"):
+            // モデルからはプロファイルに戻る（プロファイルが 1 つなら閉じる）
+            if f.step == .model && summaryProfiles.count > 1 {
+                f.step = .profile
+                f.index = f.profileIndex
+            } else {
+                summarizeForm = nil
+                return nil
+            }
+        default:
+            break
+        }
+        summarizeForm = f
+        return nil
+    }
+
     public mutating func handle(_ key: TUIKey) -> Action? {
+        if let f = summarizeForm { return handleForm(key, f) }
         if let c = confirmDelete, let e = selected { return handleConfirm(key, c, e) }
         if let m = menu, let e = selected {
             let ops = operations(for: e)
@@ -422,7 +582,9 @@ public struct SessionBrowser: Sendable {
         while lines.count < height - footer { add("") }
         add("")
         let help: String
-        if confirmDelete != nil {
+        if summarizeForm != nil {
+            help = tr(" ↑↓ choose  Enter decide  Esc back", ja: " ↑↓ 選択  Enter 決定  Esc 戻る")
+        } else if confirmDelete != nil {
             help = tr(" ↑↓ choose  Enter decide  y move to the Trash  Esc / n cancel", ja: " ↑↓ 選択  Enter 決定  y ゴミ箱に移動  Esc / n キャンセル")
         } else if menu != nil {
             help = tr(" ↑↓ choose  Enter run  Esc close", ja: " ↑↓ 選択  Enter 実行  Esc 閉じる")
@@ -435,6 +597,20 @@ public struct SessionBrowser: Sendable {
             let labels = operations(for: e).map { op in op.label + (op.shortcut.map { "  (\($0))" } ?? "") }
             TUIMenuBox.overlay(options: labels, current: nil, selected: m, belowRow: cursorRow, textColumn: 9,
                                on: &lines, width: w, height: height)
+        }
+        if let f = summarizeForm {
+            let name = f.entry.title.isEmpty ? f.entry.directory.lastPathComponent : f.entry.title
+            let verb = f.force ? tr("Summarize again", ja: "作り直す") : tr("Summarize", ja: "要約する")
+            let title: String
+            switch f.step {
+            case .profile:
+                title = tr("\(verb) \"\(name)\": profile", ja: "「\(name)」を\(verb): プロファイル")
+            case .model:
+                title = tr("\(verb) \"\(name)\": model (\(formProfile?.name ?? "-"))", ja: "「\(name)」を\(verb): モデル（\(formProfile?.name ?? "-")）")
+            }
+            let current: Int? = f.step == .profile ? summaryProfiles.firstIndex(where: { $0.name == f.entry.metadata?.profile }) : 0
+            TUIMenuBox.overlay(options: formOptions(), current: current, selected: f.index, belowRow: cursorRow, textColumn: 9,
+                               title: title, on: &lines, width: w, height: height)
         }
         if let c = confirmDelete, let e = selected {
             let name = e.title.isEmpty ? e.directory.lastPathComponent : e.title

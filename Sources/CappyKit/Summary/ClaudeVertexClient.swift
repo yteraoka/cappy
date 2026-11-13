@@ -132,6 +132,23 @@ public struct ClaudeVertexClient: SummaryModelClient {
         }
     }
 
+    /// そのモデルをこのプロジェクトで使えるか（Model Garden で有効にしているか）を、課金されない方法で確かめる。
+    /// count-tokens はモデルごとの有効化を確かめないため、モデルのエンドポイントにわざと不正な本文（max_tokens = 0）を送る。
+    /// Vertex AI はモデルの利用権限を Claude に渡す前に確かめるため、403 / 404 なら使えず、
+    /// 本文の誤りとしての 400 が返れば使える（200 でも使える）と判断する
+    public func checkModelAccess(model: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "anthropic_version": Self.apiVersion,
+            "max_tokens": 0,
+            "messages": [["role": "user", "content": "ping"]],
+        ] as [String: Any], options: [.sortedKeys])
+        var req = try await makeRequest(url: endpoint(model: model, method: "rawPredict"), body: body)
+        req.timeoutInterval = 30
+        let r = try await transport.send(req)
+        if r.status == 200 || r.status == 400 { return }
+        throw GoogleAPIError.from(r)
+    }
+
     public func countTokens(_ request: SummaryRequest, model: String) async throws -> Int {
         let url = endpoint(model: "count-tokens", method: "rawPredict")
         let body = try JSONSerialization.data(withJSONObject: [

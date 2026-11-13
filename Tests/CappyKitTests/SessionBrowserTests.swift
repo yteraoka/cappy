@@ -165,12 +165,122 @@ import Testing
         #expect(b.handle(.char("s")) == nil)
         _ = b.handle(.enter)
         _ = b.handle(.down)
-        #expect(b.handle(.enter) == .summarize(e))
+        // 要約できるプロファイルが渡されていなければ、録音したときのプロファイルでそのまま始める
+        #expect(b.handle(.enter) == .summarize(e, profile: "default", model: nil, force: false))
 
         // 録音中のものは作らせない
         var active = e
         active.isActive = true
         #expect(!active.canSummarize)
+    }
+
+    private func summaryProfile(_ name: String, provider: String = "google", model: String = "gemini-4-argon") -> Profile {
+        var p = Profile(name: name)
+        p.summary.provider = provider
+        p.summary.model = model
+        return p
+    }
+
+    /// 要約がまだないセッション（transcript.json あり）を 1 つ作り、選んだ状態の一覧を返す
+    private func browserWithUnsummarized(profiles: [Profile], summary: Bool = false) throws -> (SessionBrowser, SessionEntry) {
+        let root = try TestSupport.tempDir()
+        let dir = try makeSession(in: root, "2026-11-11T1000_todo", name: "todo", started: "2026-11-11T01:00:00.000Z", summary: summary, audio: false)
+        try Data("{}".utf8).write(to: dir.appendingPathComponent("transcript.json"))
+        var b = SessionBrowser(directories: [root], profiles: profiles)
+        b.update(entries: SessionCatalog.scan([root], active: []))
+        return (b, try #require(b.selected))
+    }
+
+    @Test func summarizeAsksForTheProfileAndTheModel() throws {
+        var bedrock = summaryProfile("bedrock", provider: "aws", model: "claude-opus-5-5")
+        bedrock.summary.region = "jp"
+        let (b0, e) = try browserWithUnsummarized(profiles: [summaryProfile("default"), bedrock, summaryProfile("rec", provider: "none")])
+        var b = b0
+        #expect(b.summaryProfiles.map(\.name) == ["default", "bedrock"]) // none は選ばせない
+        _ = b.handle(.enter)
+        _ = b.handle(.down) // 要約を作成
+        #expect(b.handle(.enter) == nil)
+        // 初めは録音したときのプロファイル（default）を選んでいる
+        #expect(b.summarizeForm?.step == .profile)
+        #expect(b.summarizeForm?.index == 0)
+        _ = b.handle(.down)
+        guard case .loadModels(let key, let p)? = b.handle(.enter) else {
+            Issue.record("no load")
+            return
+        }
+        #expect(p.name == "bedrock")
+        #expect(b.summarizeForm?.step == .model)
+        #expect(L10n.$override.withValue(.en) { b.formOptions() } == ["claude-opus-5-5 (profile default)", "Checking the available models…"])
+        let lines = b.render(width: 100, height: 30)
+        #expect(lines.contains { $0.text.contains("claude-opus-5-5") })
+        #expect(lines.allSatisfy { DisplayWidth.of($0.text) == 100 })
+
+        // 取得中の行は選べない
+        _ = b.handle(.down)
+        #expect(b.handle(.enter) == nil)
+        b.setModelList(key: key, .success([SummaryModelOption(id: "claude-opus-5-5"), SummaryModelOption(id: "moonshotai.kimi-k3.1")]))
+        #expect(b.formOptions().count == 2)
+        #expect(b.summarizeForm?.index == 1)
+        #expect(b.handle(.enter) == .summarize(e, profile: "bedrock", model: "moonshotai.kimi-k3.1", force: false))
+        #expect(b.summarizeForm == nil)
+
+        // 2 回目は取得済みの一覧を使う。Esc でモデルからプロファイルに戻り、もう一度 Esc で閉じる
+        _ = b.handle(.enter)
+        _ = b.handle(.down)
+        _ = b.handle(.enter)
+        _ = b.handle(.down)
+        #expect(b.handle(.enter) == nil)
+        #expect(b.summarizeForm?.step == .model)
+        _ = b.handle(.escape)
+        #expect(b.summarizeForm?.step == .profile)
+        #expect(b.summarizeForm?.index == 1)
+        _ = b.handle(.escape)
+        #expect(b.summarizeForm == nil)
+    }
+
+    @Test func singleProfileGoesStraightToTheModel() throws {
+        let (b0, e) = try browserWithUnsummarized(profiles: [summaryProfile("default")])
+        var b = b0
+        _ = b.handle(.enter)
+        _ = b.handle(.down)
+        guard case .loadModels(let key, _)? = b.handle(.enter) else {
+            Issue.record("no load")
+            return
+        }
+        #expect(b.summarizeForm?.step == .model)
+        b.setModelList(key: key, .failure(CappyError.usage("denied")))
+        #expect(L10n.$override.withValue(.en) { b.formOptions() }.last == "✗ Cannot get the models: denied")
+        // 失敗の行で Enter を押すと取り直す
+        _ = b.handle(.down)
+        if case .loadModels(_, _)? = b.handle(.enter) {} else { Issue.record("no retry") }
+        // 既定のモデルで始める
+        _ = b.handle(.home)
+        #expect(b.handle(.enter) == .summarize(e, profile: "default", model: nil, force: false))
+        // プロファイルが 1 つなら Esc で閉じる
+        _ = b.handle(.enter)
+        _ = b.handle(.down)
+        _ = b.handle(.enter)
+        _ = b.handle(.escape)
+        #expect(b.summarizeForm == nil)
+    }
+
+    @Test func summarizedSessionCanBeSummarizedAgain() throws {
+        let (b0, e) = try browserWithUnsummarized(profiles: [summaryProfile("default")], summary: true)
+        var b = b0
+        #expect(!e.canSummarize)
+        #expect(e.canResummarize)
+        #expect(b.operations(for: e) == [.viewTranscript, .viewSummary, .resummarize, .reveal, .delete])
+        _ = b.handle(.enter)
+        _ = b.handle(.down)
+        _ = b.handle(.down)
+        guard case .loadModels(let key, _)? = b.handle(.enter) else {
+            Issue.record("no load")
+            return
+        }
+        #expect(b.summarizeForm?.force == true)
+        b.setModelList(key: key, .success([SummaryModelOption(id: "gemini-3.5-flash")]))
+        _ = b.handle(.down)
+        #expect(b.handle(.enter) == .summarize(e, profile: "default", model: "gemini-3.5-flash", force: true))
     }
 
     @Test func sessionsBeingRecordedCannotBeDeleted() throws {

@@ -53,6 +53,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 | `--transcribe` (`--mix`, `--format`) | Transcribe after recording |
 | `--live` | Transcribe in real time while recording (`transcribe.live_model` with Gemini, or Amazon Transcribe Streaming when `transcribe.provider = "aws"`). Shows final results and saves them to `live-transcript.{md,json,srt}` |
 | `--summarize` / `--no-summarize` | Summarize after `--transcribe` / `--live` (default: `summary.auto` of the profile) |
+| `--summary-model <id>` | Model for the summary (default: `summary.model` of the profile; same values as `summarize --model`) |
 | `--profile <name>` | Config profile |
 | `--quiet` | Do not show the recording notice |
 | `-v, --verbose` | Also show dropped IOProc buffers and ring buffer usage |

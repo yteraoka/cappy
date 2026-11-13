@@ -53,6 +53,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 | `--transcribe` (`--mix`, `--format`) | 録音後に続けて文字起こしする |
 | `--live` | 録音しながらリアルタイムで文字起こしする（Gemini の `transcribe.live_model`。`transcribe.provider = "aws"` なら Amazon Transcribe Streaming）。確定した発言を表示し、`live-transcript.{md,json,srt}` に保存する |
 | `--summarize` / `--no-summarize` | `--transcribe` / `--live` の後に続けて要約する（既定はプロファイルの `summary.auto`） |
+| `--summary-model <id>` | 要約に使うモデル（既定はプロファイルの `summary.model`。`summarize --model` と同じ値） |
 | `--profile <name>` | 設定プロファイル |
 | `--quiet` | 録音の告知メッセージを出さない |
 | `-v, --verbose` | IOProc のバッファ欠落数やリングバッファの使用率も出す |
