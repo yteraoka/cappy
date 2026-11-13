@@ -66,6 +66,8 @@ public struct SummarySettings: Sendable, Equatable {
     public var auto: Bool = false
     /// 要約の書き方を追加で指示するファイル（任意）
     public var instructionsFile: String?
+    /// 要約の出力の構成のテンプレート（prompts/<名前>.md の名前、またはパス。nil なら組み込みの default）
+    public var prompt: String?
 
     public init() {}
 
@@ -314,6 +316,10 @@ public struct CappyConfig: Sendable {
             if let v = try int("max_tokens", m, sctx) { p.summary.maxTokens = v }
             if let v = try bool("auto", m, sctx) { p.summary.auto = v }
             p.summary.instructionsFile = try str("instructions_file", m, sctx)
+            p.summary.prompt = try str("prompt", m, sctx)
+            if let v = p.summary.prompt, !v.isEmpty, !SummaryTemplate.isPath(v), !SummaryTemplate.isValidName(v) {
+                throw CappyError.usage(tr("Invalid \(sctx).prompt: \(v) (a template name in prompts/ such as \"minutes\", or a path to a .md file)", ja: "\(sctx).prompt が不正です: \(v)（prompts/ のテンプレート名（\"minutes\" など）、または .md ファイルのパス）"))
+            }
             if let v = p.summary.provider, !SummarySettings.knownProviders.contains(v) {
                 throw CappyError.usage(tr("Invalid \(sctx).provider: \(v) (google / aws / none)", ja: "\(sctx).provider が不正です: \(v)（google / aws / none）"))
             }
@@ -344,7 +350,7 @@ public struct CappyConfig: Sendable {
                 throw CappyError.usage(tr("\(sctx).max_tokens must be 1024 or more", ja: "\(sctx).max_tokens は 1024 以上にしてください"))
             }
             warnUnknownKeys(m, ["provider", "project_id", "region", "model", "fallback_model", "effort",
-                                "max_tokens", "auto", "instructions_file"], sctx)
+                                "max_tokens", "auto", "instructions_file", "prompt"], sctx)
         }
         if let a = t["aws"]?.table {
             let actx = ctx + ".aws"

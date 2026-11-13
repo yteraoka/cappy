@@ -259,6 +259,10 @@ public struct SummaryState: Codable, Sendable, Equatable {
     public var file: String?
     /// 要約の元にした transcript.json の SHA-256（文字起こしをやり直したら要約も作り直す）
     public var transcriptDigest: String?
+    /// 使った要約のテンプレート（組み込みなら nil）
+    public var prompt: String?
+    /// 依頼文（テンプレートと追加の指示を含む）の SHA-256。変わったら要約を作り直す
+    public var promptDigest: String?
     public var inputTokens: Int?
     public var outputTokens: Int?
     public var stopReason: String?
@@ -274,8 +278,9 @@ public struct SummaryState: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case provider, model, region, state, file, note, error
+        case provider, model, region, state, file, note, error, prompt
         case transcriptDigest = "transcript_digest"
+        case promptDigest = "prompt_digest"
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case stopReason = "stop_reason"

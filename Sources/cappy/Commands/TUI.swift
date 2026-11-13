@@ -61,7 +61,8 @@ struct TUI: AsyncParsableCommand {
         }
         let config = try CappyConfig.load()
         if let name = common.profile { _ = try config.profile(named: name) }
-        var launcher = RecordLauncher(profiles: RecordLauncher.orderedProfiles(config), initialProfile: common.profile)
+        var launcher = RecordLauncher(profiles: RecordLauncher.orderedProfiles(config), initialProfile: common.profile,
+                                      prompts: SummaryTemplate.available())
         launcher.verbose = common.verbose
         launcher.update(targets: Self.loadTargets())
 
@@ -84,8 +85,8 @@ struct TUI: AsyncParsableCommand {
         while let choice = await app.chooseTarget() {
             let arguments: [String], details: [(label: String, value: String)]
             switch choice {
-            case .summarize(let entry, let profile, let model, let force):
-                await Self.summarize(entry, profileName: profile, model: model, force: force, app: app)
+            case .summarize(let entry, let profile, let model, let prompt, let force):
+                await Self.summarize(entry, profileName: profile, model: model, prompt: prompt, force: force, app: app)
                 continue
             case .record(let a, let d):
                 (arguments, details) = (a, d)
@@ -113,7 +114,7 @@ struct TUI: AsyncParsableCommand {
 
     /// 過去の録音のページから要約を作る（`cappy summarize` と同じ。プロファイルとモデルはウィンドウで選んだもの）。
     /// Ctrl-C で中断して一覧に戻る
-    static func summarize(_ entry: SessionEntry, profileName: String, model: String?, force: Bool, app: TUIApp) async {
+    static func summarize(_ entry: SessionEntry, profileName: String, model: String?, prompt: String?, force: Bool, app: TUIApp) async {
         let task = Task { () throws -> Void in
             let store = try SessionStore.open(entry.directory)
             let profile = try CappyConfig.load().profile(named: profileName)
@@ -126,16 +127,20 @@ struct TUI: AsyncParsableCommand {
             let chosen = model.flatMap { $0 == profile.summary.model ? nil : $0 }
             var args = ["--profile", profile.name]
             if let chosen { args += ["--model", chosen] }
+            // プロファイルの既定と同じテンプレートなら --prompt は付けない
+            let promptName = prompt.flatMap { $0 == (profile.summary.prompt ?? SummaryTemplate.builtinName) ? nil : $0 }
+            if let promptName { args += ["--prompt", promptName] }
             if force { args.append("--force") }
             args.append(entry.directory.path)
             app.beginSession(details: [(tr("Session", ja: "セッション"), name),
                                        (tr("Profile", ja: "プロファイル"), profile.name),
-                                       (tr("Model", ja: "モデル"), chosen ?? profile.summary.model)],
+                                       (tr("Model", ja: "モデル"), chosen ?? profile.summary.model),
+                                       (tr("Template", ja: "テンプレート"), promptName ?? profile.summary.prompt ?? SummaryTemplate.builtinName)],
                              command: "$ cappy summarize " + args.map(shellQuote).joined(separator: " "), job: .summarize)
             CappyLog.shared.attach(sessionDirectory: entry.directory)
             CappyLog.shared.info(tr("cappy \(CappyVersion.current) summarize started session=\(store.metadata.id)", ja: "cappy \(CappyVersion.current) summarize 開始 session=\(store.metadata.id)"))
             defer { CappyLog.shared.detach() }
-            try await SummarizeRunner.run(store: store, profile: profile, request: .init(force: force, model: chosen, explicit: true))
+            try await SummarizeRunner.run(store: store, profile: profile, request: .init(force: force, model: chosen, prompt: promptName, explicit: true))
         }
         app.setCancelJob { task.cancel() }
         let result = await task.result
@@ -209,7 +214,7 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
         /// アプリを選んで録音を始める
         case record(arguments: [String], details: [(label: String, value: String)])
         /// 過去の録音のページから要約を作る
-        case summarize(SessionEntry, profile: String, model: String?, force: Bool)
+        case summarize(SessionEntry, profile: String, model: String?, prompt: String?, force: Bool)
     }
 
     private enum Mode { case launcher, sessions, pager, session, viewingLog }
@@ -255,7 +260,7 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
     init(launcher: RecordLauncher, outputDirectories: [URL], refresh: @escaping @Sendable () -> [LaunchTarget], ascii: Bool = false) {
         self.launcher = launcher
         frameWriter = TUIFrameWriter(ascii: ascii)
-        browser = SessionBrowser(directories: outputDirectories, profiles: launcher.profiles)
+        browser = SessionBrowser(directories: outputDirectories, profiles: launcher.profiles, prompts: launcher.prompts)
         self.refresh = refresh
     }
 
@@ -592,7 +597,7 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
             }
         case .loadModels(let key, let profile):
             loadModels(key: key, profile: profile)
-        case .summarize(let entry, let profile, let model, let force):
+        case .summarize(let entry, let profile, let model, let prompt, let force):
             lock.withLock {
                 browser.notice = nil
                 details = []
@@ -602,7 +607,7 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
                 mode = .session // 入力の扱いを処理中のものに切り替える（Ctrl-C で中断）
                 dirty = true
             }
-            resolveChoice(.summarize(entry, profile: profile, model: model, force: force))
+            resolveChoice(.summarize(entry, profile: profile, model: model, prompt: prompt, force: force))
         case .playMix(let entry):
             setSessionsNotice(tr("Mixing the two tracks…", ja: "2 トラックをミックスしています…"))
             DispatchQueue.global().async { [weak self] in

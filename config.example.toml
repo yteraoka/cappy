@@ -47,6 +47,7 @@ effort = "high"              # low / medium / high / xhigh / max (deeper is more
 # max_tokens = 32000
 auto = false                 # if true, summarize automatically after transcribe (suppress with --no-summarize)
 # instructions_file = "~/.config/cappy/summary-instructions.md"  # extra instructions on how to write the summary
+# prompt = "minutes"         # template for the structure (~/.config/cappy/prompts/minutes.md, or a path to a .md file; default: the built-in default)
 
 # AWS account (used with provider = "aws" for transcription and summary)
 # Do not write credentials; cappy uses the profiles in ~/.aws/config (SSO, access keys, credential_process, ...)

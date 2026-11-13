@@ -72,6 +72,8 @@ enum SummarizeRunner {
         var force = false
         var model: String?
         var effort: String?
+        /// 要約のテンプレート（nil ならプロファイルの summary.prompt）
+        var prompt: String?
         /// --summarize を明示したか（none のときの表示を変える）
         var explicit = false
     }
@@ -97,6 +99,7 @@ enum SummarizeRunner {
         if profile.summaryProvider == "google" && (model.contains("anthropic.") || family == .bedrockChat) {
             throw CappyError.usage(tr("Invalid --model: \(model) (Bedrock model IDs can be used only with summary.provider = \"aws\")", ja: "--model が不正です: \(model)（Bedrock のモデル ID は summary.provider = \"aws\" のときだけ使えます）"))
         }
+        let template = try SummaryTemplate.load(request.prompt ?? profile.summary.prompt)
         let client = try SummaryClientFactory.make(profile: profile)
         let options = Summarizer.Options(
             model: model,
@@ -105,8 +108,10 @@ enum SummarizeRunner {
             maxTokens: s.maxTokens,
             language: profile.language,
             instructions: try SummaryClientFactory.instructions(profile: profile),
+            template: template,
             force: request.force)
-        Console.status(tr("Creating the summary (\(options.model))…", ja: "要約を作成しています（\(options.model)）…"))
+        let via = template.isBuiltin ? "" : ", " + template.name
+        Console.status(tr("Creating the summary (\(options.model)\(via))…", ja: "要約を作成しています（\(options.model)\(via)）…"))
         let outcome = try await Summarizer(store: store, client: client, options: options).run()
         Console.clearStatus()
         switch outcome {

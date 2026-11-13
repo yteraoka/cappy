@@ -30,7 +30,7 @@ cappy init --profile aws    # 別のプロファイルを追加する
 | `[profiles.<name>.google]` | 文字起こしと要約で共通の Google Cloud のアカウント: `project_id`、`bucket`、`delete_remote_after` |
 | `[profiles.<name>.aws]` | 文字起こしと要約で共通の AWS のアカウント: `profile`、`region`、`bucket`、`delete_remote_after` |
 | `[profiles.<name>.transcribe]` | 文字起こし: `provider`（`google` / `aws` / `none`）、`model`、`location`、`diarization` など |
-| `[profiles.<name>.summary]` | 会議の要約: `provider`（`google` / `aws` / `none`）、`model`、`region`、`auto` など |
+| `[profiles.<name>.summary]` | 会議の要約: `provider`（`google` / `aws` / `none`）、`model`、`region`、`auto`、`prompt`（要約のテンプレート。[使い方](./usage.ja.md#要約のテンプレート)）など |
 
 `provider` でクラウド（`[google]` か `[aws]` のアカウント）を、`model` で何を使うかを選びます。
 

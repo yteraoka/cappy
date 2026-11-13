@@ -109,6 +109,11 @@ enum CompletionCandidates {
         return format(models.filter { seen.insert($0).inserted }.map { ($0, nil) })
     }
 
+    /// 要約のテンプレート（組み込みの default と prompts/*.md）
+    static func prompts() -> [String] {
+        format(SummaryTemplate.available().map { ($0, nil) })
+    }
+
     static let providers = Profile.providers
     static let transcribeModels = [GeminiSettings().model, GoogleSettings().model]
     static let efforts = ["low", "medium", "high", "xhigh", "max"]

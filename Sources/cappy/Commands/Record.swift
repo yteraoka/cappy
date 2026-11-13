@@ -76,6 +76,11 @@ struct Record: AsyncParsableCommand {
             completion: .custom { _, _, _ in CompletionCandidates.models() })
     var summaryModel: String?
 
+    @Option(name: .customLong("summary-prompt"),
+            help: ArgumentHelp(tr("Template for the summary (a name in prompts/ or a path; default: summary.prompt of the profile)", ja: "要約のテンプレート（prompts/ の名前かパス。既定はプロファイルの summary.prompt）")),
+            completion: .custom { _, _, _ in CompletionCandidates.prompts() })
+    var summaryPrompt: String?
+
     @Flag(help: ArgumentHelp(tr("Transcribe in real time while recording (transcribe.live_model on Vertex AI, or Amazon Transcribe Streaming when transcribe.provider = aws; results go to live-transcript.*)", ja: "録音しながらリアルタイムで文字起こしする（Vertex AI の transcribe.live_model、transcribe.provider = aws なら Amazon Transcribe Streaming。結果は live-transcript.*）")))
     var live = false
 
@@ -122,6 +127,10 @@ struct Record: AsyncParsableCommand {
         CappyLog.shared.verbose = common.verbose
         let profile = try common.loadProfile()
         let formats = try TranscriptFormat.parseList(format)
+        // 録音が終わってから気づかないよう、要約のテンプレートは先に読めるか確かめる
+        if summarize ?? profile.summary.auto, transcribe || live {
+            _ = try SummaryTemplate.load(summaryPrompt ?? profile.summary.prompt)
+        }
         let maxDuration = try duration.map(DurationParser.parse)
         let spec = RecordTargetSpec(bundleIDs: apps, pids: pids, system: system)
 
@@ -305,13 +314,13 @@ struct Record: AsyncParsableCommand {
                 providerName: nil, language: nil, mix: mix, formats: formats, force: false, keepRemote: false))
             if (summarize ?? profile.summary.auto) && profile.provider != "none" {
                 interrupts.setPhase(.summarizing)
-                try await SummarizeRunner.run(store: store, profile: profile, request: .init(model: summaryModel, explicit: summarize == true))
+                try await SummarizeRunner.run(store: store, profile: profile, request: .init(model: summaryModel, prompt: summaryPrompt, explicit: summarize == true))
             }
         } else {
             if !liveURLs.isEmpty && (summarize ?? profile.summary.auto) {
                 // リアルタイム文字起こしの結果から要約する
                 interrupts.setPhase(.summarizing)
-                try await SummarizeRunner.run(store: store, profile: profile, request: .init(model: summaryModel, explicit: summarize == true))
+                try await SummarizeRunner.run(store: store, profile: profile, request: .init(model: summaryModel, prompt: summaryPrompt, explicit: summarize == true))
             }
             Console.print(tr("Transcribe: cappy transcribe \(dir.path)", ja: "文字起こし: cappy transcribe \(dir.path)"))
         }
