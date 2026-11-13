@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.7.0](https://github.com/yteraoka/cappy/compare/v0.6.0...v0.7.0) - 2026-11-13
+
+- 要約のテンプレート対応と、相手側が無音のときの警告・文字起こしの省略 by @yteraoka in https://github.com/yteraoka/cappy/pull/30
+
 ## [v0.6.0](https://github.com/yteraoka/cappy/compare/v0.5.0...v0.6.0) - 2026-11-13
 
 - live 文字起こしで、相手が話し続けても途中で確定させ、確定しなかった文字を捨てない by @yteraoka in https://github.com/yteraoka/cappy/pull/26
