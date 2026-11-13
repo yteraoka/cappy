@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.6.0](https://github.com/yteraoka/cappy/compare/v0.5.0...v0.6.0) - 2026-11-13
+
+- live 文字起こしで、相手が話し続けても途中で確定させ、確定しなかった文字を捨てない by @yteraoka in https://github.com/yteraoka/cappy/pull/26
+- Split README into topic docs under docs/ by @yteraoka in https://github.com/yteraoka/cappy/pull/28
+- tui: 要約モデルを API で取得した一覧から選べるようにする by @yteraoka in https://github.com/yteraoka/cappy/pull/29
+
 ## [v0.5.0](https://github.com/yteraoka/cappy/compare/v0.4.0...v0.5.0) - 2026-11-12
 
 - 全画面で録音から過去の録音の閲覧まで行う cappy tui を追加する by @yteraoka in https://github.com/yteraoka/cappy/pull/22
