@@ -42,6 +42,8 @@ cappy record --app us.zoom.xos --name weekly-sync --transcribe --summarize
 cappy tui
 ```
 
+Running `cappy` with no arguments also starts `cappy tui` once the config file exists (before that, it tells you to run `cappy init`).
+
 The first recording asks for the "System Audio Recording" and "Microphone" permissions for your terminal app. Results are saved under `~/Recordings/cappy/<date>_<name>/` (`transcript.md`, `summary.md`, ...).
 
 If cappy stops halfway, `cappy transcribe <dir>` resumes and `cappy recover <dir>` repairs a session that ended abnormally.

@@ -7,6 +7,9 @@ struct Cappy: AsyncParsableCommand {
         commandName: "cappy",
         abstract: tr("Record meeting app audio and your microphone as separate tracks, then transcribe and summarize them with cloud services", ja: "会議アプリの音声とマイク音声を別トラックで録音し、外部サービスで文字起こし・要約する"),
         discussion: tr("""
+        Without a subcommand, starts `cappy tui` when a config file with a profile exists
+        (otherwise tells you to run `cappy init`).
+
         Config file: ~/.config/cappy/config.toml (override with CAPPY_CONFIG)
         Language: English by default. Set CAPPY_LANG=ja (or a ja_* locale in LC_ALL / LC_MESSAGES / LANG) for Japanese.
 
@@ -14,6 +17,9 @@ struct Cappy: AsyncParsableCommand {
           0 success  1 invalid arguments or config  2 missing permission  3 recording target not found
           4 I/O error while recording  5 transcription or summary service error
         """, ja: """
+        サブコマンドを省略すると、プロファイルのある設定ファイルがあれば `cappy tui` を起動します
+        （なければ `cappy init` を案内します）。
+
         設定ファイル: ~/.config/cappy/config.toml（CAPPY_CONFIG で変更可）
         表示言語: 既定は英語。CAPPY_LANG=ja（または LC_ALL / LC_MESSAGES / LANG が ja_*）で日本語になります。
 
@@ -24,6 +30,45 @@ struct Cappy: AsyncParsableCommand {
         version: CappyVersion.current,
         subcommands: [Init.self, Record.self, TUI.self, Mic.self, Transcribe.self, Summarize.self, Apps.self, Devices.self, Doctor.self, Recover.self, Completion.self]
     )
+
+    /// 引数なしで実行されたとき。使える設定ファイルがあれば `cappy tui` を始め、なければ `cappy init` を案内する
+    mutating func run() async throws {
+        let config: CappyConfig
+        do {
+            config = try CappyConfig.load()
+        } catch let e as CappyError {
+            Self.printNoConfig(e.message, hint: tr("Fix the config file, or create it again with `cappy init`.",
+                                                   ja: "設定ファイルを直すか、`cappy init` で作り直してください。"))
+            throw ExitCode(ExitStatus.usage.rawValue)
+        }
+        guard config.fileExists else {
+            Self.printNoConfig(tr("No config file found: \(config.path.path)", ja: "設定ファイルがありません: \(config.path.path)"),
+                               hint: tr("Run `cappy init` to create it.", ja: "`cappy init` を実行して作成してください。"))
+            throw ExitCode(ExitStatus.usage.rawValue)
+        }
+        guard !config.profiles.isEmpty else {
+            Self.printNoConfig(tr("The config file has no profile: \(config.path.path)", ja: "設定ファイルにプロファイルがありません: \(config.path.path)"),
+                               hint: tr("Run `cappy init` to add one.", ja: "`cappy init` を実行してプロファイルを追加してください。"))
+            throw ExitCode(ExitStatus.usage.rawValue)
+        }
+        // スクリプトなどから端末なしで呼ばれたときは、これまでどおりヘルプを出す
+        guard isatty(STDIN_FILENO) != 0, isatty(STDOUT_FILENO) != 0 else {
+            print(Self.helpMessage())
+            return
+        }
+        var tui = try TUI.parse([])
+        try await tui.run()
+    }
+
+    private static func printNoConfig(_ message: String, hint: String) {
+        let text = """
+        \(message)
+        \(hint)
+        \(tr("`cappy --help` lists the commands.", ja: "コマンドの一覧は `cappy --help` で確認できます。"))
+
+        """
+        FileHandle.standardError.write(Data(text.utf8))
+    }
 }
 
 struct CommonOptions: ParsableArguments {

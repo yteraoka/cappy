@@ -4,6 +4,7 @@
 
 ```bash
 cappy init                         # 設定ファイルを対話で作る（configuration.ja.md を参照）
+cappy                              # `cappy tui` と同じ（設定ファイルがなければ `cappy init` を案内する）
 cappy tui                          # 全画面で設定とアプリを選んで録音を始める（tui.ja.md を参照）
 cappy apps                         # 音声プロセスの一覧（PID・bundle ID・出力中か）
 cappy devices                      # 入力デバイスの一覧（UID・名前・サンプルレート）

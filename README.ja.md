@@ -42,6 +42,8 @@ cappy record --app us.zoom.xos --name weekly-sync --transcribe --summarize
 cappy tui
 ```
 
+設定ファイルを作成した後は、引数なしの `cappy` でも `cappy tui` が起動します（設定ファイルがなければ `cappy init` を案内します）。
+
 初回の録音時に、実行しているターミナルアプリに対して「システムオーディオ録音」と「マイク」の許可を求められます。結果は `~/Recordings/cappy/<日時>_<名前>/` に保存されます（`transcript.md`、`summary.md` など）。
 
 途中で終了しても `cappy transcribe <dir>` で再開でき、異常終了したセッションは `cappy recover <dir>` で修復できます。
