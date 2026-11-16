@@ -275,6 +275,62 @@ final class FakeSummaryClient: SummaryModelClient, @unchecked Sendable {
         #expect(client.requests.count == 2)
     }
 
+    @Test func backsUpExistingSummaryWhenRegenerating() async throws {
+        let store = try makeSession()
+        let client = FakeSummaryClient { Self.ok($0) }
+        let url = try await Summarizer(store: store, client: client, options: options()).run().url
+        try Data("以前の要約".utf8).write(to: url)
+        let mtime = Date(timeIntervalSince1970: 1_794_800_000) // 2026-11-16 03:33:20 UTC
+        try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
+
+        var opts = options(force: true)
+        opts.backupExisting = true
+        _ = try await Summarizer(store: store, client: client, options: opts).run()
+        let backup = store.directory.appendingPathComponent("summary-" + Self.stamp(mtime) + ".md")
+        #expect(try String(contentsOf: backup, encoding: .utf8) == "以前の要約")
+        #expect(try String(contentsOf: url, encoding: .utf8).contains("要約本文"))
+        let attrs = try FileManager.default.attributesOfItem(atPath: backup.path)
+        #expect((attrs[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+
+        // 同じ日時のものがあれば番号を付ける
+        try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
+        let second = try #require(try Summarizer.backup(url))
+        #expect(second.lastPathComponent == "summary-" + Self.stamp(mtime) + "-2.md")
+    }
+
+    @Test func doesNotBackUpByDefaultOrOnFailure() async throws {
+        let store = try makeSession()
+        _ = try await Summarizer(store: store, client: FakeSummaryClient { Self.ok($0) }, options: options()).run()
+        _ = try await Summarizer(store: store, client: FakeSummaryClient { Self.ok($0) }, options: options(force: true)).run()
+        var opts = options(force: true)
+        opts.backupExisting = true
+        let failing = FakeSummaryClient { _ in throw GoogleAPIError(httpStatus: 500, status: "INTERNAL", message: "x") }
+        _ = try? await Summarizer(store: store, client: failing, options: opts).run()
+        let files = try FileManager.default.contentsOfDirectory(atPath: store.directory.path)
+        #expect(files.filter { $0.hasPrefix("summary-") }.isEmpty)
+        #expect(try Summarizer.backup(store.directory.appendingPathComponent("missing.md")) == nil)
+    }
+
+    static func stamp(_ d: Date) -> String { FileBackup.stamp(d) }
+
+    @Test func fileBackupKeepsASetTogether() throws {
+        let dir = try TestSupport.tempDir()
+        let urls = ["md", "json", "srt"].map { dir.appendingPathComponent("transcript.\($0)") }
+        #expect(try FileBackup.backup(urls).isEmpty)
+        let mtime = Date(timeIntervalSince1970: 1_794_800_000)
+        for u in urls.prefix(2) {
+            try Data(u.pathExtension.utf8).write(to: u)
+            try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: u.path)
+        }
+        let stamp = FileBackup.stamp(mtime)
+        // ないもの（srt）は飛ばし、同じ日時を使う
+        #expect(try FileBackup.backup(urls).map(\.lastPathComponent) == ["transcript-\(stamp).md", "transcript-\(stamp).json"])
+        // 組のどれかが重なれば、組ごと次の番号にする
+        try FileManager.default.removeItem(at: dir.appendingPathComponent("transcript-\(stamp).md"))
+        #expect(try FileBackup.backup(urls).map(\.lastPathComponent) == ["transcript-\(stamp)-2.md", "transcript-\(stamp)-2.json"])
+        #expect(FileBackup.stamp(Date(timeIntervalSince1970: 0), timeZone: TimeZone(identifier: "UTC")!) == "19700101-000000")
+    }
+
     @Test func regeneratesWhenTranscriptChanges() async throws {
         let store = try makeSession()
         let client = FakeSummaryClient { Self.ok($0) }

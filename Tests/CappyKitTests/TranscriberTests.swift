@@ -108,6 +108,33 @@ final class FakeProvider: TranscriptionProvider, @unchecked Sendable {
         #expect(store.metadata.transcription?.state == .done)
     }
 
+    @Test func forcedRunBacksUpThePreviousTranscript() async throws {
+        let store = try makeSession()
+        _ = try await Transcriber(store: store, provider: FakeProvider(), options: options(), sleep: { _ in }).run()
+        let mtime = Date(timeIntervalSince1970: 1_794_800_000)
+        for f in TranscriptFormat.allCases {
+            try Data("前の\(f.rawValue)".utf8).write(to: store.url(for: f.fileName))
+            try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: store.url(for: f.fileName).path)
+        }
+        var opts = options(force: true)
+        opts.backupExisting = true
+        let p = FakeProvider()
+        _ = try await Transcriber(store: store, provider: p, options: opts, sleep: { _ in }).run()
+        #expect(Set(p.submitted) == [.mic, .remote])
+        let stamp = FileBackup.stamp(mtime)
+        for f in TranscriptFormat.allCases {
+            let backup = store.url(for: "transcript-\(stamp).\(f.rawValue)")
+            #expect(try String(contentsOf: backup, encoding: .utf8) == "前の\(f.rawValue)")
+            #expect(try String(contentsOf: store.url(for: f.fileName), encoding: .utf8) != "前の\(f.rawValue)")
+        }
+
+        // backupExisting がなければ残さない
+        let before = try FileManager.default.contentsOfDirectory(atPath: store.directory.path).filter { $0.hasPrefix("transcript-") }
+        _ = try await Transcriber(store: store, provider: FakeProvider(), options: options(force: true), sleep: { _ in }).run()
+        let after = try FileManager.default.contentsOfDirectory(atPath: store.directory.path).filter { $0.hasPrefix("transcript-") }
+        #expect(before.count == 3 && after.sorted() == before.sorted())
+    }
+
     @Test func doneSessionOnlyRerenders() async throws {
         let store = try makeSession()
         _ = try await Transcriber(store: store, provider: FakeProvider(), options: options(), sleep: { _ in }).run()

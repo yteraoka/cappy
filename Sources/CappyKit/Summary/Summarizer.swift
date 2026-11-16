@@ -16,9 +16,13 @@ public struct Summarizer: Sendable {
         /// 出力の構成（既定は組み込み）
         public var template: SummaryTemplate
         public var force: Bool
+        /// 既存の summary.md を上書きする前に、タイムスタンプ付きの名前（summary-YYYYMMDD-HHMMSS.md）で残す
+        public var backupExisting: Bool
 
         public init(model: String, fallbackModel: String?, effort: String, maxTokens: Int, language: String,
-                    instructions: String? = nil, template: SummaryTemplate = .builtin, force: Bool = false) {
+                    instructions: String? = nil, template: SummaryTemplate = .builtin, force: Bool = false,
+                    backupExisting: Bool = false) {
+            self.backupExisting = backupExisting
             self.template = template
             self.model = model
             self.fallbackModel = fallbackModel
@@ -158,6 +162,12 @@ public struct Summarizer: Sendable {
         let markdown = Self.render(body: response.text, doc: doc, meta: store.metadata, response: response,
                                    providerName: client.providerName, notes: notes,
                                    template: options.template.isBuiltin ? nil : options.template.name)
+        // 新しい要約ができてから退避する（失敗したときに余計なコピーを残さない）
+        if options.backupExisting, let backup = try Self.backup(outURL) {
+            CappyLog.shared.info(tr("Backed up the previous summary: \(backup.lastPathComponent)", ja: "以前の要約を退避しました: \(backup.lastPathComponent)"))
+            Console.print(tr("Backed up the previous summary:", ja: "以前の要約を退避しました:"))
+            Console.print("  \(backup.path)")
+        }
         try FileSecurity.writeAtomically(Data(markdown.utf8), to: outURL)
         try store.update { m in
             m.summary?.state = .done
@@ -172,6 +182,13 @@ public struct Summarizer: Sendable {
         }
         CappyLog.shared.info(tr("Summary finished model=\(response.model) input_tokens=\(response.inputTokens ?? -1) output_tokens=\(response.outputTokens ?? -1)", ja: "要約が完了しました model=\(response.model) input_tokens=\(response.inputTokens ?? -1) output_tokens=\(response.outputTokens ?? -1)"))
         return .created(outURL)
+    }
+
+    /// 既存の要約を、作った日時（ファイルの更新日時）を入れた名前でコピーする。なければ nil
+    /// 例: summary.md → summary-20261116-103000.md（同じ名前があれば -2, -3 … を付ける）
+    @discardableResult
+    public static func backup(_ url: URL, timeZone: TimeZone = .current) throws -> URL? {
+        try FileBackup.backup([url], timeZone: timeZone).first
     }
 
     static func render(body: String, doc: TranscriptDocument, meta: SessionMetadata, response: SummaryResponse,

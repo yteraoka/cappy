@@ -18,6 +18,23 @@ public struct SessionEntry: Equatable, Sendable {
     /// 要約の元にする文字起こし（transcript.json、なければ live-transcript.json）
     public var summarySource: URL? = nil
 
+    /// 文字起こしの結果（transcript.md か transcript.json）があるか
+    public var hasTranscript: Bool {
+        transcript != nil || summarySource?.lastPathComponent == TranscriptFormat.json.fileName
+    }
+
+    /// 文字起こしに送れる音声があるか（録音中・異常終了したものは除く）
+    var canSendAudio: Bool {
+        guard let m = metadata, !isActive, m.recording.state != .recording else { return false }
+        return !originals.isEmpty || !sendFiles.isEmpty
+    }
+
+    /// 文字起こしがまだなく、できるか（中断したものは続きから）
+    public var canTranscribe: Bool { !hasTranscript && canSendAudio }
+
+    /// 文字起こしがあり、やり直せるか（別のプロファイルでやり直すなど）
+    public var canRetranscribe: Bool { hasTranscript && canSendAudio }
+
     /// 要約がまだなく、作れるか（文字起こしの結果があり、録音中でない）
     public var canSummarize: Bool {
         summary == nil && summarySource != nil && metadata != nil && !isActive
@@ -195,6 +212,10 @@ public struct SessionBrowser: Sendable {
         case summarize
         /// 要約を作り直す（あるとき）
         case resummarize
+        /// 文字起こしする（まだないとき。中断したものは続きから）
+        case transcribe
+        /// 文字起こしをやり直す（あるとき）
+        case retranscribe
         case playMix, open(TrackID), reveal
         /// ゴミ箱に移す（確認してから）
         case delete
@@ -206,6 +227,8 @@ public struct SessionBrowser: Sendable {
             case .viewSummary: return tr("Show the summary", ja: "要約を表示")
             case .summarize: return tr("Create the summary", ja: "要約を作成")
             case .resummarize: return tr("Create the summary again", ja: "要約を作り直す")
+            case .transcribe: return tr("Transcribe", ja: "文字起こしする")
+            case .retranscribe: return tr("Transcribe again", ja: "文字起こしをやり直す")
             case .playMix: return tr("Play both tracks mixed", ja: "相手と自分を合わせて再生")
             case .open(.remote): return tr("Open the remote audio", ja: "相手の音声を開く")
             case .open(.mic): return tr("Open the mic audio", ja: "自分の音声を開く")
@@ -224,7 +247,7 @@ public struct SessionBrowser: Sendable {
             case .playMix: return "p"
             case .reveal: return "f"
             case .delete: return "d"
-            case .open, .summarize, .resummarize: return nil
+            case .open, .summarize, .resummarize, .transcribe, .retranscribe: return nil
             }
         }
     }
@@ -240,6 +263,8 @@ public struct SessionBrowser: Sendable {
         case trash(SessionEntry)
         /// 要約を作る（profile: 使うプロファイル、model: nil ならプロファイルの summary.model、force: 作り直す）
         case summarize(SessionEntry, profile: String, model: String?, prompt: String?, force: Bool)
+        /// 文字起こしする（profile: 使うプロファイル、force: やり直す）
+        case transcribe(SessionEntry, profile: String, force: Bool)
         /// 要約モデルの一覧を取得する（終わったら setModelList を呼ぶ）
         case loadModels(key: String, profile: Profile)
         case switchPage
@@ -280,6 +305,16 @@ public struct SessionBrowser: Sendable {
     }
     public private(set) var summarizeForm: SummarizeForm?
 
+    /// 文字起こしの前に、プロファイルを選ぶウィンドウ（プロファイルが 1 つでも、確かめるために出す）
+    public struct TranscribeForm: Equatable, Sendable {
+        public var entry: SessionEntry
+        /// やり直すか
+        public var force: Bool
+        /// transcribeProfiles の中で選んでいる位置
+        public var index: Int
+    }
+    public private(set) var transcribeForm: TranscribeForm?
+
     public init(directories: [URL], profiles: [Profile] = [], prompts: [String] = []) {
         self.directories = directories
         self.profiles = profiles
@@ -287,6 +322,9 @@ public struct SessionBrowser: Sendable {
     }
 
     public var summaryProfiles: [Profile] { profiles.filter { $0.summaryProvider != "none" } }
+
+    /// 文字起こしに使えるプロファイル（provider が none のものは選ばせない）
+    public var transcribeProfiles: [Profile] { profiles.filter { $0.transcriptionService != .none } }
 
     public var selected: SessionEntry? { entries.indices.contains(cursor) ? entries[cursor] : nil }
 
@@ -309,6 +347,8 @@ public struct SessionBrowser: Sendable {
         if e.summary != nil { ops.append(.viewSummary) }
         if e.canSummarize { ops.append(.summarize) }
         if e.canResummarize { ops.append(.resummarize) }
+        if e.canTranscribe { ops.append(.transcribe) }
+        if e.canRetranscribe { ops.append(.retranscribe) }
         if e.canPlayMix { ops.append(.playMix) }
         if e.audio(.remote) != nil { ops.append(.open(.remote)) }
         if e.audio(.mic) != nil { ops.append(.open(.mic)) }
@@ -325,6 +365,8 @@ public struct SessionBrowser: Sendable {
         case .viewSummary: return e.summary.map { .view(title: tr("Summary — \(name)", ja: "要約 — \(name)"), url: $0) }
         case .summarize: return e.canSummarize ? startSummarize(e, force: false) : nil
         case .resummarize: return e.canResummarize ? startSummarize(e, force: true) : nil
+        case .transcribe: return e.canTranscribe ? startTranscribe(e, force: false) : nil
+        case .retranscribe: return e.canRetranscribe ? startTranscribe(e, force: true) : nil
         case .playMix: return .playMix(e)
         case .open(let t): return e.audio(t).map(Action.open)
         case .reveal: return .open(e.directory)
@@ -353,6 +395,62 @@ public struct SessionBrowser: Sendable {
             confirmDelete = nil
             return nil
         }
+    }
+
+    // MARK: 文字起こしのプロファイル
+
+    /// 文字起こしのプロファイルを選ぶウィンドウを開く。初めは録音したときのプロファイルを選んでおく
+    mutating func startTranscribe(_ e: SessionEntry, force: Bool) -> Action? {
+        let list = transcribeProfiles
+        guard !list.isEmpty else {
+            // 文字起こしできるプロファイルがない: 録音したときのプロファイルで試み、その理由を表示させる
+            return .transcribe(e, profile: e.metadata?.profile ?? "default", force: force)
+        }
+        let p = list.firstIndex { $0.name == e.metadata?.profile } ?? 0
+        transcribeForm = TranscribeForm(entry: e, force: force, index: p)
+        return nil
+    }
+
+    /// 文字起こしのウィンドウに出す選択肢
+    func transcribeOptions() -> [String] {
+        transcribeProfiles.map { p in
+            let service: String
+            switch p.transcriptionService {
+            case .amazon: service = "Amazon Transcribe"
+            case .gemini: service = "Gemini" + (p.transcribeModel.map { ", \($0)" } ?? "")
+            default: service = "Speech-to-Text" + (p.transcribeModel.map { ", \($0)" } ?? "")
+            }
+            return "\(p.name)  (\(service), \(p.language))"
+        }
+    }
+
+    /// ウィンドウを開いている間のキー。↑↓ で選び、Enter で始める、Esc で閉じる
+    private mutating func handleTranscribeForm(_ key: TUIKey, _ form: TranscribeForm) -> Action? {
+        var f = form
+        let count = transcribeProfiles.count
+        switch key {
+        case .interrupt:
+            return .quit
+        case .up, .backTab, .char("k"):
+            f.index = max(0, f.index - 1)
+        case .down, .tab, .char("j"):
+            f.index = min(max(0, count - 1), f.index + 1)
+        case .home, .pageUp:
+            f.index = 0
+        case .end, .pageDown:
+            f.index = max(0, count - 1)
+        case .enter:
+            guard transcribeProfiles.indices.contains(f.index) else { return nil }
+            transcribeForm = nil
+            return .transcribe(f.entry, profile: transcribeProfiles[f.index].name, force: f.force)
+        case .escape, .left, .char("q"), .char("Q"):
+            transcribeForm = nil
+            return nil
+        default:
+            break
+        }
+        transcribeForm = f
+        return nil
     }
 
     // MARK: 要約のプロファイルとモデル
@@ -510,6 +608,7 @@ public struct SessionBrowser: Sendable {
 
     public mutating func handle(_ key: TUIKey) -> Action? {
         if let f = summarizeForm { return handleForm(key, f) }
+        if let f = transcribeForm { return handleTranscribeForm(key, f) }
         if let c = confirmDelete, let e = selected { return handleConfirm(key, c, e) }
         if let m = menu, let e = selected {
             let ops = operations(for: e)
@@ -615,7 +714,7 @@ public struct SessionBrowser: Sendable {
         while lines.count < height - footer { add("") }
         add("")
         let help: String
-        if summarizeForm != nil {
+        if summarizeForm != nil || transcribeForm != nil {
             help = tr(" ↑↓ choose  Enter decide  Esc back", ja: " ↑↓ 選択  Enter 決定  Esc 戻る")
         } else if confirmDelete != nil {
             help = tr(" ↑↓ choose  Enter decide  y move to the Trash  Esc / n cancel", ja: " ↑↓ 選択  Enter 決定  y ゴミ箱に移動  Esc / n キャンセル")
@@ -645,6 +744,16 @@ public struct SessionBrowser: Sendable {
             }
             let current: Int? = f.step == .profile ? summaryProfiles.firstIndex(where: { $0.name == f.entry.metadata?.profile }) : 0
             TUIMenuBox.overlay(options: formOptions(), current: current, selected: f.index, belowRow: cursorRow, textColumn: 9,
+                               title: title, on: &lines, width: w, height: height)
+        }
+        if let f = transcribeForm {
+            let name = f.entry.title.isEmpty ? f.entry.directory.lastPathComponent : f.entry.title
+            let title = f.force
+                ? tr("Transcribe \"\(name)\" again: profile (the current transcript is kept with a timestamp)",
+                     ja: "「\(name)」の文字起こしをやり直す: プロファイル（今の結果は日時付きの名前で残します）")
+                : tr("Transcribe \"\(name)\": profile", ja: "「\(name)」を文字起こしする: プロファイル")
+            let current = transcribeProfiles.firstIndex { $0.name == f.entry.metadata?.profile }
+            TUIMenuBox.overlay(options: transcribeOptions(), current: current, selected: f.index, belowRow: cursorRow, textColumn: 9,
                                title: title, on: &lines, width: w, height: height)
         }
         if let c = confirmDelete, let e = selected {

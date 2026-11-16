@@ -13,6 +13,8 @@ public final class Transcriber: @unchecked Sendable {
         public var cleanup: Bool
         public var force: Bool
         public var location: String?
+        /// 既存の transcript.md / .json / .srt を上書きする前に、タイムスタンプ付きの名前（transcript-YYYYMMDD-HHMMSS.md など）で残す
+        public var backupExisting = false
         /// ポーリング間隔（指数バックオフ）
         public var pollInitial: TimeInterval = 5
         public var pollMax: TimeInterval = 300
@@ -63,8 +65,18 @@ public final class Transcriber: @unchecked Sendable {
         try await submitPending()
         try await pollUntilDone()
         let doc = try await collectResults()
-        let urls = try TranscriptRenderer.write(doc, formats: options.formats.contains(.json) ? options.formats : options.formats + [.json],
-                                                to: store.directory)
+        let formats = options.formats.contains(.json) ? options.formats : options.formats + [.json]
+        // 新しい結果ができてから退避する（失敗・中断したときに余計なコピーを残さない）
+        if options.backupExisting {
+            let backups = try FileBackup.backup(formats.map { store.url(for: $0.fileName) })
+            if !backups.isEmpty {
+                CappyLog.shared.info(tr("Backed up the previous transcript: \(backups.map(\.lastPathComponent).joined(separator: ", "))",
+                                        ja: "以前の文字起こしを退避しました: \(backups.map(\.lastPathComponent).joined(separator: ", "))"))
+                Console.print(tr("Backed up the previous transcript:", ja: "以前の文字起こしを退避しました:"))
+                for b in backups { Console.print("  \(b.path)") }
+            }
+        }
+        let urls = try TranscriptRenderer.write(doc, formats: formats, to: store.directory)
         try store.update { m in
             m.transcription?.state = .done
             m.transcription?.error = nil
