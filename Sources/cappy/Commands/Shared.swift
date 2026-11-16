@@ -76,6 +76,8 @@ enum SummarizeRunner {
         var prompt: String?
         /// --summarize を明示したか（none のときの表示を変える）
         var explicit = false
+        /// 既存の summary.md をタイムスタンプ付きの名前で残してから上書きする（cappy tui から作り直すとき）
+        var backupExisting = false
     }
 
     static func run(store: SessionStore, profile: Profile, request: Request) async throws {
@@ -109,7 +111,8 @@ enum SummarizeRunner {
             language: profile.language,
             instructions: try SummaryClientFactory.instructions(profile: profile),
             template: template,
-            force: request.force)
+            force: request.force,
+            backupExisting: request.backupExisting)
         let via = template.isBuiltin ? "" : ", " + template.name
         Console.status(tr("Creating the summary (\(options.model)\(via))…", ja: "要約を作成しています（\(options.model)\(via)）…"))
         let outcome = try await Summarizer(store: store, client: client, options: options).run()

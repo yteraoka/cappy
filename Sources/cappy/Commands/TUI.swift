@@ -140,7 +140,8 @@ struct TUI: AsyncParsableCommand {
             CappyLog.shared.attach(sessionDirectory: entry.directory)
             CappyLog.shared.info(tr("cappy \(CappyVersion.current) summarize started session=\(store.metadata.id)", ja: "cappy \(CappyVersion.current) summarize 開始 session=\(store.metadata.id)"))
             defer { CappyLog.shared.detach() }
-            try await SummarizeRunner.run(store: store, profile: profile, request: .init(force: force, model: chosen, prompt: promptName, explicit: true))
+            try await SummarizeRunner.run(store: store, profile: profile, request: .init(force: force, model: chosen, prompt: promptName, explicit: true,
+                                                                                         backupExisting: true))
         }
         app.setCancelJob { task.cancel() }
         let result = await task.result
