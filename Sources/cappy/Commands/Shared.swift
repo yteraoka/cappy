@@ -11,6 +11,8 @@ enum TranscribeRunner {
         var formats: [TranscriptFormat]
         var force: Bool
         var keepRemote: Bool
+        /// 既存の transcript.* をタイムスタンプ付きの名前で残してから上書きする（cappy tui から作り直すとき）
+        var backupExisting = false
     }
 
     static func run(store: SessionStore, profile: Profile, request: Request) async throws {
@@ -56,6 +58,7 @@ enum TranscribeRunner {
                 location: gemini ? profile.gemini.location : profile.google.location)
         }
         opts.pollMax = 300
+        opts.backupExisting = request.backupExisting
         if request.mix {
             Console.print(tr("Note: --mix loses the distinction between you and the remote side; speakers are told apart only by the provider's diarization", ja: "注意: --mix では自分と相手の区別が失われ、話者の区別はプロバイダの話者分離に頼ります"))
         }

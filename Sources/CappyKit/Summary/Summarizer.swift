@@ -188,31 +188,7 @@ public struct Summarizer: Sendable {
     /// 例: summary.md → summary-20261116-103000.md（同じ名前があれば -2, -3 … を付ける）
     @discardableResult
     public static func backup(_ url: URL, timeZone: TimeZone = .current) throws -> URL? {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: url.path) else { return nil }
-        let date = (try? fm.attributesOfItem(atPath: url.path)[.modificationDate] as? Date) ?? Date()
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = timeZone
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        let ext = url.pathExtension
-        let stem = url.deletingPathExtension().lastPathComponent + "-" + f.string(from: date)
-        let dir = url.deletingLastPathComponent()
-        var dest = dir.appendingPathComponent(stem).appendingPathExtension(ext)
-        var n = 2
-        while fm.fileExists(atPath: dest.path) {
-            dest = dir.appendingPathComponent("\(stem)-\(n)").appendingPathExtension(ext)
-            n += 1
-        }
-        do {
-            try fm.copyItem(at: url, to: dest)
-        } catch {
-            throw CappyError.io(tr("Cannot back up the previous summary: \(dest.path): \(error.localizedDescription)",
-                                   ja: "以前の要約を退避できません: \(dest.path): \(error.localizedDescription)"))
-        }
-        FileSecurity.makePrivate(dest)
-        return dest
+        try FileBackup.backup([url], timeZone: timeZone).first
     }
 
     static func render(body: String, doc: TranscriptDocument, meta: SessionMetadata, response: SummaryResponse,

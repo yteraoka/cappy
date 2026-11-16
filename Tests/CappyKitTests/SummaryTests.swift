@@ -311,13 +311,24 @@ final class FakeSummaryClient: SummaryModelClient, @unchecked Sendable {
         #expect(try Summarizer.backup(store.directory.appendingPathComponent("missing.md")) == nil)
     }
 
-    static func stamp(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = .current
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        return f.string(from: d)
+    static func stamp(_ d: Date) -> String { FileBackup.stamp(d) }
+
+    @Test func fileBackupKeepsASetTogether() throws {
+        let dir = try TestSupport.tempDir()
+        let urls = ["md", "json", "srt"].map { dir.appendingPathComponent("transcript.\($0)") }
+        #expect(try FileBackup.backup(urls).isEmpty)
+        let mtime = Date(timeIntervalSince1970: 1_794_800_000)
+        for u in urls.prefix(2) {
+            try Data(u.pathExtension.utf8).write(to: u)
+            try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: u.path)
+        }
+        let stamp = FileBackup.stamp(mtime)
+        // ないもの（srt）は飛ばし、同じ日時を使う
+        #expect(try FileBackup.backup(urls).map(\.lastPathComponent) == ["transcript-\(stamp).md", "transcript-\(stamp).json"])
+        // 組のどれかが重なれば、組ごと次の番号にする
+        try FileManager.default.removeItem(at: dir.appendingPathComponent("transcript-\(stamp).md"))
+        #expect(try FileBackup.backup(urls).map(\.lastPathComponent) == ["transcript-\(stamp)-2.md", "transcript-\(stamp)-2.json"])
+        #expect(FileBackup.stamp(Date(timeIntervalSince1970: 0), timeZone: TimeZone(identifier: "UTC")!) == "19700101-000000")
     }
 
     @Test func regeneratesWhenTranscriptChanges() async throws {

@@ -70,7 +70,7 @@ import Testing
         var b = SessionBrowser(directories: [root])
         b.update(entries: SessionCatalog.scan([root]))
         let e = try #require(b.selected)
-        #expect(b.operations(for: e) == [.viewTranscript, .viewSummary, .playMix, .open(.remote), .open(.mic), .reveal, .delete])
+        #expect(b.operations(for: e) == [.viewTranscript, .viewSummary, .retranscribe, .playMix, .open(.remote), .open(.mic), .reveal, .delete])
 
         guard case .view(_, let url)? = b.handle(.char("t")) else { Issue.record("t should show the transcript"); return }
         #expect(url.lastPathComponent == "transcript.md")
@@ -82,7 +82,7 @@ import Testing
         // Enter でメニューを開き、↓ で選んで Enter
         #expect(b.handle(.enter) == nil)
         #expect(b.menu == 0)
-        for _ in 0..<3 { _ = b.handle(.down) }
+        for _ in 0..<4 { _ = b.handle(.down) }
         #expect(b.handle(.enter) == .open(e.directory.appendingPathComponent("remote.caf")))
         #expect(b.menu == nil)
         // メニューは Esc で閉じるだけ（終了しない）
@@ -281,6 +281,60 @@ import Testing
         b.setModelList(key: key, .success([SummaryModelOption(id: "gemini-3.5-flash")]))
         _ = b.handle(.down)
         #expect(b.handle(.enter) == .summarize(e, profile: "default", model: "gemini-3.5-flash", prompt: nil, force: true))
+    }
+
+    @Test func transcribeAsksForTheProfile() throws {
+        let root = try TestSupport.tempDir()
+        _ = try makeSession(in: root, "2026-11-12T2244_done", name: "done", started: "2026-11-12T13:44:00.000Z")
+        _ = try makeSession(in: root, "2026-11-11T1000_todo", name: "todo", started: "2026-11-11T01:00:00.000Z",
+                            transcript: false, summary: false)
+        var aws = Profile(name: "aws")
+        aws.provider = "aws"
+        aws.language = "en-US"
+        var rec = Profile(name: "rec")
+        rec.provider = "none"
+        var b = SessionBrowser(directories: [root], profiles: [Profile(name: "default"), aws, rec])
+        b.update(entries: SessionCatalog.scan([root], active: []))
+        #expect(b.transcribeProfiles.map(\.name) == ["default", "aws"]) // none は選ばせない
+
+        // 文字起こしがあるものは「やり直す」（--force）
+        let done = b.entries[0]
+        #expect(done.canRetranscribe && !done.canTranscribe)
+        _ = b.handle(.enter)
+        _ = b.handle(.down)
+        _ = b.handle(.down)
+        #expect(b.handle(.enter) == nil)
+        #expect(b.transcribeForm?.force == true)
+        #expect(b.transcribeForm?.index == 0) // 録音したときのプロファイル
+        #expect(L10n.$override.withValue(.en) { b.transcribeOptions() } == ["default  (Gemini, ja-JP)", "aws  (Amazon Transcribe, en-US)"])
+        let lines = L10n.$override.withValue(.ja) { b.render(width: 120, height: 30) }
+        #expect(lines.contains { $0.text.contains("「done」の文字起こしをやり直す") })
+        _ = b.handle(.down)
+        #expect(b.handle(.enter) == .transcribe(done, profile: "aws", force: true))
+        #expect(b.transcribeForm == nil)
+
+        // まだないものは「文字起こしする」。Esc で閉じる
+        _ = b.handle(.down)
+        let todo = try #require(b.selected)
+        #expect(todo.canTranscribe && !todo.canRetranscribe)
+        #expect(b.operations(for: todo) == [.transcribe, .playMix, .open(.remote), .open(.mic), .reveal, .delete])
+        _ = b.handle(.enter)
+        _ = b.handle(.enter)
+        #expect(b.transcribeForm?.force == false)
+        _ = b.handle(.escape)
+        #expect(b.transcribeForm == nil)
+        _ = b.handle(.enter)
+        _ = b.handle(.enter)
+        #expect(b.handle(.enter) == .transcribe(todo, profile: "default", force: false))
+
+        // 音声がない・録音中のものはできない
+        var active = todo
+        active.isActive = true
+        #expect(!active.canTranscribe)
+        var silent = todo
+        silent.originals = [:]
+        silent.sendFiles = [:]
+        #expect(!silent.canTranscribe)
     }
 
     @Test func sessionsBeingRecordedCannotBeDeleted() throws {

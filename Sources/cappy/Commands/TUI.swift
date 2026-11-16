@@ -25,8 +25,9 @@ struct TUI: AsyncParsableCommand {
 
         Tab switches to the past recordings: show the transcript (t), live transcript (l) or summary (s),
         play both tracks mixed (p), open each track in the default player, show the folder in Finder (f),
-        create the summary of a session, or create it again, choosing the profile and the model
-        (from the menu; Ctrl-C interrupts it),
+        create the summary of a session, or create it again, choosing the profile and the model,
+        transcribe a session, or transcribe it again with another profile
+        (from the menu; Ctrl-C interrupts it; the previous summary.md / transcript.* is kept with a timestamp),
         or delete a session (d; asks first and moves the folder to the Trash).
         """, ja: """
         上の欄でプロファイル、録音後の操作（文字起こし・要約・リアルタイム文字起こし）、要約モデル（要約するとき。
@@ -44,7 +45,8 @@ struct TUI: AsyncParsableCommand {
 
         Tab で過去の録音のページに切り替えます。文字起こし（t）・リアルタイム文字起こし（l）・要約（s）の表示、
         相手と自分を合わせた再生（p）、各トラックを再生アプリで開く、フォルダを Finder で開く（f）、
-        プロファイルとモデルを選んでの要約の作成・作り直し（メニューから。Ctrl-C で中断）、
+        プロファイルとモデルを選んでの要約の作成・作り直し、プロファイルを選んでの文字起こし・やり直し
+        （メニューから。Ctrl-C で中断。前の summary.md / transcript.* は日時付きの名前で残す）、
         削除（d。確認してからフォルダをゴミ箱に移動）ができます。
         """)
     )
@@ -87,6 +89,9 @@ struct TUI: AsyncParsableCommand {
             switch choice {
             case .summarize(let entry, let profile, let model, let prompt, let force):
                 await Self.summarize(entry, profileName: profile, model: model, prompt: prompt, force: force, app: app)
+                continue
+            case .transcribe(let entry, let profile, let force):
+                await Self.transcribe(entry, profileName: profile, force: force, app: app)
                 continue
             case .record(let a, let d):
                 (arguments, details) = (a, d)
@@ -155,6 +160,54 @@ struct TUI: AsyncParsableCommand {
         app.finishSummary(directory: entry.directory, error: error)
     }
 
+    /// 過去の録音のページから文字起こしする（`cappy transcribe` と同じ。プロファイルはウィンドウで選んだもの）。
+    /// やり直すときは --force で、前の transcript.* は日時付きの名前で残す。Ctrl-C で中断して一覧に戻る
+    static func transcribe(_ entry: SessionEntry, profileName: String, force: Bool, app: TUIApp) async {
+        let task = Task { () throws -> Void in
+            let store = try SessionStore.open(entry.directory)
+            let profile = try CappyConfig.load().profile(named: profileName)
+            if profile.transcriptionService == .none {
+                throw CappyError.usage(tr("The provider of profile \(profile.name) is none, so no transcription", ja: "プロファイル \(profile.name) の provider が none のため、文字起こしは行いません"),
+                                       hint: tr("Choose a profile whose provider is google or aws", ja: "provider が google か aws のプロファイルを選んでください"))
+            }
+            let name = entry.title.isEmpty ? entry.directory.lastPathComponent : entry.title
+            // 中断した文字起こしが別のサービス・言語のものなら、続きからではなく最初からにする（--force）
+            var restart = force
+            if !restart, let t = store.metadata.transcription, t.state != .done, t.jobs.contains(where: { $0.handle != nil }) {
+                let providerName = [TranscriptionService.gemini: "gemini", .speech: "google", .amazon: "transcribe"][profile.transcriptionService]
+                if t.provider != providerName || t.language != profile.language || t.mix { restart = true }
+            }
+            var args = ["--profile", profile.name, "--no-summarize"]
+            if restart { args.append("--force") }
+            args.append(entry.directory.path)
+            var details: [(label: String, value: String)] = [(tr("Session", ja: "セッション"), name),
+                                                             (tr("Profile", ja: "プロファイル"), profile.name),
+                                                             (tr("Provider", ja: "プロバイダ"), profile.provider)]
+            if let m = profile.transcribeModel { details.append((tr("Model", ja: "モデル"), m)) }
+            details.append((tr("Language", ja: "言語"), profile.language))
+            app.beginSession(details: details, command: "$ cappy transcribe " + args.map(shellQuote).joined(separator: " "), job: .transcribe)
+            CappyLog.shared.attach(sessionDirectory: entry.directory)
+            CappyLog.shared.info(tr("cappy \(CappyVersion.current) transcribe started session=\(store.metadata.id)", ja: "cappy \(CappyVersion.current) transcribe 開始 session=\(store.metadata.id)"))
+            defer { CappyLog.shared.detach() }
+            try await TranscribeRunner.run(store: store, profile: profile, request: .init(
+                providerName: nil, language: nil, mix: false, formats: TranscriptFormat.allCases, force: restart,
+                keepRemote: false, backupExisting: true))
+        }
+        app.setCancelJob { task.cancel() }
+        let result = await task.result
+        app.setCancelJob(nil)
+        var error: String?
+        if case .failure(let e) = result {
+            error = task.isCancelled ? tr("Interrupted. Resume from the menu, or with `cappy transcribe \(entry.directory.path)`",
+                                          ja: "中断しました。メニューか `cappy transcribe \(entry.directory.path)` で再開できます")
+                : describe(e)
+        }
+        app.finishBrowserJob(directory: entry.directory, error: error,
+                             success: tr("Transcription finished: \(entry.directory.path)", ja: "文字起こしが完了しました: \(entry.directory.path)")
+                                + (force && entry.summary != nil ? tr(" (the summary is from the previous transcript; create it again from the menu)",
+                                                                      ja: "（要約は前の文字起こしのものです。メニューから作り直せます）") : ""))
+    }
+
     static func loadTargets() -> [LaunchTarget] {
         LaunchTarget.group((try? AudioProcesses.list()) ?? [], excludingPID: getpid())
     }
@@ -216,11 +269,13 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
         case record(arguments: [String], details: [(label: String, value: String)])
         /// 過去の録音のページから要約を作る
         case summarize(SessionEntry, profile: String, model: String?, prompt: String?, force: Bool)
+        /// 過去の録音のページから文字起こしする
+        case transcribe(SessionEntry, profile: String, force: Bool)
     }
 
     private enum Mode { case launcher, sessions, pager, session, viewingLog }
     /// .session の画面で動かしているもの
-    enum Job { case record, summarize }
+    enum Job { case record, summarize, transcribe }
 
     private let lock = NSLock()
     private var launcher: RecordLauncher
@@ -381,6 +436,12 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
 
     /// 過去の録音のページから始めた要約が終わった（または失敗した）。結果を一覧の上に出して、一覧に戻る
     func finishSummary(directory: URL, error: String?) {
+        finishBrowserJob(directory: directory, error: error,
+                         success: tr("Summary created: \(directory.path)", ja: "要約を作成しました: \(directory.path)"))
+    }
+
+    /// 過去の録音のページから始めた処理（要約・文字起こし）が終わった。結果を一覧の上に出して、一覧に戻る
+    func finishBrowserJob(directory: URL, error: String?, success: String) {
         let entries = SessionCatalog.scan(lock.withLock { browser.directories })
         lock.withLock {
             let text: String
@@ -388,7 +449,7 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
                 text = "✗ " + error
                 allLog.append(tr("Error: \(error)", ja: "エラー: \(error)"))
             } else {
-                text = tr("Summary created: \(directory.path)", ja: "要約を作成しました: \(directory.path)")
+                text = success
             }
             browser.update(entries: entries)
             browser.notice = text
@@ -609,6 +670,17 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
                 dirty = true
             }
             resolveChoice(.summarize(entry, profile: profile, model: model, prompt: prompt, force: force))
+        case .transcribe(let entry, let profile, let force):
+            lock.withLock {
+                browser.notice = nil
+                details = []
+                log = []
+                status = nil
+                job = .transcribe
+                mode = .session // 入力の扱いを処理中のものに切り替える（Ctrl-C で中断）
+                dirty = true
+            }
+            resolveChoice(.transcribe(entry, profile: profile, force: force))
         case .playMix(let entry):
             setSessionsNotice(tr("Mixing the two tracks…", ja: "2 トラックをミックスしています…"))
             DispatchQueue.global().async { [weak self] in
@@ -799,6 +871,10 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
         if job == .summarize {
             return (tr("Summarizing…", ja: "要約を作成しています…"),
                     tr("Ctrl-C: interrupt and go back to the past recordings", ja: "Ctrl-C: 中断して過去の録音に戻る"))
+        }
+        if job == .transcribe {
+            return (tr("Transcribing…", ja: "文字起こし中…"),
+                    tr("Ctrl-C: interrupt and go back to the past recordings (resume from the menu)", ja: "Ctrl-C: 中断して過去の録音に戻る（メニューから再開できます）"))
         }
         switch phase {
         case nil:
