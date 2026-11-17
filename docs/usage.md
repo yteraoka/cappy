@@ -32,6 +32,9 @@ cappy summarize ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 cappy mic off
 cappy mic on
 
+# Take a screenshot of the recording target's window (from another terminal or a hotkey)
+cappy shot
+
 # Repair a session that ended abnormally
 cappy recover ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
@@ -60,7 +63,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 | `--quiet` | Do not show the recording notice |
 | `-v, --verbose` | Also show dropped IOProc buffers and ring buffer usage |
 
-- Press Enter while recording to add a marker to `markers` in `session.json`. Type some text before Enter to give it a label (the text being typed is shown on the status line; Backspace deletes a character and Ctrl-U clears it). Press Space with nothing typed to mute the microphone (see "Muting the microphone").
+- Press Enter while recording to add a marker to `markers` in `session.json`. Type some text before Enter to give it a label (the text being typed is shown on the status line; Backspace deletes a character and Ctrl-U clears it). Press Space with nothing typed to mute the microphone, and s to take a screenshot (see "Muting the microphone" and "Screenshots").
 - While recording, cappy reads the terminal one key at a time and restores the terminal settings when recording stops. If cappy is killed (e.g. `kill -9`) and the terminal stops echoing, run `stty sane`.
 - Ctrl-C / SIGTERM stops recording, finalizes the CAF files and creates the files to send. A second Ctrl-C skips the conversion and exits (create them later with `recover`).
 - cappy stops and finalizes the recording right before the Mac sleeps. It does not resume automatically after waking up.
@@ -77,6 +80,18 @@ Meeting apps keep using the microphone while you are muted in them, so cappy wou
 - While muted, the mic track is recorded as silence, so the track keeps its length and stays aligned with the remote track. The live transcription also receives silence. The muted periods are recorded in `mic_mutes` of `session.json`, and the status line shows `mic 🔇muted`.
 - cappy cannot read the mute state of Zoom, Meet or Teams (none of them make it available to other apps, and they typically keep the microphone open while muted). To keep the two in sync, bind one hotkey to both the meeting app's mute shortcut and `cappy mic toggle` (for example with Shortcuts, Raycast, Hammerspoon or BetterTouchTool), or mute in the meeting app and in cappy at the same time.
 - `cappy mic` finds the recording through a file in `$TMPDIR/cappy/` (`CAPPY_RUNTIME_DIR` to change it) and sends SIGUSR1 (mute) / SIGUSR2 (unmute) to it. It checks the process start time so that a reused PID never receives the signal.
+
+### Screenshots
+
+Keep slides and other material shared in the meeting, on the same timeline as the recording.
+
+- Press s in the terminal running `cappy record` to capture the recording target app's window and save it as a PNG in `screenshots/` of the session directory (named with a sequence number and the time from the start of the recording, such as `001_00-12-34.png`). This works only while nothing is typed; once you start typing a marker label, s is part of the label (so a label cannot start with s). A full-width ｓ from a Japanese input method works too.
+- From another terminal, a script or a hotkey: `cappy shot`. Binding it to a hotkey lets you take screenshots without switching to the terminal. When several recordings are running, choose one with `--pid`.
+- cappy captures the largest visible normal window of the recording target app (an app matching the `--app` prefix, or the parent app of a helper process being recorded). Windows hidden behind others are captured with their content; minimized windows cannot be captured. With `--system`, the whole main display is captured.
+- Browsers (Meet and so on) are captured per window, so the screenshot shows the tab currently displayed in that window.
+- The time (ms from the start of the recording), file, app and window title are recorded in `screenshots` of `session.json`.
+- The terminal app you run cappy from needs the "Screen Recording" permission (System Settings > Privacy & Security > Screen & System Audio Recording > "Screen & System Audio Recording"). cappy asks for it the first time you take a screenshot; restart the terminal app after allowing it. Recording continues without it. `cappy doctor` shows the state.
+- `cappy shot` finds the recording the same way as `cappy mic` and sends SIGINFO to it. It waits until the screenshot is taken and shows the saved file or the error.
 
 ### Live transcription (`--live`)
 

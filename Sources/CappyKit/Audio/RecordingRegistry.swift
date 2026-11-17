@@ -1,16 +1,18 @@
 import Darwin
 import Foundation
 
-/// 録音中の `cappy record` を別のプロセス（`cappy mic`）から見つけて操作するための登録簿。
+/// 録音中の `cappy record` を別のプロセス（`cappy mic` / `cappy shot`）から見つけて操作するための登録簿。
 ///
-/// 録音プロセスは一時ディレクトリに `record-<pid>.json` を置き、マイクのミュート状態を書き込む。
-/// 操作する側は SIGUSR1（ミュート）/ SIGUSR2（解除）を送る。
+/// 録音プロセスは一時ディレクトリに `record-<pid>.json` を置き、マイクのミュート状態とスクリーンショットの結果を書き込む。
+/// 操作する側は SIGUSR1（ミュート）/ SIGUSR2（解除）/ SIGINFO（スクリーンショット）を送る。
 /// PID の再利用で無関係なプロセスにシグナルを送らないよう、プロセスの開始時刻も記録して照合する。
 public enum RecordingRegistry {
     /// ミュートを要求するシグナル
     public static let muteSignal = SIGUSR1
     /// ミュートの解除を要求するシグナル
     public static let unmuteSignal = SIGUSR2
+    /// スクリーンショットを要求するシグナル（既定の動作は無視なので、対応していない版に送っても終了しない）
+    public static let screenshotSignal = SIGINFO
 
     public struct Entry: Codable, Sendable, Equatable {
         public var pid: Int32
@@ -20,6 +22,12 @@ public enum RecordingRegistry {
         public var name: String?
         public var hasMic: Bool
         public var micMuted: Bool
+        /// スクリーンショットを撮ろうとした回数（失敗も数える。`cappy shot` が結果を待つのに使う）。対応していない版では nil
+        public var screenshotAttempts: Int?
+        /// 最後のスクリーンショットのファイル（成功したとき）
+        public var lastScreenshot: String?
+        /// 最後のスクリーンショットのエラー（失敗したとき）
+        public var lastScreenshotError: String?
         public var updatedAt: String
 
         public init(pid: Int32, processStart: UInt64, session: String, name: String?, hasMic: Bool, micMuted: Bool) {
@@ -37,6 +45,9 @@ public enum RecordingRegistry {
             case processStart = "process_start"
             case hasMic = "has_mic"
             case micMuted = "mic_muted"
+            case screenshotAttempts = "screenshot_attempts"
+            case lastScreenshot = "last_screenshot"
+            case lastScreenshotError = "last_screenshot_error"
             case updatedAt = "updated_at"
         }
     }
@@ -90,10 +101,19 @@ public enum RecordingRegistry {
 
     /// ミュート / 解除を要求する
     public static func request(muted: Bool, of e: Entry) throws {
+        try send(muted ? muteSignal : unmuteSignal, to: e)
+    }
+
+    /// スクリーンショットを要求する
+    public static func requestScreenshot(of e: Entry) throws {
+        try send(screenshotSignal, to: e)
+    }
+
+    private static func send(_ sig: Int32, to e: Entry) throws {
         guard isAlive(e) else {
             throw CappyError.targetNotFound(tr("The recording (PID \(e.pid)) has already ended", ja: "録音（PID \(e.pid)）はすでに終了しています"))
         }
-        guard kill(e.pid, muted ? muteSignal : unmuteSignal) == 0 else {
+        guard kill(e.pid, sig) == 0 else {
             throw CappyError.io(tr("Cannot send a signal to PID \(e.pid): \(String(cString: strerror(errno)))", ja: "PID \(e.pid) にシグナルを送れません: \(String(cString: strerror(errno)))"))
         }
     }

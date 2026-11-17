@@ -506,9 +506,12 @@ public final class Recorder: @unchecked Sendable {
         return true
     }
 
+    /// 録音開始からの経過時間（ms。トラックの時刻と同じ基準）
+    public var elapsedMs: Int64 { Int64(((writer?.elapsedSeconds ?? 0) * 1000).rounded()) }
+
     /// 録音中の目印（フェーズ 2）
     public func addMarker(label: String?) {
-        let at = Int64(((writer?.elapsedSeconds ?? 0) * 1000).rounded())
+        let at = elapsedMs
         _ = try? session.update { m in m.markers.append(SessionMarker(atMs: at, label: label)) }
         CappyLog.shared.info(tr("Marker added at=\(at)ms", ja: "マーカーを記録しました at=\(at)ms"))
     }

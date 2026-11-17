@@ -17,6 +17,7 @@ struct TUI: AsyncParsableCommand {
         the same screen.
 
         While recording: Space mutes / unmutes the mic, Enter adds a marker (type a label first if you like),
+        s saves a screenshot of the app's window,
         Ctrl-C stops the recording and goes on to the conversion, transcription and summary that were chosen.
         Ctrl-C while stopping skips the conversion; Ctrl-C during the conversion, transcription or summary interrupts it
         (resume with `cappy recover` / `cappy transcribe` / `cappy summarize`) and quits.
@@ -37,6 +38,7 @@ struct TUI: AsyncParsableCommand {
         始め、録音・文字起こし・要約の様子を同じ画面に表示します。
 
         録音中: Space でマイクのミュート / 解除、Enter でマーカー（先に文字を入力するとラベル付き）、
+        s でアプリのウインドウのスクリーンショット、
         Ctrl-C で録音を停止し、選んだ変換・文字起こし・要約に進みます。
         停止処理中の Ctrl-C で変換を省いて終了、変換・文字起こし・要約中の Ctrl-C で中断します
         （`cappy recover` / `cappy transcribe` / `cappy summarize` で再開できます）して終了します。
@@ -881,8 +883,8 @@ final class TUIApp: ConsoleSink, RecordKeyInput, @unchecked Sendable {
             return (tr("Preparing…", ja: "準備中…"), tr("Ctrl-C: cancel", ja: "Ctrl-C: 中止"))
         case .recording?:
             return (tr("● Recording", ja: "● 録音中"),
-                    tr("Space: mute / unmute the mic   Enter: marker (type a label first)   Ctrl-C: stop and save",
-                       ja: "Space: マイクのミュート / 解除   Enter: マーカー（先に文字でラベル）   Ctrl-C: 停止して保存"))
+                    tr("Space: mute / unmute the mic   Enter: marker (type a label first)   s: screenshot   Ctrl-C: stop and save",
+                       ja: "Space: マイクのミュート / 解除   Enter: マーカー（先に文字でラベル）   s: スクショ   Ctrl-C: 停止して保存"))
         case .finalizing?:
             return (tr("Stopping the recording…", ja: "録音を停止しています…"),
                     tr("Ctrl-C: skip the conversion and finish", ja: "Ctrl-C: 変換を省いて終える"))

@@ -59,6 +59,15 @@ struct Doctor: AsyncParsableCommand {
         case .unknown: add(.warn, tr("Microphone", ja: "マイク"), tr("Cannot get the status", ja: "状態を取得できません"))
         }
 
+        // 画面収録（スクリーンショットだけに使う。なくても録音はできる）
+        if !WindowScreenshot.hasPermission && requestPermissions { WindowScreenshot.requestPermission() }
+        if WindowScreenshot.hasPermission {
+            add(.ok, tr("Screen recording (screenshots)", ja: "画面収録（スクリーンショット）"), PermissionStatus.authorized.displayName)
+        } else {
+            add(.warn, tr("Screen recording (screenshots)", ja: "画面収録（スクリーンショット）"),
+                tr("Not allowed (only needed for screenshots with s / `cappy shot`; recording works without it)\n", ja: "許可されていません（s キー / `cappy shot` のスクリーンショットにだけ必要です。録音には不要）\n") + WindowScreenshot.permissionHint)
+        }
+
         // デバイス
         if let out = try? AudioDevices.defaultOutputDevice(), let info = try? AudioDevices.info(for: out) {
             add(.ok, tr("Default output", ja: "既定の出力"), tr("\(info.name) (\(Int(info.sampleRate)) Hz)", ja: "\(info.name)（\(Int(info.sampleRate)) Hz）"))

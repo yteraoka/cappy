@@ -28,7 +28,7 @@ struct Cappy: AsyncParsableCommand {
           4 録音中の I/O エラー  5 文字起こし・要約サービスのエラー
         """),
         version: CappyVersion.current,
-        subcommands: [Init.self, Record.self, TUI.self, Mic.self, Transcribe.self, Summarize.self, Apps.self, Devices.self, Doctor.self, Recover.self, Completion.self]
+        subcommands: [Init.self, Record.self, TUI.self, Mic.self, Shot.self, Transcribe.self, Summarize.self, Apps.self, Devices.self, Doctor.self, Recover.self, Completion.self]
     )
 
     /// 引数なしで実行されたとき。使える設定ファイルがあれば `cappy tui` を始め、なければ `cappy init` を案内する
@@ -56,7 +56,7 @@ struct Cappy: AsyncParsableCommand {
             print(Self.helpMessage())
             return
         }
-        var tui = try TUI.parse([])
+        let tui = try TUI.parse([])
         try await tui.run()
     }
 

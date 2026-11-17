@@ -14,6 +14,7 @@ struct Record: AsyncParsableCommand {
 
         Press Enter while recording to add a marker. Type some text before Enter to give the marker a label.
         Press Space (with nothing typed) to mute / unmute the microphone (also `cappy mic off|on|toggle` from elsewhere).
+        Press s (with nothing typed) to save a screenshot of the target app's window in screenshots/ (also `cappy shot` from elsewhere).
         While muted, the mic track is recorded as silence, so sounds picked up while you are muted in the meeting app are not kept.
         Ctrl-C stops recording and creates the files to send. A second Ctrl-C skips the conversion and exits.
         """, ja: """
@@ -25,6 +26,7 @@ struct Record: AsyncParsableCommand {
 
         録音中に Enter を押すとマーカー（目印）を記録します。文字を入力してから Enter でラベル付きになります。
         何も入力していないときに Space を押すとマイクをミュート / 解除します（別のターミナルなどからは `cappy mic off|on|toggle`）。
+        何も入力していないときに s を押すと、録音対象のアプリのウインドウのスクリーンショットを screenshots/ に保存します（別のターミナルなどからは `cappy shot`）。
         ミュート中はマイクのトラックを無音で記録するため、会議アプリでミュートしている間の音を残さずに済みます。
         Ctrl-C で停止して送信用ファイルまで作成します。2 回目の Ctrl-C で変換を省いて終了します。
         """)
@@ -206,7 +208,10 @@ struct Record: AsyncParsableCommand {
         }
 
         let micControl = MicMuteController(recorder: recorder)
-        micControl.start(session: dir, name: name)
+        let shots = ScreenshotController(recorder: recorder, registry: micControl)
+        shots.start()
+        defer { shots.cancel() }
+        micControl.start(session: dir, name: name, screenshots: true)
         defer { micControl.stop() }
 
         let sleepDone = DispatchSemaphore(value: 0)
@@ -220,12 +225,12 @@ struct Record: AsyncParsableCommand {
         let trackList = store.metadata.tracks.map { tr("\($0.id.displayName) (\($0.id.rawValue))", ja: "\($0.id.displayName)（\($0.id.rawValue)）") }
             .joined(separator: tr(", ", ja: "・"))
         let statusLine = StatusLine()
-        let keys = startKeyReader(recorder, micControl: micControl, statusLine: statusLine, input: keyInput)
+        let keys = startKeyReader(recorder, micControl: micControl, shots: shots, statusLine: statusLine, input: keyInput)
         defer { keys?.stop() }
         let tty = keys != nil
         let muteKey = tty && micControl.hasMic
-        Console.print(tr("Tracks: \(trackList)  Stop: Ctrl-C\(muteKey ? "  Mic mute: Space" : "")\(tty ? "  Marker: Enter (type a label first if you like)" : "")",
-                         ja: "トラック: \(trackList)  停止: Ctrl-C\(muteKey ? "  マイクのミュート: Space" : "")\(tty ? "  マーカー: Enter（先に文字を入力するとラベル付き）" : "")"))
+        Console.print(tr("Tracks: \(trackList)  Stop: Ctrl-C\(muteKey ? "  Mic mute: Space" : "")\(tty ? "  Marker: Enter (type a label first if you like)  Screenshot: s" : "")",
+                         ja: "トラック: \(trackList)  停止: Ctrl-C\(muteKey ? "  マイクのミュート: Space" : "")\(tty ? "  マーカー: Enter（先に文字を入力するとラベル付き）  スクリーンショット: s" : "")"))
         if recorder.isMicMuted {
             Console.print(tr("🔇 The mic is muted. Unmute: \(muteKey ? "Space or " : "")`cappy mic on`", ja: "🔇 マイクはミュート中です。解除: \(muteKey ? "Space か " : "")`cappy mic on`"))
         }
@@ -251,6 +256,7 @@ struct Record: AsyncParsableCommand {
         interrupts.setPhase(.finalizing)
         statusTimer.cancel()
         keys?.stop()
+        await shots.stop()
         Console.clearStatus()
         Console.print(reason == "sleep" ? tr("Stopping the recording because the Mac is going to sleep…", ja: "スリープするため録音を停止しています…") : tr("Stopping the recording…", ja: "録音を停止しています…"))
 
@@ -417,13 +423,15 @@ struct Record: AsyncParsableCommand {
         return timer
     }
 
-    /// キー入力（Space でミュートの切り替え、Enter でマーカー）を読み始める。端末から入力できなければ nil
-    private func startKeyReader(_ recorder: Recorder, micControl: MicMuteController, statusLine: StatusLine,
+    /// キー入力（Space でミュートの切り替え、Enter でマーカー、s でスクリーンショット）を読み始める。端末から入力できなければ nil
+    private func startKeyReader(_ recorder: Recorder, micControl: MicMuteController, shots: ScreenshotController, statusLine: StatusLine,
                                 input: RecordKeyInput?) -> KeyInputStopper? {
         let handler: @Sendable (KeyInputParser.Event, String) -> Void = { event, text in
             switch event {
             case .toggleMute:
                 micControl.toggle()
+            case .screenshot:
+                shots.request()
             case .marker(let label):
                 statusLine.setInput("")
                 recorder.addMarker(label: label)
@@ -453,6 +461,7 @@ struct Record: AsyncParsableCommand {
             line += tr(", \(meta.gaps.count) gap(s), \(total) ms in total", ja: "、欠落 \(meta.gaps.count) 区間 計 \(total) ms")
         }
         if !meta.markers.isEmpty { line += tr(", \(meta.markers.count) marker(s)", ja: "、マーカー \(meta.markers.count)") }
+        if let shots = meta.screenshots, !shots.isEmpty { line += tr(", \(shots.count) screenshot(s)", ja: "、スクリーンショット \(shots.count)") }
         if let mutes = meta.micMutes, !mutes.isEmpty {
             let total = SessionMute.totalMs(mutes, untilMs: meta.track(.mic)?.durationMs ?? maxMs)
             line += tr(", mic muted \(TimeFormat.hms(ms: total)) in total", ja: "、マイクのミュート 計 \(TimeFormat.hms(ms: total))")

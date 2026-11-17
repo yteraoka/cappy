@@ -3,12 +3,15 @@ import Foundation
 /// 録音中のキー入力（端末から 1 バイトずつ）を解釈する。
 ///
 /// - 何も入力していないときの Space（全角スペースも）: マイクのミュートの切り替え
+/// - 何も入力していないときの s（S・全角の ｓ / Ｓ も）: 録音対象のウインドウのスクリーンショット
 /// - Enter: マーカー（入力した文字があればラベルにする）
 /// - Backspace: 1 文字消す、Ctrl-U: 入力を消す
 /// - 矢印キーなどのエスケープシーケンスやその他の制御文字は無視する
 public struct KeyInputParser: Sendable {
     public enum Event: Equatable, Sendable {
         case toggleMute
+        /// スクリーンショットを撮る
+        case screenshot
         case marker(label: String?)
         /// 入力中の文字が変わった（表示を更新する）
         case edited
@@ -57,6 +60,8 @@ public struct KeyInputParser: Sendable {
             return .edited
         case 0x20 where text.isEmpty:
             return .toggleMute
+        case UInt8(ascii: "s") where text.isEmpty, UInt8(ascii: "S") where text.isEmpty:
+            return .screenshot
         case 0x00..<0x20:
             return nil
         default:
@@ -77,6 +82,7 @@ public struct KeyInputParser: Sendable {
         defer { utf8.removeAll() }
         guard let s = String(validating: utf8, as: UTF8.self) else { return nil }
         if text.isEmpty && s == "\u{3000}" { return .toggleMute } // 日本語入力中の Space
+        if text.isEmpty && (s == "\u{FF53}" || s == "\u{FF33}") { return .screenshot } // 日本語入力中の s（ｓ / Ｓ）
         text += s
         return .edited
     }

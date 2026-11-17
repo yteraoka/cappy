@@ -110,7 +110,8 @@ final class MicMuteController: @unchecked Sendable {
     var hasMic: Bool { recorder.hasMicTrack }
 
     /// シグナルの受け口を用意してから登録簿に載せる（順序が逆だと既定の動作でプロセスが終了しうる）
-    func start(session: URL, name: String?) {
+    /// - Parameter screenshots: `cappy shot` で撮れるか（ScreenshotController のシグナルの受け口を用意済みか）
+    func start(session: URL, name: String?, screenshots: Bool) {
         for sig in [RecordingRegistry.muteSignal, RecordingRegistry.unmuteSignal] {
             signal(sig, SIG_IGN)
             let src = DispatchSource.makeSignalSource(signal: sig, queue: .global())
@@ -118,8 +119,9 @@ final class MicMuteController: @unchecked Sendable {
             src.resume()
             sources.append(src)
         }
-        let e = RecordingRegistry.Entry(pid: getpid(), processStart: RecordingRegistry.processStartMicros(getpid()) ?? 0,
+        var e = RecordingRegistry.Entry(pid: getpid(), processStart: RecordingRegistry.processStartMicros(getpid()) ?? 0,
                                         session: session.path, name: name, hasMic: hasMic, micMuted: recorder.isMicMuted)
+        if screenshots { e.screenshotAttempts = 0 }
         lock.withLock { entry = e }
         publish()
     }
@@ -145,6 +147,16 @@ final class MicMuteController: @unchecked Sendable {
         Console.print(muted ? tr("🔇 Mic muted (\(at))", ja: "🔇 マイクをミュートしました（\(at)）")
                             : tr("🎙 Mic unmuted (\(at))", ja: "🎙 マイクのミュートを解除しました（\(at)）"))
         if changed { publish() }
+    }
+
+    /// 登録簿の自分の項目を書き換えて書き出す（スクリーンショットの結果など）
+    func updateRegistry(_ change: (inout RecordingRegistry.Entry) -> Void) {
+        lock.withLock {
+            guard !stopped, var e = entry else { return }
+            change(&e)
+            entry = e
+        }
+        publish()
     }
 
     private func publish() {
