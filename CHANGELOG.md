@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.8.0](https://github.com/yteraoka/cappy/compare/v0.7.0...v0.8.0) - 2026-11-17
+
+- cappy tui から文字起こし・要約を作り直せるようにし、前の結果をタイムスタンプ付きの名前で残す by @yteraoka in https://github.com/yteraoka/cappy/pull/32
+- 引数なしの cappy で、設定があれば cappy tui を起動し、なければ cappy init を案内する by @yteraoka in https://github.com/yteraoka/cappy/pull/34
+
 ## [v0.7.0](https://github.com/yteraoka/cappy/compare/v0.6.0...v0.7.0) - 2026-11-13
 
 - 要約のテンプレート対応と、相手側が無音のときの警告・文字起こしの省略 by @yteraoka in https://github.com/yteraoka/cappy/pull/30
