@@ -114,6 +114,32 @@ public struct SessionMarker: Codable, Sendable, Equatable {
     }
 }
 
+/// 録音中に撮ったスクリーンショット
+public struct SessionScreenshot: Codable, Sendable, Equatable {
+    /// 録音開始からの ms
+    public var atMs: Int64
+    /// セッションディレクトリからの相対パス
+    public var file: String
+    /// 撮ったウインドウのアプリの bundle ID（画面全体を撮ったときは nil）
+    public var bundleID: String?
+    /// 撮ったウインドウのタイトル
+    public var title: String?
+
+    public init(atMs: Int64, file: String, bundleID: String? = nil, title: String? = nil) {
+        self.atMs = atMs
+        self.file = file
+        self.bundleID = bundleID
+        self.title = title
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case atMs = "at_ms"
+        case file
+        case bundleID = "bundle_id"
+        case title
+    }
+}
+
 /// マイクをミュートした区間（録音開始からの ms。終了前は endMs が nil）
 public struct SessionMute: Codable, Sendable, Equatable {
     public var startMs: Int64
@@ -299,6 +325,8 @@ public struct SessionMetadata: Codable, Sendable, Equatable {
     public var markers: [SessionMarker]
     /// マイクをミュートした区間（record 中の Space キーや `cappy mic off` で切り替えたもの）
     public var micMutes: [SessionMute]?
+    /// 録音中に撮ったスクリーンショット（record 中の s キーや `cappy shot`）
+    public var screenshots: [SessionScreenshot]?
     public var recording: RecordingState
     public var transcription: TranscriptionState?
     public var summary: SummaryState?
@@ -319,7 +347,7 @@ public struct SessionMetadata: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, targets, tracks, gaps, markers, recording, transcription, summary, live, profile
+        case id, name, targets, tracks, gaps, markers, screenshots, recording, transcription, summary, live, profile
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case micMutes = "mic_mutes"

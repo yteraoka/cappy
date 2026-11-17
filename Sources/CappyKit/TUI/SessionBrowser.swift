@@ -798,6 +798,9 @@ public struct SessionBrowser: Sendable {
             let list = m.markers.prefix(5).map { TimeFormat.hms(ms: $0.atMs) + ($0.label.map { " \($0)" } ?? "") }
             out.append(tr("Markers: ", ja: "マーカー: ") + list.joined(separator: ", ") + (m.markers.count > 5 ? " …" : ""))
         }
+        if let shots = m.screenshots, !shots.isEmpty {
+            out.append(tr("Screenshots: \(shots.count) (screenshots/)", ja: "スクリーンショット: \(shots.count) 枚（screenshots/）"))
+        }
         return out
     }
 }

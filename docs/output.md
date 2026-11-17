@@ -4,7 +4,7 @@ English | [日本語](./output.ja.md)
 
 ```text
 ~/Recordings/cappy/2026-11-11T1000_weekly-sync/   (0700)
-├── session.json       # metadata and processing state (tracks, gaps, markers, mic_mutes, transcription ...)
+├── session.json       # metadata and processing state (tracks, gaps, markers, mic_mutes, screenshots, transcription ...)
 ├── remote.caf         # remote side (tap), original recording (native format, Float32)
 ├── mic.caf            # you (microphone), original recording
 ├── remote.flac        # file to send (16 kHz, mono, 16 bit; WAV if FLAC is not available)
@@ -14,6 +14,7 @@ English | [日本語](./output.ja.md)
 ├── transcript.srt     # for captions and video editing
 ├── live-transcript.{md,json,srt}  # live transcription (record --live)
 ├── summary.md         # meeting summary (cappy summarize / --summarize)
+├── screenshots/       # screenshots taken while recording (s key / cappy shot; 001_00-12-34.png ...)
 └── cappy.log          # events, times and errors only (no meeting content)
 ```
 

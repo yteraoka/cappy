@@ -53,3 +53,4 @@ Two permissions are needed: "System Audio Recording" and "Microphone". For a CLI
 - Settings: System Settings > Privacy & Security > Screen & System Audio Recording > "System Audio Recording Only", and "Microphone"
 - Without permission, `record` exits with code 2 without recording.
 - Even without system audio recording permission, creating the tap can succeed and the remote track becomes silent. cappy warns about this after recording.
+- Only for screenshots while recording (s key / `cappy shot`), the "Screen Recording" permission is also needed ("Screen & System Audio Recording" at the top of the same Screen & System Audio Recording page). cappy asks for it the first time you take a screenshot; restart the terminal app after allowing it.
