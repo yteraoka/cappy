@@ -129,7 +129,7 @@ final class ScreenshotController: @unchecked Sendable {
         let url = store.directory.appendingPathComponent(rel)
         let at = TimeFormat.hms(ms: atMs)
         // 録音対象のプロセスは録音中に増えることがある（ヘルパーの起動など）ので、撮るたびに作り直す
-        let target = ScreenshotTarget(targets: store.metadata.targets, processes: (try? AudioProcesses.list()) ?? [])
+        let target = ScreenshotTarget(targets: store.metadata.targets)
         do {
             let r = try await WindowScreenshot.capture(target: target, to: url)
             _ = try? store.update { m in

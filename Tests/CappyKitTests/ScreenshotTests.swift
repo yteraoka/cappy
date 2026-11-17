@@ -25,24 +25,29 @@ import Testing
     }
 
     @Test func targetMatchesAppHelpersAndPIDs() {
-        let processes = [
-            AudioProcessInfo(objectID: 1, pid: 200, bundleID: "com.google.Chrome.helper.renderer", name: "Google Chrome Helper (Renderer)",
-                             isRunningOutput: true, isRunningInput: false),
-            AudioProcessInfo(objectID: 2, pid: 300, bundleID: "us.zoom.xos", name: "zoom.us", isRunningOutput: true, isRunningInput: true),
-        ]
+        let chrome = "/Applications/Google Chrome.app"
+        let helper = chrome + "/Contents/Frameworks/Google Chrome Framework.framework/Versions/140/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)"
+        let paths: [Int32: String] = [200: helper, 300: "/Applications/zoom.us.app/Contents/MacOS/zoom.us", 400: "/usr/libexec/somedaemon"]
+        #expect(ScreenshotTarget.appBundlePath(ofExecutable: helper) == chrome)
+        #expect(ScreenshotTarget.appBundlePath(ofExecutable: "/usr/libexec/somedaemon") == nil)
+
         // --pid でヘルパーを指定しても、ウインドウを持つ本体のアプリを撮る
-        let byPID = ScreenshotTarget(targets: [SessionTarget(kind: .pid, pid: 200, matchedPIDs: [200])], processes: processes)
-        #expect(byPID.processBundleIDs == ["com.google.Chrome.helper.renderer"])
-        #expect(byPID.matches(pid: 100, bundleID: "com.google.Chrome"))
-        #expect(byPID.matches(pid: 200, bundleID: nil))
-        #expect(!byPID.matches(pid: 100, bundleID: "com.google"))
-        #expect(!byPID.matches(pid: 300, bundleID: "us.zoom.xos"))
+        let byPID = ScreenshotTarget(targets: [SessionTarget(kind: .pid, pid: 200, matchedPIDs: [200])], executablePath: { paths[$0] })
+        #expect(byPID.pids == [200])
+        #expect(byPID.processAppPaths == [chrome])
+        #expect(byPID.matches(pid: 100, bundleID: "com.google.Chrome", appPath: chrome))
+        #expect(byPID.matches(pid: 200, bundleID: nil, appPath: nil))
+        // 同じ会社の別のアプリ（bundle ID が前方一致するだけ）は対象にしない
+        #expect(!byPID.matches(pid: 101, bundleID: "com.google", appPath: "/Applications/Google Drive.app"))
+        #expect(!byPID.matches(pid: 300, bundleID: "us.zoom.xos", appPath: "/Applications/zoom.us.app"))
 
-        let byApp = ScreenshotTarget(targets: [SessionTarget(kind: .app, bundleID: "us.zoom.xos", matchedPIDs: [300])], processes: processes)
-        #expect(byApp.matches(pid: 999, bundleID: "us.zoom.xos"))
-        #expect(!byApp.matches(pid: 100, bundleID: "com.google.Chrome"))
+        let byApp = ScreenshotTarget(targets: [SessionTarget(kind: .app, bundleID: "us.zoom.xos", matchedPIDs: [300])], executablePath: { paths[$0] })
+        #expect(byApp.matches(pid: 999, bundleID: "us.zoom.xos", appPath: nil))
+        #expect(!byApp.matches(pid: 100, bundleID: "com.google.Chrome", appPath: chrome))
 
-        #expect(ScreenshotTarget(targets: [SessionTarget(kind: .system)]).system)
+        // アプリの中にない実行ファイルは親のアプリを持たない
+        #expect(ScreenshotTarget(targets: [SessionTarget(kind: .pid, pid: 400)], executablePath: { paths[$0] }).processAppPaths.isEmpty)
+        #expect(ScreenshotTarget(targets: [SessionTarget(kind: .system)], executablePath: { _ in nil }).system)
     }
 
     @Test func choosesTheLargestVisibleWindowOfTheTarget() {

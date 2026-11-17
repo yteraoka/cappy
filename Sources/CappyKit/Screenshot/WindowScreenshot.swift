@@ -1,4 +1,5 @@
 import CoreGraphics
+import Darwin
 import Foundation
 import ImageIO
 @preconcurrency import ScreenCaptureKit
@@ -10,20 +11,20 @@ public struct ScreenshotTarget: Sendable, Equatable {
     public var bundleIDs: [String]
     /// 録音対象のプロセス
     public var pids: [Int32]
-    /// 録音対象のプロセス（ヘルパーを含む）の bundle ID。ウインドウを持つ親のアプリを探すのに使う
-    public var processBundleIDs: [String]
+    /// 録音対象のプロセス（ヘルパーを含む）の実行ファイルを含むアプリ（一番外側の .app）。ウインドウを持つ親のアプリを探すのに使う
+    public var processAppPaths: [String]
     /// --system（特定のアプリがない）。画面全体を撮る
     public var system: Bool
 
-    public init(bundleIDs: [String] = [], pids: [Int32] = [], processBundleIDs: [String] = [], system: Bool = false) {
+    public init(bundleIDs: [String] = [], pids: [Int32] = [], processAppPaths: [String] = [], system: Bool = false) {
         self.bundleIDs = bundleIDs
         self.pids = pids
-        self.processBundleIDs = processBundleIDs
+        self.processAppPaths = processAppPaths
         self.system = system
     }
 
-    /// session.json の録音対象から作る。processes には録音中の音声プロセスの一覧を渡す（ヘルパーの bundle ID を引く）
-    public init(targets: [SessionTarget], processes: [AudioProcessInfo] = []) {
+    /// session.json の録音対象から作る。executablePath でプロセスの実行ファイルを引き、それを含むアプリを求める
+    public init(targets: [SessionTarget], executablePath: (Int32) -> String? = ScreenshotTarget.executablePath) {
         var bundleIDs: [String] = []
         var pids: [Int32] = []
         var system = false
@@ -36,21 +37,36 @@ public struct ScreenshotTarget: Sendable, Equatable {
             if let p = t.pid { pids.append(p) }
             pids.append(contentsOf: t.matchedPIDs ?? [])
         }
-        let pidSet = Set(pids)
-        let processBundleIDs = processes.filter { pidSet.contains($0.pid) && !$0.bundleID.isEmpty }.map(\.bundleID)
-        self.init(bundleIDs: bundleIDs, pids: pids, processBundleIDs: Array(Set(processBundleIDs)).sorted(), system: system)
+        pids = Array(Set(pids)).sorted()
+        let apps = Set(pids.compactMap { executablePath($0).flatMap(Self.appBundlePath(ofExecutable:)) })
+        self.init(bundleIDs: bundleIDs, pids: pids, processAppPaths: apps.sorted(), system: system)
     }
 
     /// このアプリのウインドウを撮る対象にするか
     ///
     /// - 録音対象のプロセスそのもの
     /// - bundle ID が録音対象の bundle ID で始まる（--app com.google.Chrome → com.google.Chrome）
-    /// - 録音対象のプロセスがこのアプリのヘルパー（com.google.Chrome.helper.renderer → com.google.Chrome）
-    public func matches(pid: Int32, bundleID: String?) -> Bool {
+    /// - 録音対象のプロセス（ヘルパー）の実行ファイルがこのアプリの中にある
+    ///   （Google Chrome.app/Contents/Frameworks/…/Google Chrome Helper (Renderer).app → Google Chrome.app）
+    public func matches(pid: Int32, bundleID: String?, appPath: String?) -> Bool {
         if pids.contains(pid) { return true }
-        guard let b = bundleID, !b.isEmpty else { return false }
-        if bundleIDs.contains(where: { b.hasPrefix($0) }) { return true }
-        return processBundleIDs.contains { $0 == b || $0.hasPrefix(b + ".") }
+        if let b = bundleID, !b.isEmpty, bundleIDs.contains(where: { b.hasPrefix($0) }) { return true }
+        if let appPath, processAppPaths.contains(appPath) { return true }
+        return false
+    }
+
+    /// 実行ファイルを含む一番外側のアプリ（/Applications/Google Chrome.app）。アプリの中になければ nil
+    public static func appBundlePath(ofExecutable path: String) -> String? {
+        guard let r = path.range(of: ".app/") else { return nil }
+        return String(path[..<r.lowerBound]) + ".app"
+    }
+
+    /// プロセスの実行ファイルのパス
+    public static func executablePath(_ pid: Int32) -> String? {
+        var buf = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        let n = proc_pidpath(pid, &buf, UInt32(buf.count))
+        guard n > 0 else { return nil }
+        return String(cString: buf)
     }
 }
 
@@ -59,16 +75,20 @@ public struct ScreenshotWindowCandidate: Sendable, Equatable {
     public var index: Int
     public var pid: Int32
     public var bundleID: String?
+    /// ウインドウを持つアプリ（.app）のパス
+    public var appPath: String?
     public var title: String?
     public var width: Double
     public var height: Double
     public var layer: Int
     public var onScreen: Bool
 
-    public init(index: Int, pid: Int32, bundleID: String?, title: String?, width: Double, height: Double, layer: Int, onScreen: Bool) {
+    public init(index: Int, pid: Int32, bundleID: String?, appPath: String? = nil, title: String?,
+                width: Double, height: Double, layer: Int, onScreen: Bool) {
         self.index = index
         self.pid = pid
         self.bundleID = bundleID
+        self.appPath = appPath
         self.title = title
         self.width = width
         self.height = height
@@ -86,7 +106,7 @@ public enum WindowScreenshot {
     /// 撮るウインドウを選ぶ。録音対象のアプリの通常のウインドウのうち、画面に出ているものを優先し、その中で一番大きいもの
     public static func choose(_ windows: [ScreenshotWindowCandidate], for target: ScreenshotTarget) -> ScreenshotWindowCandidate? {
         let candidates = windows.filter {
-            $0.layer == 0 && $0.width >= minimumSide && $0.height >= minimumSide && target.matches(pid: $0.pid, bundleID: $0.bundleID)
+            $0.layer == 0 && $0.width >= minimumSide && $0.height >= minimumSide && target.matches(pid: $0.pid, bundleID: $0.bundleID, appPath: $0.appPath)
         }
         let pool = candidates.contains(where: \.onScreen) ? candidates.filter(\.onScreen) : candidates
         // 同じ大きさなら前面（一覧の先）のもの
@@ -156,9 +176,14 @@ public enum WindowScreenshot {
             result = Result(bundleID: nil, appName: nil, title: nil, wholeDisplay: true)
         } else {
             let windows = content.windows
+            var appPaths: [Int32: String?] = [:]
             let candidates = windows.enumerated().compactMap { (i, w) -> ScreenshotWindowCandidate? in
                 guard let app = w.owningApplication else { return nil }
-                return ScreenshotWindowCandidate(index: i, pid: app.processID, bundleID: app.bundleIdentifier, title: w.title,
+                let pid = app.processID
+                if appPaths[pid] == nil {
+                    appPaths[pid] = .some(ScreenshotTarget.executablePath(pid).flatMap(ScreenshotTarget.appBundlePath(ofExecutable:)))
+                }
+                return ScreenshotWindowCandidate(index: i, pid: pid, bundleID: app.bundleIdentifier, appPath: appPaths[pid] ?? nil, title: w.title,
                                                  width: Double(w.frame.width), height: Double(w.frame.height),
                                                  layer: w.windowLayer, onScreen: w.isOnScreen)
             }
