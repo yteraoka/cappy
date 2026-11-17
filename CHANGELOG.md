@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.9.0](https://github.com/yteraoka/cappy/compare/v0.8.0...v0.9.0) - 2026-11-17
+
+- 録音中に s キーと cappy shot で録音対象のウインドウのスクリーンショットを撮れるようにする by @yteraoka in https://github.com/yteraoka/cappy/pull/35
+
 ## [v0.8.0](https://github.com/yteraoka/cappy/compare/v0.7.0...v0.8.0) - 2026-11-17
 
 - cappy tui から文字起こし・要約を作り直せるようにし、前の結果をタイムスタンプ付きの名前で残す by @yteraoka in https://github.com/yteraoka/cappy/pull/32
