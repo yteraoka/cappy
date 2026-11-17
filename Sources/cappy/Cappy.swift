@@ -56,7 +56,7 @@ struct Cappy: AsyncParsableCommand {
             print(Self.helpMessage())
             return
         }
-        var tui = try TUI.parse([])
+        let tui = try TUI.parse([])
         try await tui.run()
     }
 

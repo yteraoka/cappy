@@ -63,10 +63,11 @@ public struct ScreenshotTarget: Sendable, Equatable {
 
     /// プロセスの実行ファイルのパス
     public static func executablePath(_ pid: Int32) -> String? {
-        var buf = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        var buf = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
         let n = proc_pidpath(pid, &buf, UInt32(buf.count))
         guard n > 0 else { return nil }
-        return String(cString: buf)
+        // n は終端の NUL を含まない長さ
+        return String(decoding: buf.prefix(Int(n)).prefix { $0 != 0 }, as: UTF8.self)
     }
 }
 
