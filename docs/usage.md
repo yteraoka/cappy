@@ -4,6 +4,7 @@ English | [日本語](./usage.ja.md)
 
 ```bash
 cappy init                         # create the config file interactively (see configuration.md)
+cappy                              # same as `cappy tui` (or tells you to run `cappy init` when there is no config)
 cappy tui                          # choose the settings and the app on a full screen, then record (see tui.md)
 cappy apps                         # list audio processes (PID, bundle ID, whether playing)
 cappy devices                      # list input devices (UID, name, sample rate)

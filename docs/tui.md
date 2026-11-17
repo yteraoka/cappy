@@ -2,7 +2,7 @@
 
 English | [日本語](./tui.ja.md)
 
-`cappy tui` lets you choose the profile, the operation and the app to record on a full screen, and starts recording with Enter.
+`cappy tui` lets you choose the profile, the operation and the app to record on a full screen, and starts recording with Enter. Running `cappy` with no arguments does the same when the config file has a profile; without one, it tells you to run `cappy init`.
 
 ```
  cappy — choose the settings and the app to record
