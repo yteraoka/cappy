@@ -69,17 +69,7 @@ public final class FileSink: AudioSink, @unchecked Sendable {
             let ratio = fileFormat.sampleRate / buffer.format.sampleRate
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
             guard let out = AVAudioPCMBuffer(pcmFormat: fileFormat, frameCapacity: capacity) else { return }
-            var supplied = false
-            var convError: NSError?
-            let status = converter.convert(to: out, error: &convError) { _, inputStatus in
-                if supplied {
-                    inputStatus.pointee = .noDataNow
-                    return nil
-                }
-                supplied = true
-                inputStatus.pointee = .haveData
-                return buffer
-            }
+            let (status, convError) = converter.convertSingleBuffer(buffer, to: out)
             if status == .error { throw convError ?? CappyError.io(tr("Format conversion failed", ja: "形式変換に失敗しました")) }
             if out.frameLength > 0 {
                 try file.write(from: out)

@@ -69,17 +69,7 @@ public final class LiveAudioSink: AudioSink, @unchecked Sendable {
         guard let converter else { return }
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * outFormat.sampleRate / buffer.format.sampleRate) + 64
         guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
-        var supplied = false
-        var error: NSError?
-        let status = converter.convert(to: out, error: &error) { _, inputStatus in
-            if supplied {
-                inputStatus.pointee = .noDataNow
-                return nil
-            }
-            supplied = true
-            inputStatus.pointee = .haveData
-            return buffer
-        }
+        let (status, _) = converter.convertSingleBuffer(buffer, to: out)
         guard status != .error, out.frameLength > 0, let p = out.int16ChannelData?[0] else { return }
         append(Data(bytes: p, count: Int(out.frameLength) * 2), frames: Int64(out.frameLength))
     }
