@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.10.0](https://github.com/yteraoka/cappy/compare/v0.9.3...v0.10.0) - 2026-11-18
+
+- Update actions/create-github-app-token action to v3.4.0 by @renovate[bot] in https://github.com/yteraoka/cappy/pull/49
+- Add gcappy: menu bar GUI for cappy by @yteraoka in https://github.com/yteraoka/cappy/pull/46
+
 ## [v0.9.3](https://github.com/yteraoka/cappy/compare/v0.9.2...v0.9.3) - 2026-11-18
 
 - スクリーンショットで、タイトルが会議に一致するウインドウを優先して撮る by @yteraoka in https://github.com/yteraoka/cappy/pull/45
