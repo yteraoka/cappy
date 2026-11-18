@@ -1,6 +1,33 @@
 import AVFoundation
 import Foundation
 
+/// AVAudioConverter の入力ブロックから読み書きする状態。
+///
+/// 入力ブロックは SDK 上は @Sendable だが、`convert(to:error:withInputFrom:)` の中で同期的に
+/// （呼び出したスレッドで）呼ばれるだけなので、ロックなしで共有してよい
+final class ConverterInputState<Value>: @unchecked Sendable {
+    var value: Value
+    init(_ value: Value) { self.value = value }
+}
+
+extension AVAudioConverter {
+    /// 1 つのバッファを変換する（ストリームの途中として扱い、終わりにはしない）
+    func convertSingleBuffer(_ buffer: AVAudioPCMBuffer, to out: AVAudioPCMBuffer) -> (AVAudioConverterOutputStatus, NSError?) {
+        let input = ConverterInputState((buffer: buffer, supplied: false))
+        var error: NSError?
+        let status = convert(to: out, error: &error) { _, inputStatus in
+            if input.value.supplied {
+                inputStatus.pointee = .noDataNow
+                return nil
+            }
+            input.value.supplied = true
+            inputStatus.pointee = .haveData
+            return input.value.buffer
+        }
+        return (status, error)
+    }
+}
+
 /// 送信用ファイル（16 kHz・モノラル・16 bit の FLAC、不可なら WAV）への変換、ミックス、分割
 public enum SendFileConverter {
     public static let sampleRate: Double = 16_000
@@ -76,37 +103,38 @@ public enum SendFileConverter {
                                             frameCapacity: AVAudioFrameCount(Double(inCapacity) * sampleRate / inFormat.sampleRate) + 1024)
         else { throw CappyError.io(tr("Cannot allocate a buffer", ja: "バッファを確保できません")) }
 
-        var readError: Error?
-        var eof = false
+        // 入力ブロックから読み書きする状態（ファイル・バッファ・終端・読み込みエラー）
+        let source = ConverterInputState((file: inFile, buffer: inBuf, eof: false, readError: Error?.none))
         var written: Int64 = 0
         while true {
             outBuf.frameLength = 0
             var convError: NSError?
             let status = converter.convert(to: outBuf, error: &convError) { _, inputStatus in
-                if eof {
+                if source.value.eof {
                     inputStatus.pointee = .endOfStream
                     return nil
                 }
-                if inFile.framePosition >= inFile.length {
-                    eof = true
+                let file = source.value.file
+                if file.framePosition >= file.length {
+                    source.value.eof = true
                     inputStatus.pointee = .endOfStream
                     return nil
                 }
                 do {
-                    try inFile.read(into: inBuf, frameCount: inCapacity)
+                    try file.read(into: source.value.buffer, frameCount: inCapacity)
                 } catch {
-                    readError = error
-                    eof = true
+                    source.value.readError = error
+                    source.value.eof = true
                     inputStatus.pointee = .endOfStream
                     return nil
                 }
-                if inBuf.frameLength == 0 {
-                    eof = true
+                if source.value.buffer.frameLength == 0 {
+                    source.value.eof = true
                     inputStatus.pointee = .endOfStream
                     return nil
                 }
                 inputStatus.pointee = .haveData
-                return inBuf
+                return source.value.buffer
             }
             if status == .error {
                 throw CappyError.io(tr("Format conversion failed: \(convError?.localizedDescription ?? "")", ja: "形式変換に失敗しました: \(convError?.localizedDescription ?? "")"))
@@ -119,10 +147,10 @@ public enum SendFileConverter {
                 }
                 written += Int64(outBuf.frameLength)
             }
-            if status == .endOfStream || (eof && outBuf.frameLength == 0) { break }
+            if status == .endOfStream || (source.value.eof && outBuf.frameLength == 0) { break }
         }
         outFile.close()
-        if let readError {
+        if let readError = source.value.readError {
             // 末尾が壊れていても、読めたところまでで送信用ファイルを作る
             CappyLog.shared.warning(tr("Could not read the end of \(input.lastPathComponent): \(readError.localizedDescription)", ja: "\(input.lastPathComponent) の末尾を読めませんでした: \(readError.localizedDescription)"))
         }
