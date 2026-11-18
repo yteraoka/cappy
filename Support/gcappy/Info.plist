@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>ja</string>
+	</array>
+	<key>CFBundleExecutable</key>
+	<string>gcappy</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.cappy.gcappy</string>
+	<key>CFBundleName</key>
+	<string>gcappy</string>
+	<key>CFBundleDisplayName</key>
+	<string>gcappy</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<!-- scripts/build-app.sh が Version.swift の値に書き換える -->
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.0.0</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<!-- Dock には出さず、メニューバーだけに置く -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>gcappy uses system audio recording to record the audio of meeting apps. / gcappy は会議アプリの音声を録音するためにシステムオーディオ録音を使用します。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>gcappy uses the microphone to record your voice. / gcappy は自分の声を録音するためにマイクを使用します。</string>
+</dict>
+</plist>

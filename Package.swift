@@ -12,6 +12,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .executable(name: "cappy", targets: ["cappy"]),
+        .executable(name: "gcappy", targets: ["gcappy"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.2"),
@@ -41,6 +42,16 @@ let package = Package(
                     "-Xlinker", "__info_plist",
                     "-Xlinker", infoPlist,
                 ]),
+            ]
+        ),
+        // メニューバーから録音を操作する GUI 版（gcappy.app）。録音そのものは同梱の cappy を子プロセスで動かす
+        .executableTarget(
+            name: "gcappy",
+            dependencies: ["CappyKit"],
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("ServiceManagement"),
+                .linkedFramework("UserNotifications"),
             ]
         ),
         .testTarget(

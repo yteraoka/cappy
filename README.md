@@ -23,7 +23,8 @@ How it works:
 ## Install
 
 ```bash
-brew install yteraoka/cask/cappy
+brew install yteraoka/cask/cappy     # CLI
+brew install yteraoka/cask/gcappy    # menu bar app (bundles cappy)
 ```
 
 To build from source (Swift 6 / Xcode 16 or later): `make build && make install PREFIX=~/.local`. See [Installation](./docs/installation.md) for shell completion and permissions.
@@ -58,6 +59,7 @@ If cappy stops halfway, `cappy transcribe <dir>` resumes and `cappy recover <dir
 | [AWS setup](./docs/aws.md) | Amazon Transcribe, Amazon Bedrock summaries, AWS authentication |
 | [Usage](./docs/usage.md) | Commands, `record` / `transcribe` / `summarize` options, mic mute, screenshots, live transcription, exit codes |
 | [cappy tui](./docs/tui.md) | Full-screen UI, past recordings, stopping and interrupting |
+| [gcappy](./docs/gcappy.md) | Menu bar app (start / stop recording, mute, screenshots, permissions) |
 | [Output](./docs/output.md) | Files in the session directory |
 | [Development](./docs/development.md) | Testing, implementation and architecture notes |
 | [Distribution](./docs/distribution.md) | Homebrew tap, release flow, local release build |

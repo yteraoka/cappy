@@ -23,7 +23,8 @@
 ## インストール
 
 ```bash
-brew install yteraoka/cask/cappy
+brew install yteraoka/cask/cappy     # CLI
+brew install yteraoka/cask/gcappy    # メニューバー版（cappy を同梱）
 ```
 
 ソースからビルドする場合（Swift 6 / Xcode 16 以降）は `make build && make install PREFIX=~/.local` です。シェルの補完と権限は「[インストール](./docs/installation.ja.md)」を参照してください。
@@ -58,6 +59,7 @@ cappy tui
 | [AWS の準備](./docs/aws.ja.md) | Amazon Transcribe、Amazon Bedrock での要約、AWS の認証 |
 | [使い方](./docs/usage.ja.md) | コマンド一覧、`record` / `transcribe` / `summarize` のオプション、マイクのミュート、スクリーンショット、リアルタイム文字起こし、終了コード |
 | [cappy tui](./docs/tui.ja.md) | 全画面 UI、過去の録音、終了と中断 |
+| [gcappy](./docs/gcappy.ja.md) | メニューバー版（録音の開始・停止・ミュート・スクリーンショット、権限） |
 | [出力](./docs/output.ja.md) | セッションディレクトリのファイル |
 | [開発](./docs/development.ja.md) | テスト、実装メモ、構成メモ |
 | [配布](./docs/distribution.ja.md) | Homebrew tap、リリースの流れ、手元でのリリースビルド |

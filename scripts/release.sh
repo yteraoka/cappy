@@ -1,5 +1,5 @@
 #!/bin/bash
-# 配布用の zip を dist/ に作る。
+# 配布用の zip を dist/ に作る（CLI の cappy と、メニューバー版の gcappy.app）。
 #
 # 環境変数:
 #   CAPPY_SIGN_IDENTITY   署名に使う ID。"-" なら ad-hoc 署名で、公証は行わない（Homebrew での配布向け）。
@@ -7,7 +7,7 @@
 #   CAPPY_NOTARY_PROFILE  Developer ID で署名する場合に必要。`xcrun notarytool store-credentials` で保存したプロファイル名
 #   CAPPY_ARCHS           既定 "arm64"（"arm64 x86_64" でユニバーサル）
 #
-# GitHub Actions の中では、zip のパスと SHA-256 を $GITHUB_OUTPUT（zip / sha256）に書く。
+# GitHub Actions の中では、zip のパスと SHA-256 を $GITHUB_OUTPUT（zip / sha256、gcappy は app_zip / app_sha256）に書く。
 set -euo pipefail
 
 VERSION="${1:?usage: scripts/release.sh <version>}"
@@ -58,9 +58,35 @@ fi
 
 SHA256="$(shasum -a 256 "$ZIP" | cut -d ' ' -f 1)"
 echo "$SHA256  $(basename "$ZIP")" > "$ZIP.sha256"
+
+# gcappy.app（cappy を同梱したメニューバー版）
+CAPPY_SIGN_IDENTITY="$IDENTITY" CAPPY_ARCHS="$ARCHS" scripts/build-app.sh "$VERSION"
+APP_ZIP="dist/gcappy-${VERSION}-macos-$(echo "$ARCHS" | tr ' ' '-').zip"
+# Homebrew は展開した中身がディレクトリ 1 つだけだとその中に移動するため、LICENSE と並べて zip にする
+make_app_zip() {
+  local stage
+  stage="$(mktemp -d)"
+  ditto dist/gcappy.app "$stage/gcappy.app"
+  cp LICENSE "$stage/LICENSE"
+  rm -f "$APP_ZIP"
+  ditto -c -k "$stage" "$APP_ZIP"
+  rm -rf "$stage"
+}
+make_app_zip
+if ! $ADHOC; then
+  xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple dist/gcappy.app
+  make_app_zip
+fi
+APP_SHA256="$(shasum -a 256 "$APP_ZIP" | cut -d ' ' -f 1)"
+echo "$APP_SHA256  $(basename "$APP_ZIP")" > "$APP_ZIP.sha256"
+
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-  { echo "zip=$ZIP"; echo "sha256=$SHA256"; } >> "$GITHUB_OUTPUT"
+  { echo "zip=$ZIP"; echo "sha256=$SHA256"; echo "app_zip=$APP_ZIP"; echo "app_sha256=$APP_SHA256"; } >> "$GITHUB_OUTPUT"
 fi
 echo "完成: $ZIP"
 echo "SHA-256: $SHA256"
 echo "formula: scripts/formula.sh $VERSION $SHA256"
+echo "完成: $APP_ZIP"
+echo "SHA-256: $APP_SHA256"
+echo "formula: scripts/formula.sh $VERSION $APP_SHA256 gcappy"
