@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.9.3](https://github.com/yteraoka/cappy/compare/v0.9.2...v0.9.3) - 2026-11-18
+
+- スクリーンショットで、タイトルが会議に一致するウインドウを優先して撮る by @yteraoka in https://github.com/yteraoka/cappy/pull/45
+- Update dependency macos to v26 by @renovate[bot] in https://github.com/yteraoka/cappy/pull/42
+- macOS 26 SDK で出る AVAudioConverter の入力ブロックの Sendable の警告を直す by @yteraoka in https://github.com/yteraoka/cappy/pull/48
+
 ## [v0.9.2](https://github.com/yteraoka/cappy/compare/v0.9.1...v0.9.2) - 2026-11-18
 
 - Configure Renovate by @renovate[bot] in https://github.com/yteraoka/cappy/pull/39
