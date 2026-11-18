@@ -58,6 +58,11 @@ struct Record: AsyncParsableCommand {
     @Option(help: ArgumentHelp(tr("Session name (used for the directory name and the transcript title)", ja: "セッション名（ディレクトリ名と transcript の見出しに使う）")))
     var name: String?
 
+    @Option(name: .customLong("shot-title"),
+            help: ArgumentHelp(tr("Regular expression for the title of the meeting window to screenshot with s (repeatable; default: screenshot.window_titles of the profile)",
+                                  ja: "s で撮る会議のウインドウのタイトルの正規表現（複数指定可。既定はプロファイルの screenshot.window_titles）")))
+    var shotTitles: [String] = []
+
     @Option(help: ArgumentHelp(tr("Stop automatically after this duration (e.g. 90m, 1h30m, 45s)", ja: "指定時間で自動停止する（例: 90m, 1h30m, 45s）")), completion: .list(["30m", "1h", "90m", "2h"]))
     var duration: String?
 
@@ -114,6 +119,11 @@ struct Record: AsyncParsableCommand {
             throw ValidationError(tr("--summarize requires --transcribe or --live (after recording, use `cappy transcribe --summarize`)", ja: "--summarize は --transcribe か --live と一緒に指定してください（録音後なら `cappy transcribe --summarize`）"))
         }
         // 録音が終わってから気づかないよう、モデル ID の形だけは先に確かめる
+        do {
+            _ = try WindowScreenshot.compile(shotTitles)
+        } catch let e as CappyError {
+            throw ValidationError("--shot-title: " + e.message)
+        }
         if let m = summaryModel, SummaryModelFamily.of(m) == nil {
             throw ValidationError(tr("Invalid --summary-model: \(m) (a model ID starting with claude- or gemini-, or on Bedrock an ID such as moonshotai.kimi-k3.1)", ja: "--summary-model が不正です: \(m)（claude- または gemini- で始まるモデル ID、Bedrock なら moonshotai.kimi-k3.1 のような ID）"))
         }
@@ -208,7 +218,8 @@ struct Record: AsyncParsableCommand {
         }
 
         let micControl = MicMuteController(recorder: recorder)
-        let shots = ScreenshotController(recorder: recorder, registry: micControl)
+        let shots = ScreenshotController(recorder: recorder, registry: micControl,
+                                         titlePatterns: shotTitles.isEmpty ? profile.screenshot.windowTitles : shotTitles)
         shots.start()
         defer { shots.cancel() }
         micControl.start(session: dir, name: name, screenshots: true)

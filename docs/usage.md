@@ -51,6 +51,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 | `--system` | Record all system output except cappy itself |
 | `--no-mic` / `--mic <UID>` | Disable microphone recording / choose the input device (default: the system default input, following changes) |
 | `--muted` | Start with the microphone muted (see "Muting the microphone") |
+| `--shot-title <regex>` | Title pattern of the meeting window that s captures. Repeatable (default: `screenshot.window_titles` of the profile; see "Screenshots") |
 | `--out <dir>` / `--name <title>` | Output directory / session name |
 | `--duration 90m` | Stop automatically after this duration (`1h30m`, `45s`, ... also work) |
 | `--wait` | Wait until the target starts playing audio |
@@ -87,8 +88,15 @@ Keep slides and other material shared in the meeting, on the same timeline as th
 
 - Press s in the terminal running `cappy record` to capture the recording target app's window and save it as a PNG in `screenshots/` of the session directory (named with a sequence number and the time from the start of the recording, such as `001_00-12-34.png`). This works only while nothing is typed; once you start typing a marker label, s is part of the label (so a label cannot start with s). A full-width ｓ from a Japanese input method works too.
 - From another terminal, a script or a hotkey: `cappy shot`. Binding it to a hotkey lets you take screenshots without switching to the terminal. When several recordings are running, choose one with `--pid`.
-- cappy captures the largest visible normal window of the recording target app (an app matching the `--app` prefix, or the parent app of a helper process being recorded). Windows hidden behind others are captured with their content; minimized windows cannot be captured. With `--system`, the whole main display is captured.
-- Browsers (Meet and so on) are captured per window, so the screenshot shows the tab currently displayed in that window.
+- cappy captures a normal window of the recording target app (an app matching the `--app` prefix, or the parent app of a helper process being recorded), chosen in this order (windows on screen first):
+  1. The window chosen by its title earlier in the same recording, while it is still open. Switching tabs in the meeting window changes its title, but the same window is captured.
+  2. The frontmost window whose title matches a meeting pattern.
+  3. Otherwise the frontmost window (cappy tells you so).
+- The meeting patterns are case-insensitive regular expressions. The defaults are Google Meet (`^Meet - |Google Meet`), Zoom (`Zoom Meeting` and so on), `Microsoft Teams`, `Webex` and `Whereby|Jitsi Meet`. Change them with `screenshot.window_titles` of the profile ([configuration](./configuration.md)) or `cappy record --shot-title <regex>` (repeatable).
+- A browser window's title is the title of the tab it shows, and the screenshot is per window, so it shows the tab currently displayed in that window. With several windows open, the window showing the meeting tab is captured.
+- Choosing the window that plays audio is not possible: Chrome, Brave and other Chromium browsers play the audio of every tab from one helper process (the Audio Service), so the window the sound comes from cannot be told.
+- Windows hidden behind others are captured with their content; minimized windows cannot be captured. With `--system`, the whole main display is captured.
+- The message shown for each screenshot includes the app and the window title.
 - The time (ms from the start of the recording), file, app and window title are recorded in `screenshots` of `session.json`.
 - The terminal app you run cappy from needs the "Screen Recording" permission (System Settings > Privacy & Security > Screen & System Audio Recording > "Screen & System Audio Recording"). cappy asks for it the first time you take a screenshot; restart the terminal app after allowing it. Recording continues without it. `cappy doctor` shows the state.
 - `cappy shot` finds the recording the same way as `cappy mic` and sends SIGINFO to it. It waits until the screenshot is taken and shows the saved file or the error.

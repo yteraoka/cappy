@@ -3,9 +3,11 @@ import Testing
 @testable import CappyKit
 
 @Suite struct ScreenshotTests {
+    /// index が前面からの順番、windowID は 100 + index
     private func window(_ index: Int, pid: Int32, _ bundleID: String?, _ title: String? = nil,
                         size: (Double, Double) = (1200, 800), layer: Int = 0, onScreen: Bool = true) -> ScreenshotWindowCandidate {
-        ScreenshotWindowCandidate(index: index, pid: pid, bundleID: bundleID, title: title,
+        ScreenshotWindowCandidate(index: index, windowID: UInt32(100 + index), order: onScreen ? index : Int.max,
+                                  pid: pid, bundleID: bundleID, title: title,
                                   width: size.0, height: size.1, layer: layer, onScreen: onScreen)
     }
 
@@ -50,23 +52,86 @@ import Testing
         #expect(ScreenshotTarget(targets: [SessionTarget(kind: .system)], executablePath: { _ in nil }).system)
     }
 
-    @Test func choosesTheLargestVisibleWindowOfTheTarget() {
-        let target = ScreenshotTarget(bundleIDs: ["us.zoom.xos"])
+    @Test func prefersTheMeetingWindowByTitle() throws {
+        let target = ScreenshotTarget(bundleIDs: ["com.brave.Browser"])
+        let patterns = try WindowScreenshot.compile(ScreenshotSettings.defaultWindowTitles)
         let windows = [
-            window(0, pid: 10, "com.apple.Terminal", "cappy", size: (2000, 1200)),            // 対象外のアプリ
-            window(1, pid: 20, "us.zoom.xos", "Zoom Workplace", size: (900, 600)),
-            window(2, pid: 20, "us.zoom.xos", "Zoom Meeting", size: (1400, 900)),
-            window(3, pid: 20, "us.zoom.xos", nil, size: (3000, 30)),                           // 細長い帯
-            window(4, pid: 20, "us.zoom.xos", "menu", size: (1600, 1000), layer: 25),           // 通常のウインドウではない
-            window(5, pid: 20, "us.zoom.xos", "hidden", size: (2500, 1500), onScreen: false),   // 画面に出ていない
+            window(0, pid: 10, "com.apple.Terminal", "Meet - abc-defg-hij", size: (2000, 1200)), // 対象外のアプリ
+            window(1, pid: 20, "com.brave.Browser", "GitHub - Brave", size: (2500, 1400)),         // 前面で大きいが会議ではない
+            window(2, pid: 20, "com.brave.Browser", "Meet - abc-defg-hij - Brave", size: (900, 600)),
+            window(3, pid: 20, "com.brave.Browser", nil, size: (3000, 30)),                        // 細長い帯
+            window(4, pid: 20, "com.brave.Browser", "menu", size: (1600, 1000), layer: 25),        // 通常のウインドウではない
         ]
-        #expect(WindowScreenshot.choose(windows, for: target)?.index == 2)
+        #expect(WindowScreenshot.choose(windows, for: target, titlePatterns: patterns) == .init(window: windows[2], reason: .title))
+        // 一致するものがなければ、一番前面のもの（大きさでは選ばない）
+        let noMeeting = [windows[1], window(2, pid: 20, "com.brave.Browser", "Docs - Brave", size: (3000, 1800))]
+        #expect(WindowScreenshot.choose(noMeeting, for: target, titlePatterns: patterns) == .init(window: windows[1], reason: .frontmost))
+        // 会議のウインドウが複数あれば、前面のもの
+        let two = [windows[1], window(2, pid: 20, "com.brave.Browser", "Meet - aaa - Brave"), window(3, pid: 20, "com.brave.Browser", "Meet - bbb - Brave")]
+        #expect(WindowScreenshot.choose(two, for: target, titlePatterns: patterns)?.window.index == 2)
+        #expect(WindowScreenshot.choose([windows[0]], for: target, titlePatterns: patterns) == nil)
+    }
+
+    @Test func remembersTheWindowWhileItExists() throws {
+        let target = ScreenshotTarget(bundleIDs: ["com.brave.Browser"])
+        let patterns = try WindowScreenshot.compile(ScreenshotSettings.defaultWindowTitles)
+        // 会議のウインドウ（id 102）でタブを切り替えてタイトルが変わっても、同じウインドウを撮る
+        let windows = [
+            window(0, pid: 20, "com.brave.Browser", "Meet - other - Brave"),
+            window(1, pid: 20, "com.brave.Browser", "GitHub - Brave"),
+            window(2, pid: 20, "com.brave.Browser", "Slides - Brave"),
+        ]
+        #expect(WindowScreenshot.choose(windows, for: target, titlePatterns: patterns, remembered: 102) == .init(window: windows[2], reason: .remembered))
+        // 閉じられていれば、改めて選ぶ
+        #expect(WindowScreenshot.choose(windows, for: target, titlePatterns: patterns, remembered: 999)?.reason == .title)
+    }
+
+    @Test func prefersWindowsOnScreen() {
+        let target = ScreenshotTarget(bundleIDs: ["us.zoom.xos"])
+        let hidden = window(0, pid: 20, "us.zoom.xos", "Zoom Meeting", onScreen: false)
+        let shown = window(1, pid: 20, "us.zoom.xos", "Zoom Workplace")
+        // パターンなし: 画面に出ている前面のもの
+        #expect(WindowScreenshot.choose([hidden, shown], for: target)?.window == shown)
         // 画面に出ているものがなければ、出ていないものから選ぶ
-        let offScreen = windows.map { var w = $0; w.onScreen = false; return w }
-        #expect(WindowScreenshot.choose(offScreen, for: target)?.index == 5)
-        // 同じ大きさなら前面のもの
-        #expect(WindowScreenshot.choose([window(0, pid: 20, "us.zoom.xos"), window(1, pid: 20, "us.zoom.xos")], for: target)?.index == 0)
-        #expect(WindowScreenshot.choose([windows[0]], for: target) == nil)
+        #expect(WindowScreenshot.choose([hidden], for: target) == .init(window: hidden, reason: .frontmost))
+    }
+
+    @Test func defaultTitlePatterns() throws {
+        let patterns = try WindowScreenshot.compile(ScreenshotSettings.defaultWindowTitles)
+        for title in ["Meet - abc-defg-hij - Brave", "Google Meet - Google Chrome", "Zoom Meeting", "zoom meeting",
+                      "Meeting with A | Microsoft Teams", "Webex", "Jitsi Meet - Chrome"] {
+            #expect(WindowScreenshot.titleMatches(title, patterns), "\(title)")
+        }
+        for title in ["Zoom Workplace", "Meeting notes - Google Docs", "GitHub - Brave", "", nil] as [String?] {
+            #expect(!WindowScreenshot.titleMatches(title, patterns), "\(title ?? "nil")")
+        }
+        #expect(throws: CappyError.self) { try WindowScreenshot.compile(["(unclosed"]) }
+    }
+
+    @Test func configReadsWindowTitles() throws {
+        let path = URL(fileURLWithPath: "/tmp/config.toml")
+        let config = try CappyConfig.parse("""
+        [profiles.default]
+        language = "ja-JP"
+
+        [profiles.custom]
+        language = "en-US"
+
+        [profiles.custom.screenshot]
+        window_titles = ["^Huddle", "Around"]
+        """, path: path)
+        #expect(config.profiles["default"]?.screenshot.windowTitles == ScreenshotSettings.defaultWindowTitles)
+        #expect(config.profiles["custom"]?.screenshot.windowTitles == ["^Huddle", "Around"])
+
+        #expect(throws: CappyError.self) {
+            try CappyConfig.parse("""
+            [profiles.default]
+            language = "ja-JP"
+
+            [profiles.default.screenshot]
+            window_titles = ["(unclosed"]
+            """, path: path)
+        }
     }
 
     @Test func relativePathHasNumberAndTime() {

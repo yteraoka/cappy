@@ -8,7 +8,8 @@ struct Shot: AsyncParsableCommand {
         abstract: tr("Take a screenshot of the recording target's window during `cappy record`", ja: "録音中の `cappy record` に、録音対象のウインドウのスクリーンショットを撮らせる"),
         discussion: tr("""
         The screenshot is saved in screenshots/ of the session directory, and its time from the start of the recording
-        is written to session.json. The largest visible window of the recording target app is captured
+        is written to session.json. cappy captures the recording target app's window whose title matches a meeting
+        (`record --shot-title` / screenshot.window_titles; the same window again later in the recording), or else the frontmost one
         (with --system, the whole main display). Screen recording permission is needed for the terminal app.
         In the terminal running `cappy record`, pressing s (with nothing typed) also takes a screenshot.
         Bind `cappy shot` to a hotkey (Shortcuts, Raycast, Hammerspoon, …) to take one without switching to the terminal.
@@ -18,7 +19,8 @@ struct Shot: AsyncParsableCommand {
           cappy shot --pid 12345
         """, ja: """
         スクリーンショットはセッションディレクトリの screenshots/ に保存し、録音開始からの時刻を session.json に記録します。
-        録音対象のアプリの、画面に表示中で一番大きいウインドウを撮ります（--system のときはメインディスプレイ全体）。
+        録音対象のアプリのウインドウのうち、タイトルが会議に一致するもの（`record --shot-title` / screenshot.window_titles。
+        以後の録音中は同じウインドウ）、なければ一番前面のものを撮ります（--system のときはメインディスプレイ全体）。
         実行元のターミナルアプリに画面収録の許可が必要です。
         `cappy record` を実行しているターミナルで、何も入力していないときに s を押しても撮れます。
         `cappy shot` をホットキー（ショートカット.app・Raycast・Hammerspoon など）に割り当てると、ターミナルに切り替えずに撮れます。
@@ -71,6 +73,10 @@ struct Shot: AsyncParsableCommand {
 final class ScreenshotController: @unchecked Sendable {
     private let recorder: Recorder
     private let registry: MicMuteController
+    /// 会議のウインドウのタイトルのパターン
+    private let titlePatterns: [String]
+    /// 前に撮った会議のウインドウ（タイトルで選んだもの）。以後はこれを撮る
+    private var remembered: UInt32?
     private let lock = NSLock()
     private var source: DispatchSourceSignal?
     private var busy = false
@@ -79,9 +85,10 @@ final class ScreenshotController: @unchecked Sendable {
     private var stopped = false
     private var attempts = 0
 
-    init(recorder: Recorder, registry: MicMuteController) {
+    init(recorder: Recorder, registry: MicMuteController, titlePatterns: [String]) {
         self.recorder = recorder
         self.registry = registry
+        self.titlePatterns = titlePatterns
     }
 
     /// シグナルの受け口を用意する（登録簿に載せる前に呼ぶ）
@@ -131,13 +138,23 @@ final class ScreenshotController: @unchecked Sendable {
         // 録音対象のプロセスは録音中に増えることがある（ヘルパーの起動など）ので、撮るたびに作り直す
         let target = ScreenshotTarget(targets: store.metadata.targets)
         do {
-            let r = try await WindowScreenshot.capture(target: target, to: url)
+            let prev = lock.withLock { remembered }
+            let r = try await WindowScreenshot.capture(target: target, to: url, titlePatterns: titlePatterns, remembered: prev)
+            // タイトルで会議のウインドウを見つけたら、この録音では以後それを撮る（途中でタイトルが変わっても同じウインドウ）
+            if let id = r.windowID, r.reason == .title || r.reason == .remembered {
+                lock.withLock { remembered = id }
+            }
             _ = try? store.update { m in
                 m.screenshots = (m.screenshots ?? []) + [SessionScreenshot(atMs: atMs, file: rel, bundleID: r.bundleID, title: r.title)]
             }
             let what = r.wholeDisplay ? tr("display", ja: "画面全体") : [r.appName, r.title].compactMap { $0 }.joined(separator: " — ")
-            CappyLog.shared.info(tr("Screenshot saved at=\(atMs)ms file=\(rel) bundle=\(r.bundleID ?? "-")", ja: "スクリーンショットを保存しました at=\(atMs)ms file=\(rel) bundle=\(r.bundleID ?? "-")"))
+            let reason = r.reason?.rawValue ?? "display"
+            CappyLog.shared.info(tr("Screenshot saved at=\(atMs)ms file=\(rel) bundle=\(r.bundleID ?? "-") window=\(reason)", ja: "スクリーンショットを保存しました at=\(atMs)ms file=\(rel) bundle=\(r.bundleID ?? "-") window=\(reason)"))
             Console.print(tr("📸 Screenshot \(number) (\(at)): \(rel)", ja: "📸 スクリーンショット \(number)（\(at)）: \(rel)") + (what.isEmpty ? "" : "  [\(what)]"))
+            if r.reason == .frontmost && !titlePatterns.isEmpty {
+                Console.print(tr("   No window title matched a meeting, so the frontmost window was captured (change the patterns with --shot-title or screenshot.window_titles)",
+                                 ja: "   会議のタイトルに一致するウインドウがないため、一番前面のウインドウを撮りました（パターンは --shot-title か screenshot.window_titles で変えられます）"))
+            }
             finish(path: url.path, error: nil)
         } catch {
             let message: String
