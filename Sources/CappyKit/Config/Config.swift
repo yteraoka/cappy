@@ -126,6 +126,24 @@ public enum TranscriptionService: String, Sendable {
     }
 }
 
+/// 録音中のスクリーンショット（[profiles.<name>.screenshot]）
+public struct ScreenshotSettings: Sendable, Equatable {
+    /// 会議のウインドウのタイトルの既定のパターン（正規表現、大文字・小文字を区別しない）。
+    /// ブラウザのウインドウのタイトルは表示中のタブのタイトルになる
+    public static let defaultWindowTitles = [
+        "^Meet - |Google Meet",                                  // Google Meet（タブのタイトルは「Meet - abc-defg-hij」）
+        "Zoom Meeting|Zoom Webinar|Zoom ミーティング|Zoom ウェビナー", // Zoom（アプリ・ブラウザ）
+        "Microsoft Teams",
+        "Webex",
+        "Whereby|Jitsi Meet",
+    ]
+
+    /// 会議のウインドウのタイトルのパターン。一致するウインドウを優先して撮る
+    public var windowTitles: [String] = defaultWindowTitles
+
+    public init() {}
+}
+
 public struct Profile: Sendable, Equatable {
     public var name: String
     /// 文字起こしのクラウド: google / aws / none
@@ -145,6 +163,8 @@ public struct Profile: Sendable, Equatable {
     public var aws: AWSSettings?
     /// Amazon Transcribe（provider = aws）
     public var awsTranscribe = TranscribeSettings()
+    /// 録音中のスクリーンショット
+    public var screenshot = ScreenshotSettings()
 
     public init(name: String) { self.name = name }
 
@@ -359,7 +379,22 @@ public struct CappyConfig: Sendable {
                                 deleteRemoteAfter: try bool("delete_remote_after", a, actx) ?? true)
             warnUnknownKeys(a, ["profile", "region", "bucket", "delete_remote_after"], actx)
         }
-        warnUnknownKeys(t, ["language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "aws", "transcribe", "summary"], ctx)
+        if let st = t["screenshot"]?.table {
+            let shctx = ctx + ".screenshot"
+            if let v = st["window_titles"] {
+                guard let list = v.array?.compactMap(\.string), list.count == v.array?.count else {
+                    throw CappyError.usage(tr("\(shctx).window_titles must be an array of strings", ja: "\(shctx).window_titles は文字列の配列である必要があります"))
+                }
+                do {
+                    _ = try WindowScreenshot.compile(list)
+                } catch let e as CappyError {
+                    throw CappyError.usage("\(shctx).window_titles: " + e.message)
+                }
+                p.screenshot.windowTitles = list
+            }
+            warnUnknownKeys(st, ["window_titles"], shctx)
+        }
+        warnUnknownKeys(t, ["language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "aws", "transcribe", "summary", "screenshot"], ctx)
         return p
     }
 

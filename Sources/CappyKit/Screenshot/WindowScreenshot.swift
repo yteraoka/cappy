@@ -75,6 +75,10 @@ public struct ScreenshotTarget: Sendable, Equatable {
 /// ウインドウの候補（ScreenCaptureKit の SCWindow から必要なものだけ取り出したもの。選び方をテストできるようにする）
 public struct ScreenshotWindowCandidate: Sendable, Equatable {
     public var index: Int
+    /// ウインドウ ID（CGWindowID。同じウインドウなら閉じるまで変わらない）
+    public var windowID: UInt32
+    /// 前面からの順番（0 が一番前。画面に出ていないウインドウは Int.max）
+    public var order: Int
     public var pid: Int32
     public var bundleID: String?
     /// ウインドウを持つアプリ（.app）のパス
@@ -85,9 +89,11 @@ public struct ScreenshotWindowCandidate: Sendable, Equatable {
     public var layer: Int
     public var onScreen: Bool
 
-    public init(index: Int, pid: Int32, bundleID: String?, appPath: String? = nil, title: String?,
+    public init(index: Int, windowID: UInt32 = 0, order: Int? = nil, pid: Int32, bundleID: String?, appPath: String? = nil, title: String?,
                 width: Double, height: Double, layer: Int, onScreen: Bool) {
         self.index = index
+        self.windowID = windowID
+        self.order = order ?? index
         self.pid = pid
         self.bundleID = bundleID
         self.appPath = appPath
@@ -98,21 +104,78 @@ public struct ScreenshotWindowCandidate: Sendable, Equatable {
         self.onScreen = onScreen
     }
 
-    var area: Double { width * height }
 }
 
 public enum WindowScreenshot {
     /// これより小さいウインドウ（ツールバーの小窓・通知など）は撮らない
     static let minimumSide: Double = 120
 
-    /// 撮るウインドウを選ぶ。録音対象のアプリの通常のウインドウのうち、画面に出ているものを優先し、その中で一番大きいもの
-    public static func choose(_ windows: [ScreenshotWindowCandidate], for target: ScreenshotTarget) -> ScreenshotWindowCandidate? {
+    /// どうやってウインドウを選んだか
+    public enum Reason: String, Sendable, Equatable {
+        /// 同じ録音で前に撮ったウインドウ
+        case remembered
+        /// タイトルが会議のパターンに一致した
+        case title
+        /// 一致するものがなく、一番前面のウインドウ
+        case frontmost
+    }
+
+    public struct Choice: Sendable, Equatable {
+        public var window: ScreenshotWindowCandidate
+        public var reason: Reason
+    }
+
+    /// タイトルのパターン（正規表現、大文字・小文字を区別しない）をコンパイルする
+    public static func compile(_ patterns: [String]) throws -> [NSRegularExpression] {
+        try patterns.map { p in
+            do {
+                return try NSRegularExpression(pattern: p, options: [.caseInsensitive])
+            } catch {
+                throw CappyError.usage(tr("Invalid window title pattern (regular expression): \(p)", ja: "ウインドウのタイトルのパターン（正規表現）が不正です: \(p)"))
+            }
+        }
+    }
+
+    static func titleMatches(_ title: String?, _ patterns: [NSRegularExpression]) -> Bool {
+        guard let title, !title.isEmpty else { return false }
+        let range = NSRange(title.startIndex..., in: title)
+        return patterns.contains { $0.firstMatch(in: title, range: range) != nil }
+    }
+
+    /// 撮るウインドウを選ぶ。対象は録音対象のアプリの通常のウインドウで、次の順に選ぶ
+    ///
+    /// 1. remembered（同じ録音で前に撮ったウインドウ）がまだあれば、それ
+    /// 2. タイトルがパターンのどれかに一致するもののうち、一番前面のもの
+    /// 3. 一番前面のもの
+    ///
+    /// 2・3 では画面に出ているものを優先する
+    public static func choose(_ windows: [ScreenshotWindowCandidate], for target: ScreenshotTarget,
+                              titlePatterns: [NSRegularExpression] = [], remembered: UInt32? = nil) -> Choice? {
         let candidates = windows.filter {
             $0.layer == 0 && $0.width >= minimumSide && $0.height >= minimumSide && target.matches(pid: $0.pid, bundleID: $0.bundleID, appPath: $0.appPath)
         }
-        let pool = candidates.contains(where: \.onScreen) ? candidates.filter(\.onScreen) : candidates
-        // 同じ大きさなら前面（一覧の先）のもの
-        return pool.max { a, b in a.area != b.area ? a.area < b.area : a.index > b.index }
+        if let remembered, remembered != 0, let w = candidates.first(where: { $0.windowID == remembered }) {
+            return Choice(window: w, reason: .remembered)
+        }
+        func frontmost(_ list: [ScreenshotWindowCandidate]) -> ScreenshotWindowCandidate? {
+            let pool = list.contains(where: \.onScreen) ? list.filter(\.onScreen) : list
+            return pool.min { a, b in a.order != b.order ? a.order < b.order : a.index < b.index }
+        }
+        if let w = frontmost(candidates.filter { titleMatches($0.title, titlePatterns) }) {
+            return Choice(window: w, reason: .title)
+        }
+        return frontmost(candidates).map { Choice(window: $0, reason: .frontmost) }
+    }
+
+    /// 画面に出ているウインドウの、前面からの順番（CGWindowListCopyWindowInfo は前面から並ぶ）
+    @MainActor
+    static func frontToBackOrder() -> [UInt32: Int] {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [:] }
+        var order: [UInt32: Int] = [:]
+        for (i, w) in list.enumerated() {
+            if let n = (w[kCGWindowNumber as String] as? NSNumber)?.uint32Value, order[n] == nil { order[n] = i }
+        }
+        return order
     }
 
     /// スクリーンショットのファイル名（screenshots/001_00-12-34.png）
@@ -129,6 +192,10 @@ public enum WindowScreenshot {
         public var title: String?
         /// 画面全体を撮ったか
         public var wholeDisplay: Bool
+        /// 撮ったウインドウの ID（画面全体なら nil）
+        public var windowID: UInt32?
+        /// どうやってウインドウを選んだか（画面全体なら nil）
+        public var reason: Reason?
     }
 
     public static let screenCaptureSettingsURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
@@ -176,8 +243,14 @@ public enum WindowScreenshot {
     }
 
     /// 録音対象のウインドウ（--system なら画面全体）を撮って PNG で保存する
+    ///
+    /// - Parameters:
+    ///   - titlePatterns: 会議のウインドウのタイトルのパターン（正規表現）
+    ///   - remembered: 同じ録音で前に撮ったウインドウの ID
     @MainActor
-    public static func capture(target: ScreenshotTarget, to url: URL) async throws -> Result {
+    public static func capture(target: ScreenshotTarget, to url: URL,
+                               titlePatterns: [String] = [], remembered: UInt32? = nil) async throws -> Result {
+        let patterns = try compile(titlePatterns)
         if !hasPermission {
             // 初回は許可を求めるダイアログを出す（許可しても反映はターミナルアプリの再起動後）
             requestPermission()
@@ -199,9 +272,10 @@ public enum WindowScreenshot {
                 throw CappyError.targetNotFound(tr("No display to capture", ja: "撮影できるディスプレイがありません"))
             }
             filter = SCContentFilter(display: display, excludingWindows: [])
-            result = Result(bundleID: nil, appName: nil, title: nil, wholeDisplay: true)
+            result = Result(bundleID: nil, appName: nil, title: nil, wholeDisplay: true, windowID: nil, reason: nil)
         } else {
             let windows = content.windows
+            let order = frontToBackOrder()
             var appPaths: [Int32: String?] = [:]
             let candidates = windows.enumerated().compactMap { (i, w) -> ScreenshotWindowCandidate? in
                 guard let app = w.owningApplication else { return nil }
@@ -209,18 +283,21 @@ public enum WindowScreenshot {
                 if appPaths[pid] == nil {
                     appPaths[pid] = .some(ScreenshotTarget.executablePath(pid).flatMap(ScreenshotTarget.appBundlePath(ofExecutable:)))
                 }
-                return ScreenshotWindowCandidate(index: i, pid: pid, bundleID: app.bundleIdentifier, appPath: appPaths[pid] ?? nil, title: w.title,
+                return ScreenshotWindowCandidate(index: i, windowID: w.windowID, order: order[w.windowID] ?? Int.max,
+                                                 pid: pid, bundleID: app.bundleIdentifier, appPath: appPaths[pid] ?? nil, title: w.title,
                                                  width: Double(w.frame.width), height: Double(w.frame.height),
                                                  layer: w.windowLayer, onScreen: w.isOnScreen)
             }
-            guard let chosen = choose(candidates, for: target) else {
+            guard let choice = choose(candidates, for: target, titlePatterns: patterns, remembered: remembered) else {
                 throw CappyError.targetNotFound(tr("No window of the recording target was found", ja: "録音対象のアプリのウインドウが見つかりません"),
                                                 hint: tr("Minimized windows cannot be captured", ja: "最小化したウインドウは撮れません"))
             }
+            let chosen = choice.window
             let window = windows[chosen.index]
             filter = SCContentFilter(desktopIndependentWindow: window)
             result = Result(bundleID: chosen.bundleID, appName: window.owningApplication?.applicationName,
-                            title: chosen.title.flatMap { $0.isEmpty ? nil : $0 }, wholeDisplay: false)
+                            title: chosen.title.flatMap { $0.isEmpty ? nil : $0 }, wholeDisplay: false,
+                            windowID: chosen.windowID, reason: choice.reason)
         }
 
         let config = SCStreamConfiguration()

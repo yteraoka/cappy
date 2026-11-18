@@ -7,6 +7,7 @@
 #   [profiles.<name>.google] / .aws    cloud accounts shared by transcription and summary
 #   [profiles.<name>.transcribe]       transcription: provider (which cloud) and model (what to use)
 #   [profiles.<name>.summary]          meeting summary: provider (which cloud) and model (what to use)
+#   [profiles.<name>.screenshot]       which window the screenshots while recording (s key / cappy shot) capture
 
 [profiles.default]
 language = "ja-JP"           # meeting language; also used for the headings and speaker names in transcript.md and summary.md
@@ -48,6 +49,12 @@ effort = "high"              # low / medium / high / xhigh / max (deeper is more
 auto = false                 # if true, summarize automatically after transcribe (suppress with --no-summarize)
 # instructions_file = "~/.config/cappy/summary-instructions.md"  # extra instructions on how to write the summary
 # prompt = "minutes"         # template for the structure (~/.config/cappy/prompts/minutes.md, or a path to a .md file; default: the built-in default)
+
+# Screenshots while recording (s key / cappy shot)
+# [profiles.default.screenshot]
+# Windows whose title matches one of these (the meeting window) are captured first. Regular expressions, case-insensitive.
+# A browser window's title is the title of the tab it shows. Default below (record --shot-title also sets them)
+# window_titles = ["^Meet - |Google Meet", "Zoom Meeting|Zoom Webinar|Zoom ミーティング|Zoom ウェビナー", "Microsoft Teams", "Webex", "Whereby|Jitsi Meet"]
 
 # AWS account (used with provider = "aws" for transcription and summary)
 # Do not write credentials; cappy uses the profiles in ~/.aws/config (SSO, access keys, credential_process, ...)

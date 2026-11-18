@@ -7,6 +7,7 @@
 #   [profiles.<name>.google] / .aws    文字起こしと要約で共通のクラウドのアカウント
 #   [profiles.<name>.transcribe]       文字起こし: provider（どのクラウドか）と model（何を使うか）
 #   [profiles.<name>.summary]          会議の要約: provider（どのクラウドか）と model（何を使うか）
+#   [profiles.<name>.screenshot]       録音中のスクリーンショット（s キー / cappy shot）で撮るウインドウ
 
 [profiles.default]
 language = "ja-JP"           # 会議の言語。transcript.md・summary.md の見出しや話者名もこれに合わせる
@@ -48,6 +49,12 @@ effort = "high"              # low / medium / high / xhigh / max（深いほど�
 auto = false                 # true なら transcribe の後に自動で要約する（--no-summarize で抑止）
 # instructions_file = "~/.config/cappy/summary-instructions.md"  # 要約の書き方の追加指示
 # prompt = "minutes"         # 構成のテンプレート（~/.config/cappy/prompts/minutes.md、または .md のパス。省略時は組み込みの default）
+
+# 録音中のスクリーンショット（s キー / cappy shot）
+# [profiles.default.screenshot]
+# タイトルがどれかに一致するウインドウ（会議のウインドウ）を優先して撮る。正規表現で、大文字・小文字は区別しない
+# ブラウザのウインドウのタイトルは表示中のタブのタイトル。省略時は次の既定値（record --shot-title でも指定できる）
+# window_titles = ["^Meet - |Google Meet", "Zoom Meeting|Zoom Webinar|Zoom ミーティング|Zoom ウェビナー", "Microsoft Teams", "Webex", "Whereby|Jitsi Meet"]
 
 # AWS のアカウント（文字起こし・要約の provider = "aws" で使う）
 # 認証情報は書かず、~/.aws/config のプロファイル（SSO・アクセスキー・credential_process など）を使う
