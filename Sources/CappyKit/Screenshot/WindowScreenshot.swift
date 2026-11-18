@@ -1,4 +1,5 @@
 @preconcurrency import CoreGraphics
+import AppKit
 import Darwin
 import Foundation
 import ImageIO
@@ -144,21 +145,40 @@ public enum WindowScreenshot {
         """)
     }
 
-    // CoreGraphics（WindowServer への接続）と ScreenCaptureKit は、どれもメインスレッドから呼ぶ。
-    // コマンドラインツールでは、最初の呼び出しが別のスレッドだと CGS_REQUIRE_INIT のアサーションでプロセスが終了する。
+    // CoreGraphics と ScreenCaptureKit は、どれもメインスレッドから呼ぶ。
+    // また、コマンドラインツールでは WindowServer への接続（CGS）が初期化されていないため、そのまま
+    // CGPreflightScreenCaptureAccess などを呼ぶと CGS_REQUIRE_INIT のアサーションでプロセスが終了する。
+    // GUI アプリと同じく NSApplication を作って接続を初期化してから呼ぶ（run はしないので Dock には出ない）。
+
+    @MainActor private static var connected = false
+
+    /// WindowServer への接続を初期化する（初回だけ）
+    @MainActor
+    static func connectWindowServer() {
+        guard !connected else { return }
+        connected = true
+        _ = NSApplication.shared
+        _ = CGMainDisplayID()
+    }
 
     /// 画面収録が許可されているか
     @MainActor
-    public static var hasPermission: Bool { CGPreflightScreenCaptureAccess() }
+    public static var hasPermission: Bool {
+        connectWindowServer()
+        return CGPreflightScreenCaptureAccess()
+    }
 
     /// 許可を求める（初回だけダイアログを出す。許可の反映はターミナルアプリの再起動後）
     @MainActor @discardableResult
-    public static func requestPermission() -> Bool { CGRequestScreenCaptureAccess() }
+    public static func requestPermission() -> Bool {
+        connectWindowServer()
+        return CGRequestScreenCaptureAccess()
+    }
 
     /// 録音対象のウインドウ（--system なら画面全体）を撮って PNG で保存する
     @MainActor
     public static func capture(target: ScreenshotTarget, to url: URL) async throws -> Result {
-        if !CGPreflightScreenCaptureAccess() {
+        if !hasPermission {
             // 初回は許可を求めるダイアログを出す（許可しても反映はターミナルアプリの再起動後）
             requestPermission()
             throw CappyError.permission(tr("Screen recording is not allowed (needed for screenshots)", ja: "画面収録が許可されていません（スクリーンショットに必要です）"),

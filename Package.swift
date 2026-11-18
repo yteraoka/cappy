@@ -24,6 +24,8 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("Security"),
                 .linkedFramework("IOKit"),
+                .linkedFramework("AppKit"),
+                .linkedFramework("ScreenCaptureKit"),
             ]
         ),
         .executableTarget(
