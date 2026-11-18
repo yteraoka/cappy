@@ -24,7 +24,7 @@ jobs:
       - name: Test
         run: swift test
 
-      # ad-hoc 署名で zip を作る（Homebrew の formula で配布するため、公証は不要）
+      # ad-hoc 署名で cappy と gcappy.app の zip を作る（Homebrew の formula で配布するため、公証は不要）
       - name: Build release zip
         id: build
         env:
@@ -56,12 +56,14 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ZIP: ${{ steps.build.outputs.zip }}
+          APP_ZIP: ${{ steps.build.outputs.app_zip }}
         run: |
+          files=("${ZIP}" "${ZIP}.sha256" "${APP_ZIP}" "${APP_ZIP}.sha256")
           # tagpr が Release を作っていればファイルを追加し、なければ作る
           if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" "${ZIP}" "${ZIP}.sha256" --clobber
+            gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" "${ZIP}" "${ZIP}.sha256" --title "${GITHUB_REF_NAME}" --generate-notes
+            gh release create "${GITHUB_REF_NAME}" "${files[@]}" --title "${GITHUB_REF_NAME}" --generate-notes
           fi
 
       - name: Update Homebrew formula
@@ -71,20 +73,22 @@ jobs:
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           VERSION: ${{ steps.build.outputs.version }}
           SHA256: ${{ steps.build.outputs.sha256 }}
+          APP_SHA256: ${{ steps.build.outputs.app_sha256 }}
           TAP: ${{ github.repository_owner }}/homebrew-cask
         run: |
           tap_dir="${RUNNER_TEMP}/tap"
           git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP}.git" "${tap_dir}"
           mkdir -p "${tap_dir}/Formula"
-          scripts/formula.sh "${VERSION}" "${SHA256}" > "${tap_dir}/Formula/cappy.rb"
+          scripts/formula.sh "${VERSION}" "${SHA256}" cappy > "${tap_dir}/Formula/cappy.rb"
+          scripts/formula.sh "${VERSION}" "${APP_SHA256}" gcappy > "${tap_dir}/Formula/gcappy.rb"
           cd "${tap_dir}"
-          if git diff --quiet -- Formula/cappy.rb && ! git ls-files --others --exclude-standard | grep -q .; then
+          if git diff --quiet -- Formula && ! git ls-files --others --exclude-standard | grep -q .; then
             echo "formula に変更はありません"
             exit 0
           fi
           bot_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
           git config user.name "${APP_SLUG}[bot]"
           git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
-          git add Formula/cappy.rb
-          git commit -m "Brew formula update for cappy version v${VERSION}"
+          git add Formula/cappy.rb Formula/gcappy.rb
+          git commit -m "Brew formula update for cappy and gcappy version v${VERSION}"
           git push origin HEAD

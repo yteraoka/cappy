@@ -2,7 +2,7 @@ PREFIX ?= /usr/local
 VERSION := $(shell sed -n 's/.*current = "\(.*\)"/\1/p' Sources/CappyKit/Core/Version.swift)
 BIN := .build/release/cappy
 
-.PHONY: build debug test integration-test install uninstall release clean
+.PHONY: build debug test integration-test install uninstall app run-app install-app release clean
 
 build:
 	swift build -c release
@@ -24,6 +24,19 @@ install: build
 
 uninstall:
 	rm -f $(PREFIX)/bin/cappy
+
+# メニューバー版 gcappy.app を dist/ に作る（既定は ad-hoc 署名。CAPPY_SIGN_IDENTITY で変更）
+app:
+	scripts/build-app.sh $(VERSION)
+
+run-app: app
+	open dist/gcappy.app
+
+# ~/Applications に gcappy.app をコピーする
+install-app: app
+	install -d $(HOME)/Applications
+	rm -rf $(HOME)/Applications/gcappy.app
+	ditto dist/gcappy.app $(HOME)/Applications/gcappy.app
 
 # Developer ID で署名・公証した配布物を dist/ に作る（scripts/release.sh を参照）
 release:

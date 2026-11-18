@@ -8,6 +8,13 @@
 brew install yteraoka/cask/cappy
 ```
 
+メニューバーから使う GUI 版（cappy を同梱）は次のとおりです。詳しくは「[gcappy](./gcappy.ja.md)」を参照してください。
+
+```bash
+brew install yteraoka/cask/gcappy
+gcappy
+```
+
 詳しくは「[配布](./distribution.ja.md)」を参照してください。
 
 ## ソースからのビルドとインストール
@@ -18,6 +25,8 @@ Swift 6 / Xcode 16 以降（Swift Package Manager）が必要です。
 make build                      # .build/release/cappy
 make install PREFIX=~/.local    # ~/.local/bin/cappy
 make test                       # 単体テスト
+make app                        # dist/gcappy.app（メニューバー版。ad-hoc 署名）
+make install-app                # ~/Applications/gcappy.app
 ```
 
 利用目的の文字列（`NSAudioCaptureUsageDescription` / `NSMicrophoneUsageDescription`）を書いた Info.plist は、リンク時に `-sectcreate __TEXT __info_plist` でバイナリに埋め込みます（`Support/Info.plist`）。
@@ -47,7 +56,7 @@ cappy completion bash > ~/.local/share/bash-completion/completions/cappy
 
 ## 権限
 
-「システムオーディオ録音」と「マイク」の 2 つが必要です。CLI では、許可の対象は**実行元のターミナルアプリ**（Terminal、iTerm など）になります。
+「システムオーディオ録音」と「マイク」の 2 つが必要です。CLI では、許可の対象は**実行元のターミナルアプリ**（Terminal、iTerm など）になります（gcappy から録音する場合は gcappy が対象です）。
 
 - 初回の `cappy record`（または `cappy doctor --request-permissions`）で許可ダイアログが出ます。
 - 設定の場所: システム設定 > プライバシーとセキュリティ > 画面収録とシステムオーディオ録音 >「システムオーディオ録音のみ」、および「マイク」
