@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.9.1](https://github.com/yteraoka/cappy/compare/v0.9.0...v0.9.1) - 2026-11-18
+
+- スクリーンショットの CoreGraphics / ScreenCaptureKit の呼び出しをメインスレッドで行う by @yteraoka in https://github.com/yteraoka/cappy/pull/37
+
 ## [v0.9.0](https://github.com/yteraoka/cappy/compare/v0.8.0...v0.9.0) - 2026-11-17
 
 - 録音中に s キーと cappy shot で録音対象のウインドウのスクリーンショットを撮れるようにする by @yteraoka in https://github.com/yteraoka/cappy/pull/35
