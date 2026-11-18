@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.9.2](https://github.com/yteraoka/cappy/compare/v0.9.1...v0.9.2) - 2026-11-18
+
+- Configure Renovate by @renovate[bot] in https://github.com/yteraoka/cappy/pull/39
+- Update dependency apple/swift-argument-parser to from: "1.8.2" by @renovate[bot] in https://github.com/yteraoka/cappy/pull/41
+- スクリーンショットの前に WindowServer への接続を初期化する by @yteraoka in https://github.com/yteraoka/cappy/pull/44
+
 ## [v0.9.1](https://github.com/yteraoka/cappy/compare/v0.9.0...v0.9.1) - 2026-11-18
 
 - スクリーンショットの CoreGraphics / ScreenCaptureKit の呼び出しをメインスレッドで行う by @yteraoka in https://github.com/yteraoka/cappy/pull/37
