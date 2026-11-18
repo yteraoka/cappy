@@ -1,3 +1,3 @@
 public enum CappyVersion {
-    public static let current = "0.9.3"
+    public static let current = "0.10.0"
 }
