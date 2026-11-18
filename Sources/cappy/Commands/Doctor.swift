@@ -60,8 +60,12 @@ struct Doctor: AsyncParsableCommand {
         }
 
         // 画面収録（スクリーンショットだけに使う。なくても録音はできる）
-        if !WindowScreenshot.hasPermission && requestPermissions { WindowScreenshot.requestPermission() }
-        if WindowScreenshot.hasPermission {
+        let requestScreenCapture = requestPermissions
+        let screenCapture = await MainActor.run { () -> Bool in
+            if !WindowScreenshot.hasPermission && requestScreenCapture { WindowScreenshot.requestPermission() }
+            return WindowScreenshot.hasPermission
+        }
+        if screenCapture {
             add(.ok, tr("Screen recording (screenshots)", ja: "画面収録（スクリーンショット）"), PermissionStatus.authorized.displayName)
         } else {
             add(.warn, tr("Screen recording (screenshots)", ja: "画面収録（スクリーンショット）"),

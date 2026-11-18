@@ -1,4 +1,4 @@
-import CoreGraphics
+@preconcurrency import CoreGraphics
 import Darwin
 import Foundation
 import ImageIO
@@ -144,14 +144,19 @@ public enum WindowScreenshot {
         """)
     }
 
+    // CoreGraphics（WindowServer への接続）と ScreenCaptureKit は、どれもメインスレッドから呼ぶ。
+    // コマンドラインツールでは、最初の呼び出しが別のスレッドだと CGS_REQUIRE_INIT のアサーションでプロセスが終了する。
+
     /// 画面収録が許可されているか
+    @MainActor
     public static var hasPermission: Bool { CGPreflightScreenCaptureAccess() }
 
     /// 許可を求める（初回だけダイアログを出す。許可の反映はターミナルアプリの再起動後）
-    @discardableResult
+    @MainActor @discardableResult
     public static func requestPermission() -> Bool { CGRequestScreenCaptureAccess() }
 
     /// 録音対象のウインドウ（--system なら画面全体）を撮って PNG で保存する
+    @MainActor
     public static func capture(target: ScreenshotTarget, to url: URL) async throws -> Result {
         if !CGPreflightScreenCaptureAccess() {
             // 初回は許可を求めるダイアログを出す（許可しても反映はターミナルアプリの再起動後）
