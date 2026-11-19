@@ -112,6 +112,10 @@ import Testing
         #expect(LaunchOperation.preferred(for: profile("a")) == .transcribe)
         #expect(LaunchOperation.preferred(for: profile("a", auto: true)) == .summarize)
         #expect(LaunchOperation.preferred(for: profile("a", provider: "none")) == .record)
+        // この Mac での文字起こしでは、リアルタイム文字起こしはまだ使えない
+        #expect(LaunchOperation.available(for: profile("a", provider: "local")) == [.record, .transcribe, .summarize])
+        #expect(LaunchOperation.available(for: profile("a", provider: "local", summary: "none")) == [.record, .transcribe])
+        #expect(LaunchOperation.preferred(for: profile("a", provider: "local", auto: true)) == .summarize)
     }
 
     @Test func startsRecordingWithTheChosenSettings() {
