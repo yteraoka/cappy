@@ -20,7 +20,17 @@ Transcription and speaker diarization run in cappy itself, but the summary and s
    brew services start ollama   # also starts it at login. If you installed the app, start the app instead
    ```
 
-3. Pull the model for the summary. A 30B-class model is over 10 GB and needs about 32 GB of memory or more. On a 16 GB Mac, choose a 7-8B model.
+3. Pull the model for the summary. Choose one that fits your memory (the steps below use `qwen3:30b`; with another model, replace the name in step 4 and later).
+
+   | Model | Size (4-bit) | Guide |
+   | --- | --- | --- |
+   | Qwen3 30B (`qwen3:30b`) | over 10 GB | Macs with 32 GB of memory or more |
+   | Qwen3.5 9B | about 6 GB | Macs with 16 GB. A small model from the Qwen family, which is rated well for Japanese |
+   | Gemma 4 12B | about 7 GB | Macs with 16 GB. An alternative to compare with Qwen3.5 9B |
+
+   - Smaller models are faster and lighter, but the minutes tend to be worse. Run `cappy summarize --force` with each model on the same transcript and compare.
+   - Check the Ollama tag names (e.g. `qwen3.5:9b`) in the [ollama.com library](https://ollama.com/library).
+   - Widening the context to 32K (step 4) also uses memory, so keep about 8-10 GB free even for a 9-12B model.
 
    ```bash
    ollama pull qwen3:30b
@@ -103,7 +113,7 @@ With `summary.provider = "local"`, cappy calls the OpenAI-compatible API (`<base
 
 - `summary.model` is the model name on the server and is required (there is no default). `cappy doctor` checks that the server is reachable and has the model.
 - **Mind the context length.** An hour-long meeting is roughly 15-20K tokens in English (about 20K in Japanese), so you need a context length of 32K tokens or more. Ollama's default context is short and silently cuts off the rest, so create a model with a wider `num_ctx` as in step 4 of the setup. In LM Studio, set the Context Length when loading the model.
-- As a rough guide to memory: a quantized 7-8B model on a 16 GB Mac, and a 20-30B model (including MoE) with 32 GB or more. The quality of the minutes depends a lot on the model size.
+- As a rough guide to memory: a quantized 9-12B model (Qwen3.5 9B, Gemma 4 12B, ...) on a 16 GB Mac, and a 20-30B model (Qwen3 30B, ..., including MoE) with 32 GB or more. The quality of the minutes depends a lot on the model size.
 - `summary.effort` (thinking effort) is not sent. `summary.max_tokens` is sent as the output limit.
 - `cappy speakers` (speaker naming) uses the same server. `speakers.model` can choose another model.
 
