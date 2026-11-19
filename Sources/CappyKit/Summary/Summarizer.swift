@@ -217,6 +217,9 @@ public struct Summarizer: Sendable {
     }
 
     static func hint(for error: Error, model: String, region: String?, provider: String = "vertex") -> String? {
+        if provider == "local" {
+            return tr("Check that the local LLM server (\(region ?? "-")) is running and has enough memory for \(model)", ja: "手元の LLM サーバー（\(region ?? "-")）が動いているか、\(model) を動かせるだけのメモリがあるかを確認してください")
+        }
         if let a = error as? AWSAPIError { return bedrockHint(a, model: model, routing: region) }
         // ストリームの途中のエラー（ClaudeStreamParser）は GoogleAPIError で届く
         if provider == "bedrock", let g = error as? GoogleAPIError {
@@ -287,10 +290,12 @@ public enum SummaryClientFactory {
                     hint: tr("Set region in [profiles.\(profile.name).aws], AWS_REGION, or region in the AWS profile", ja: "[profiles.\(profile.name).aws] の region、AWS_REGION、AWS のプロファイルの region のいずれかを設定してください"))
             }
             return BedrockSummaryClient(region: region, routing: routing, credentials: credentials, transport: transport)
+        case "local":
+            return try LocalChatClient.make(baseURL: profile.summary.baseURL, transport: transport)
         case "none":
             throw CappyError.usage(tr("Summary provider is none, so no summary", ja: "要約のプロバイダが none のため、要約は行いません"))
         default:
-            throw CappyError.usage(tr("Unsupported summary provider: \(profile.summaryProvider) (google / aws / none)", ja: "未対応の要約プロバイダです: \(profile.summaryProvider)（google / aws / none）"))
+            throw CappyError.usage(tr("Unsupported summary provider: \(profile.summaryProvider) (google / aws / local / none)", ja: "未対応の要約プロバイダです: \(profile.summaryProvider)（google / aws / local / none）"))
         }
     }
 

@@ -16,10 +16,16 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.2"),
+        // 端末内での文字起こし（WhisperKit）と話者分離（SpeakerKit）
+        .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.1"),
     ],
     targets: [
         .target(
             name: "CappyKit",
+            dependencies: [
+                .product(name: "WhisperKit", package: "argmax-oss-swift"),
+                .product(name: "SpeakerKit", package: "argmax-oss-swift"),
+            ],
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AVFoundation"),
@@ -27,6 +33,8 @@ let package = Package(
                 .linkedFramework("IOKit"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("ScreenCaptureKit"),
+                .linkedFramework("Speech"),
+                .linkedFramework("CoreMedia"),
             ]
         ),
         .executableTarget(

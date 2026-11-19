@@ -116,6 +116,7 @@ struct Doctor: AsyncParsableCommand {
         case .gemini: await checkGemini(profile, add)
         case .speech: await checkGoogle(profile, add)
         case .amazon: await checkTranscribe(profile, add)
+        case .whisperKit, .apple: await checkLocalTranscription(profile, add)
         case .none: add(.ok, tr("Transcription", ja: "文字起こし"), tr("provider = none (recording only)", ja: "provider = none（録音のみ）"))
         }
         await checkSummary(profile, add)
@@ -163,8 +164,63 @@ struct Doctor: AsyncParsableCommand {
         }
     }
 
+    /// provider = local の文字起こし（WhisperKit / Apple SpeechTranscriber と SpeakerKit）
+    func checkLocalTranscription(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let l = profile.local
+        let title = tr("Transcription (on this Mac)", ja: "文字起こし（この Mac で）")
+        let dir = l.modelDirectoryURL
+        let diar = l.diarization ? tr(", speaker diarization: SpeakerKit", ja: "、話者分離: SpeakerKit") : ""
+        switch profile.transcriptionService {
+        case .apple:
+            guard AppleSpeechRecognizer.isSupported else {
+                add(.fail, title, tr("Apple SpeechTranscriber needs macOS 26 or later (use transcribe.model = \"whisperkit\")", ja: "Apple の SpeechTranscriber は macOS 26 以降で使えます（transcribe.model = \"whisperkit\" を使ってください）"), .usage)
+                return
+            }
+            if let st = await AppleSpeechRecognizer.localeStatus(profile.language) {
+                add(.ok, title, tr("Apple SpeechTranscriber, \(profile.language)", ja: "Apple の SpeechTranscriber、\(profile.language)")
+                    + (st.installed ? "" : tr(" (the speech model is downloaded the first time)", ja: "（音声モデルは初回にダウンロードします）")) + diar, .usage)
+            } else {
+                add(.fail, title, tr("Apple SpeechTranscriber does not support \(profile.language) on this Mac (use transcribe.model = \"whisperkit\")", ja: "この Mac の Apple の SpeechTranscriber は \(profile.language) に対応していません（transcribe.model = \"whisperkit\" を使ってください）"), .usage)
+                return
+            }
+        default:
+            add(.ok, title, "WhisperKit model=\(l.whisperModel ?? tr("recommended for this Mac", ja: "この Mac の推奨")) " + diar, .usage)
+        }
+        let size = (try? FileManager.default.subpathsOfDirectory(atPath: dir.path))?.count ?? 0
+        if size == 0 && (profile.transcriptionService == .whisperKit || l.diarization) {
+            add(.warn, tr("Local models", ja: "端末内のモデル"), tr("\(dir.path) is empty. The models (about 1-3 GB) are downloaded from Hugging Face the first time", ja: "\(dir.path) は空です。初回にモデル（約 1〜3 GB）を Hugging Face からダウンロードします"), .usage)
+        } else {
+            add(.ok, tr("Local models", ja: "端末内のモデル"), dir.path, .usage)
+        }
+    }
+
+    /// provider = local の要約（手元の LLM サーバー）
+    func checkLocalSummary(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let s = profile.summary
+        let title = tr("Summary (local LLM)", ja: "要約（手元の LLM）")
+        guard !s.model.isEmpty else {
+            add(.fail, title, LocalChatClient.noModelError.message + "\n" + (LocalChatClient.noModelError.hint ?? ""), .usage)
+            return
+        }
+        add(.ok, tr("Summary settings", ja: "要約の設定"), "local base_url=\(s.baseURL) model=\(s.model)" + (s.auto ? " auto" : ""), .usage)
+        checkInstructions(profile, add)
+        do {
+            let client = try LocalChatClient.make(baseURL: s.baseURL)
+            try await client.checkAccess(model: s.model, effort: s.effort)
+            add(.ok, title, tr("\(s.model) is available on \(s.baseURL)", ja: "\(s.baseURL) で \(s.model) を使えます"), .transcription)
+        } catch let e as CappyError {
+            add(.fail, title, e.message + (e.hint.map { "\n" + $0 } ?? ""), .transcription)
+        } catch {
+            add(.warn, title, tr("Cannot check: \(error)", ja: "確認できません: \(error)"), .transcription)
+        }
+    }
+
     func checkSummary(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
         let s = profile.summary
+        if profile.summaryProvider == "local" {
+            await checkLocalSummary(profile, add)
+            return
+        }
         if profile.summaryProvider == "aws" {
             await checkBedrockSummary(profile, add)
             return

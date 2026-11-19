@@ -362,6 +362,10 @@ struct Record: AsyncParsableCommand {
         guard profile.provider != "none" else {
             throw CappyError.usage(tr("--live is not available because transcribe.provider is none in profile \(profile.name)", ja: "プロファイル \(profile.name) の transcribe.provider が none のため、--live は使えません"))
         }
+        if profile.provider == "local" {
+            throw CappyError.usage(tr("--live is not available yet with transcribe.provider = local in profile \(profile.name)", ja: "プロファイル \(profile.name) の transcribe.provider が local のため、--live はまだ使えません"),
+                                   hint: tr("Record without --live; the transcription after recording runs on this Mac", ja: "--live を付けずに録音してください。録音後の文字起こしはこの Mac で行います"))
+        }
         if profile.provider == "aws" {
             let aws = profile.aws ?? AWSSettings()
             let credentials = try AWSCredentialsProvider.resolve(profile: aws.profile, region: aws.region)

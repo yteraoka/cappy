@@ -108,7 +108,7 @@ struct Summarize: AsyncParsableCommand {
 
         if profile.summaryProvider == "none" {
             throw CappyError.usage(tr("The summary provider of profile \(profile.name) is none", ja: "プロファイル \(profile.name) の要約プロバイダが none です"),
-                                   hint: tr("Set provider in [profiles.\(profile.name).summary] to vertex or bedrock", ja: "[profiles.\(profile.name).summary] の provider を vertex か bedrock にしてください"))
+                                   hint: tr("Set provider in [profiles.\(profile.name).summary] to google, aws or local", ja: "[profiles.\(profile.name).summary] の provider を google・aws・local のいずれかにしてください"))
         }
         try await SummarizeRunner.run(store: store, profile: profile, request: .init(
             force: force, model: model, effort: effort, prompt: prompt, explicit: true))

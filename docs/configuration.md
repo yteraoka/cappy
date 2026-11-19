@@ -29,17 +29,17 @@ A profile is made of these tables:
 | `[profiles.<name>]` | `language` (meeting language), `output_dir`, `disk_warn_mb`, `disk_stop_mb` |
 | `[profiles.<name>.google]` | Google Cloud account shared by transcription and summary: `project_id`, `bucket`, `delete_remote_after` |
 | `[profiles.<name>.aws]` | AWS account shared by transcription and summary: `profile`, `region`, `bucket`, `delete_remote_after` |
-| `[profiles.<name>.transcribe]` | Transcription: `provider` (`google` / `aws` / `none`), `model`, `location`, `diarization`, ... |
-| `[profiles.<name>.summary]` | Meeting summary: `provider` (`google` / `aws` / `none`), `model`, `region`, `auto`, `prompt` (summary template; see [usage](./usage.md#summary-templates)), ... |
+| `[profiles.<name>.transcribe]` | Transcription: `provider` (`google` / `aws` / `local` / `none`), `model`, `location`, `diarization`, ... (`local`: see [keeping everything on this Mac](./local.md)) |
+| `[profiles.<name>.summary]` | Meeting summary: `provider` (`google` / `aws` / `local` / `none`), `model`, `region`, `auto`, `prompt` (summary template; see [usage](./usage.md#summary-templates)), ... |
 | `[profiles.<name>.speakers]` | Naming the speakers from what was said: `auto` (infer before summarizing; default true), `me` (your own name), `model`, `effort` (see [usage](./usage.md#speakers)) |
 | `[profiles.<name>.screenshot]` | Screenshots while recording: `window_titles` (title patterns of the meeting window; see [usage](./usage.md#screenshots)) |
 
 `provider` chooses the cloud (the account in `[google]` or `[aws]`), and `model` chooses what to use:
 
-| | `provider = "google"` | `provider = "aws"` |
-| --- | --- | --- |
-| Transcription | `model = "gemini-*"`: Gemini on Vertex AI (default `gemini-3.5-transcribe`)<br>other models (`chirp_3`, ...): Speech-to-Text v2 | Amazon Transcribe |
-| Summary | Claude / Gemini on Vertex AI (default `gemini-4-argon`) | Claude and other models on Amazon Bedrock (default `claude-opus-5-5`) |
+| | `provider = "google"` | `provider = "aws"` | `provider = "local"` ([on this Mac](./local.md)) |
+| --- | --- | --- | --- |
+| Transcription | `model = "gemini-*"`: Gemini on Vertex AI (default `gemini-3.5-transcribe`)<br>other models (`chirp_3`, ...): Speech-to-Text v2 | Amazon Transcribe | `model = "whisperkit"` (default): WhisperKit<br>`model = "apple"`: Apple SpeechTranscriber (macOS 26 or later) |
+| Summary | Claude / Gemini on Vertex AI (default `gemini-4-argon`) | Claude and other models on Amazon Bedrock (default `claude-opus-5-5`) | A local LLM server (Ollama, LM Studio, ...; `model` is required) |
 
 ```toml
 [profiles.default]

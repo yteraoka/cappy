@@ -4,8 +4,8 @@ English | [日本語](./README.ja.md)
 
 cappy is a macOS CLI that records a meeting app's audio (the remote side) and your microphone (you) as separate tracks, without a virtual audio device, then transcribes and summarizes the meeting.
 
-- Transcription: Gemini on Vertex AI (`gemini-3.5-transcribe`, the default), Google Speech-to-Text v2 (chirp_3), Amazon Transcribe
-- Summary: Claude / Gemini on Vertex AI, models on Amazon Bedrock (Claude, Kimi K3.1, GLM-5.3, ...)
+- Transcription: Gemini on Vertex AI (`gemini-3.5-transcribe`, the default), Google Speech-to-Text v2 (chirp_3), Amazon Transcribe, or on this Mac with WhisperKit / Apple SpeechTranscriber (speaker diarization with SpeakerKit)
+- Summary: Claude / Gemini on Vertex AI, models on Amazon Bedrock (Claude, Kimi K3.1, GLM-5.3, ...), or a local LLM server (Ollama, LM Studio, ...)
 - Live transcription while recording: the Vertex AI Live API (`gemini-3.5-transcribe-live`), Amazon Transcribe Streaming
 
 How it works:
@@ -56,6 +56,7 @@ If cappy stops halfway, `cappy transcribe <dir>` resumes and `cappy recover <dir
 | [Installation](./docs/installation.md) | Homebrew, building from source, shell completion, permissions |
 | [Configuration](./docs/configuration.md) | `cappy init`, the config file and profiles, UI language |
 | [Google Cloud setup](./docs/google-cloud.md) | Vertex AI / Speech-to-Text transcription and Claude / Gemini summaries |
+| [Keeping everything on this Mac](./docs/local.md) | Transcription with WhisperKit / Apple SpeechTranscriber, diarization with SpeakerKit, summaries with a local LLM (Ollama, LM Studio, ...) |
 | [AWS setup](./docs/aws.md) | Amazon Transcribe, Amazon Bedrock summaries, AWS authentication |
 | [Usage](./docs/usage.md) | Commands, `record` / `transcribe` / `summarize` / `speakers` options, mic mute, screenshots, live transcription, exit codes |
 | [cappy tui](./docs/tui.md) | Full-screen UI, past recordings, stopping and interrupting |

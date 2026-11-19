@@ -3,7 +3,7 @@ import Foundation
 /// `cappy init` で決めた設定（1 プロファイル分）
 public struct SetupAnswers: Equatable, Sendable {
     public var profileName = "default"
-    /// 文字起こしのクラウド: google / aws / none
+    /// 文字起こしのクラウド: google / aws / local / none
     public var provider = "google"
     /// provider = google のモデル（gemini-* なら Gemini、それ以外は Speech-to-Text）
     public var transcribeModel: String?
@@ -17,9 +17,11 @@ public struct SetupAnswers: Equatable, Sendable {
     public var awsRegion: String?
     /// provider = aws の S3 バケット
     public var awsBucket: String?
-    /// 要約のクラウド: google / aws / none
+    /// 要約のクラウド: google / aws / local / none
     public var summaryProvider = "none"
     public var summaryModel: String?
+    /// summaryProvider = local の OpenAI 互換 API の URL
+    public var summaryBaseURL: String?
     public var summaryRegion: String?
     public var summaryAuto = false
 
@@ -53,6 +55,7 @@ public enum SetupConfigFile {
             section(base + ".summary", [("provider", quote(a.summaryProvider)),
                                         ("model", a.summaryProvider == "none" ? nil : a.summaryModel.map(quote)),
                                         ("region", a.summaryProvider == "none" ? nil : a.summaryRegion.map(quote)),
+                                        ("base_url", a.summaryProvider == "local" ? a.summaryBaseURL.map(quote) : nil),
                                         ("auto", a.summaryProvider == "none" ? nil : (a.summaryAuto ? "true" : "false"))])
         }
         return out.joined(separator: "\n") + "\n"
@@ -234,6 +237,7 @@ public struct SetupWizard {
         a.provider = try choose(tr("Which cloud should transcribe the recordings?", ja: "文字起こしに使うクラウドを選んでください"), [
             ("google", tr("Google Cloud (Gemini on Vertex AI, or Speech-to-Text)", ja: "Google Cloud（Vertex AI の Gemini、または Speech-to-Text）")),
             ("aws", tr("AWS (Amazon Transcribe)", ja: "AWS（Amazon Transcribe）")),
+            ("local", tr("This Mac (WhisperKit or Apple SpeechTranscriber; nothing is sent outside)", ja: "この Mac（WhisperKit または Apple の SpeechTranscriber。外部には送信しない）")),
             ("none", tr("None: record only, nothing is sent outside", ja: "使わない: 録音だけ行い、外部には送信しない")),
         ], default: "google")
         a.language = try ask(tr("Meeting language (e.g. ja-JP, en-US)", ja: "会議の言語（例: ja-JP, en-US）"),
@@ -258,6 +262,12 @@ public struct SetupWizard {
             }
         case "aws":
             try askAWS(&a, bucket: true)
+        case "local":
+            var engines: [(value: String, label: String)] = [(value: "whisperkit", label: tr("WhisperKit (Whisper on Core ML; the model, about 1-3 GB, is downloaded the first time)", ja: "WhisperKit（Core ML の Whisper。初回に約 1〜3 GB のモデルをダウンロード）"))]
+            if AppleSpeechRecognizer.isSupported {
+                engines.append((value: "apple", label: tr("Apple SpeechTranscriber (built into macOS 26)", ja: "Apple の SpeechTranscriber（macOS 26 に内蔵）")))
+            }
+            a.transcribeModel = try choose(tr("Speech recognition on this Mac", ja: "この Mac で使う音声認識"), engines, default: "whisperkit")
         default:
             break
         }
@@ -267,6 +277,7 @@ public struct SetupWizard {
             a.summaryProvider = try choose(tr("Which cloud should create the meeting summary?", ja: "要約に使うクラウドを選んでください"), [
                 ("google", tr("Google Cloud (Claude / Gemini on Vertex AI)", ja: "Google Cloud（Vertex AI の Claude / Gemini）")),
                 ("aws", tr("AWS (Claude and other models on Amazon Bedrock)", ja: "AWS（Amazon Bedrock の Claude など）")),
+                ("local", tr("A local LLM server on this Mac (Ollama, LM Studio, ...)", ja: "この Mac の LLM サーバー（Ollama・LM Studio など）")),
                 ("none", tr("No summary", ja: "要約しない")),
             ], default: a.provider)
             switch a.summaryProvider {
@@ -289,6 +300,11 @@ public struct SetupWizard {
                 ], default: SummarySettings.defaultBedrockModel, bedrock: true)
                 a.summaryRegion = try ask(tr("Bedrock inference profile scope (global / jp / us / eu / au / apac, or a Region name)", ja: "Bedrock の推論プロファイルの範囲（global / jp / us / eu / au / apac、またはリージョン名）"),
                                           default: Self.bedrockScope(for: a.awsRegion ?? effectiveAWSRegion(a)), validate: Self.validLocation)
+            case "local":
+                a.summaryBaseURL = try ask(tr("URL of the OpenAI-compatible API (Ollama: http://localhost:11434/v1, LM Studio: http://localhost:1234/v1)", ja: "OpenAI 互換 API の URL（Ollama: http://localhost:11434/v1、LM Studio: http://localhost:1234/v1）"),
+                                           default: SummarySettings.defaultLocalBaseURL, validate: Self.validURL)
+                a.summaryModel = try ask(tr("Model name on that server (e.g. qwen3:30b)", ja: "そのサーバーのモデル名（例: qwen3:30b）"), default: "",
+                                         validate: { $0.isEmpty ? tr("Enter a model name", ja: "モデル名を入力してください") : nil })
             default:
                 break
             }
@@ -439,6 +455,13 @@ public struct SetupWizard {
     static func validLanguage(_ s: String) -> String? {
         s.range(of: "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$", options: .regularExpression) == nil
             ? tr("Enter a language code such as ja-JP or en-US", ja: "ja-JP や en-US のような言語コードを入力してください") : nil
+    }
+
+    static func validURL(_ s: String) -> String? {
+        guard let u = URL(string: s), let scheme = u.scheme?.lowercased(), ["http", "https"].contains(scheme), u.host != nil else {
+            return tr("Enter a URL such as http://localhost:11434/v1", ja: "http://localhost:11434/v1 のような URL を入力してください")
+        }
+        return nil
     }
 
     static func validLocation(_ s: String) -> String? {

@@ -27,13 +27,31 @@ enum TranscribeRunner {
             Console.print(tr("Provider is none, so no transcription (recording only)", ja: "プロバイダが none のため、文字起こしは行いません（録音のみ）"))
             return
         }
+        if let m = request.model, service.isLocal, LocalTranscribeSettings.LocalEngine(rawValue: m.lowercased()) == nil {
+            throw CappyError.usage(tr("Invalid --model: \(m) (whisperkit / apple with provider local)", ja: "--model が不正です: \(m)（provider が local なら whisperkit / apple）"))
+        }
         if request.model != nil && service == .amazon {
             throw CappyError.usage(tr("--model can be used only with provider google (Amazon Transcribe has no model to choose)", ja: "--model は provider が google のときだけ使えます（Amazon Transcribe にはモデルの選択がありません）"))
         }
         let provider = try ProviderFactory.make(service: service, profile: profile, model: model)
         let gemini = service == .gemini
         var opts: Transcriber.Options
-        if let aws = provider as? AmazonTranscribeProvider {
+        if service.isLocal {
+            if service == .apple && !AppleSpeechRecognizer.isSupported {
+                throw CappyError.usage(tr("Apple SpeechTranscriber needs macOS 26 or later", ja: "Apple の SpeechTranscriber は macOS 26 以降で使えます"),
+                                       hint: tr("Use transcribe.model = \"whisperkit\" instead", ja: "代わりに transcribe.model = \"whisperkit\" を使ってください"))
+            }
+            // 外部には何も送らない。cleanup は途中の結果（local-*.json）を消すだけ
+            opts = Transcriber.Options(
+                language: request.language ?? profile.language,
+                mix: request.mix,
+                formats: request.formats,
+                diarization: profile.local.diarization,
+                wordTimestamps: true,
+                cleanup: !request.keepRemote,
+                force: request.force,
+                location: nil)
+        } else if let aws = provider as? AmazonTranscribeProvider {
             opts = Transcriber.Options(
                 language: request.language ?? profile.language,
                 mix: request.mix,
@@ -147,6 +165,11 @@ enum SummarizeRunner {
 extension SummarizeRunner {
     /// 要約・話者の名前の推定に使うモデルが、要約のクラウドで使えるかを確かめる
     static func validateModel(_ model: String, profile: Profile) throws {
+        // 手元のサーバーのモデル名は自由（qwen3:30b など）
+        if profile.summaryProvider == "local" {
+            if model.isEmpty { throw LocalChatClient.noModelError }
+            return
+        }
         guard let family = SummaryModelFamily.of(model) else {
             throw CappyError.usage(tr("Invalid --model: \(model) (a model ID starting with claude- or gemini-, or on Bedrock an ID such as moonshotai.kimi-k3.1)", ja: "--model が不正です: \(model)（claude- または gemini- で始まるモデル ID、Bedrock なら moonshotai.kimi-k3.1 のような ID）"))
         }

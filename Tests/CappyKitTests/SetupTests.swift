@@ -64,7 +64,7 @@ private final class ScriptedIO: @unchecked Sendable {
     }
 
     @Test func speechToTextFlowUsesItsOwnLocation() throws {
-        let s = ScriptedIO(["stt", "", "ja-JP", "proj", "bucket-1", "2", "eu", "3", ""])
+        let s = ScriptedIO(["stt", "", "ja-JP", "proj", "bucket-1", "2", "eu", "4", ""])
         let a = try SetupWizard(io: s.io, environment: SetupEnvironment(), existingProfiles: []).run()
         #expect(s.remaining == 0)
         let p = try profile(a)
@@ -108,7 +108,7 @@ private final class ScriptedIO: @unchecked Sendable {
     }
 
     @Test func noneSkipsServiceAndSummaryQuestions() throws {
-        let s = ScriptedIO(["local", "3", "ja-JP", ""])
+        let s = ScriptedIO(["rec-only", "4", "ja-JP", ""])
         let a = try SetupWizard(io: s.io, environment: SetupEnvironment(), existingProfiles: []).run()
         #expect(s.remaining == 0)
         let text = SetupConfigFile.render(a)
@@ -132,7 +132,7 @@ private final class ScriptedIO: @unchecked Sendable {
     }
 
     @Test func detectedGcloudProjectIsTheDefault() throws {
-        let s = ScriptedIO(["", "", "ja-JP", "", "b-123", "", "", "3", ""])
+        let s = ScriptedIO(["", "", "ja-JP", "", "b-123", "", "", "4", ""])
         let a = try SetupWizard(io: s.io, environment: SetupEnvironment(gcloudProject: "from-gcloud"), existingProfiles: []).run()
         #expect(a.googleProjectID == "from-gcloud")
         #expect(a.summaryProvider == "none")
@@ -141,7 +141,7 @@ private final class ScriptedIO: @unchecked Sendable {
 
     @Test func existingProfileNeedsConfirmation() throws {
         // default はある → 置き換えない → 新しい名前（空は不可）
-        let s = ScriptedIO(["", "n", "", "second", "3", "ja-JP", ""])
+        let s = ScriptedIO(["", "n", "", "second", "4", "ja-JP", ""])
         let a = try SetupWizard(io: s.io, environment: SetupEnvironment(), existingProfiles: ["default"]).run()
         #expect(a.profileName == "second")
         #expect(s.remaining == 0)
@@ -330,7 +330,7 @@ private final class ScriptedIO: @unchecked Sendable {
         #expect {
             try parse("[profiles.p.transcribe]\nprovider = \"gemini\"\n")
         } throws: { error in
-            (error as? CappyError)?.message.contains("google / aws / none") == true
+            (error as? CappyError)?.message.contains("google / aws / local / none") == true
         }
     }
 }
@@ -343,12 +343,16 @@ private final class ScriptedIO: @unchecked Sendable {
     func examplesLoad(_ file: String) throws {
         let url = Self.root.appendingPathComponent(file)
         let c = try CappyConfig.load(from: url)
-        #expect(c.profiles.count == 5)
+        #expect(c.profiles.count == 6)
         #expect(try c.profile(named: "default").transcriptionService == .gemini)
         #expect(try c.profile(named: "default").gemini.location == "global")
         #expect(try c.profile(named: "aws").transcriptionService == .amazon)
         #expect(try c.profile(named: "aws").summaryProvider == "aws")
         #expect(try c.profile(named: "client-a").google.location == "eu")
         #expect(try c.profile(named: "local-only").summaryProvider == "none")
+        let onDevice = try c.profile(named: "on-device")
+        #expect(onDevice.transcriptionService == .whisperKit)
+        #expect(onDevice.summaryProvider == "local")
+        #expect(onDevice.summary.model == "qwen3:30b")
     }
 }

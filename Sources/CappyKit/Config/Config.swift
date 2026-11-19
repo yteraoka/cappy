@@ -45,7 +45,41 @@ public struct GeminiSettings: Sendable, Equatable {
     public var chunkSeconds: TimeInterval { TimeInterval(max(1, chunkMinutes) * 60) }
 }
 
-/// 会議の要約（google: Vertex AI の Claude / Gemini、aws: Amazon Bedrock の Claude など）
+/// 端末内での文字起こし（provider = local）。model が apple なら Apple の SpeechTranscriber、それ以外は WhisperKit
+public struct LocalTranscribeSettings: Sendable, Equatable {
+    /// whisperkit / apple
+    public var engine: LocalEngine = .whisperKit
+    /// WhisperKit のモデル（argmaxinc/whisperkit-coreml の名前の一部。例: large-v3-v20240930_turbo）。nil なら端末に合わせた推奨
+    public var whisperModel: String?
+    /// WhisperKit・SpeakerKit のモデルを置くディレクトリ
+    public var modelDir: String = "~/Library/Application Support/cappy/models"
+    /// remote トラックで SpeakerKit による話者分離を行うか
+    public var diarization: Bool = true
+    /// 相手側の人数（分かっていれば話者分離の精度が上がる。nil なら自動）
+    public var numSpeakers: Int?
+    /// 認識を寄せたい語句（WhisperKit ではプロンプトとして渡す）
+    public var customVocabulary: [String] = []
+
+    public init() {}
+
+    public enum LocalEngine: String, Sendable, Equatable, CaseIterable {
+        case whisperKit = "whisperkit"
+        case apple
+
+        public var displayName: String {
+            switch self {
+            case .whisperKit: return "WhisperKit"
+            case .apple: return "Apple SpeechTranscriber"
+            }
+        }
+    }
+
+    public var modelDirectoryURL: URL {
+        URL(fileURLWithPath: FileSecurity.expandTilde(modelDir), isDirectory: true)
+    }
+}
+
+/// 会議の要約（google: Vertex AI の Claude / Gemini、aws: Amazon Bedrock の Claude など、local: 手元の LLM サーバー）
 public struct SummarySettings: Sendable, Equatable {
     /// google / aws / none。nil なら文字起こしと同じ（transcribe.provider）
     public var provider: String?
@@ -68,13 +102,17 @@ public struct SummarySettings: Sendable, Equatable {
     public var instructionsFile: String?
     /// 要約の出力の構成のテンプレート（prompts/<名前>.md の名前、またはパス。nil なら組み込みの default）
     public var prompt: String?
+    /// provider = local: OpenAI 互換の API（Ollama・LM Studio・llama.cpp など）の URL
+    public var baseURL: String = SummarySettings.defaultLocalBaseURL
 
     public init() {}
 
     public static let defaultModel = "gemini-4-argon"
+    /// provider = local の既定の URL（Ollama）
+    public static let defaultLocalBaseURL = "http://localhost:11434/v1"
     /// provider = aws（Bedrock）で model を省略したときのモデル
     public static let defaultBedrockModel = "claude-opus-5-5"
-    public static let knownProviders: Set<String> = ["google", "aws", "none"]
+    public static let knownProviders: Set<String> = ["google", "aws", "local", "none"]
     /// Bedrock の推論プロファイルの範囲として知られているもの（これ以外は警告だけ出す）
     public static let knownBedrockRoutings: Set<String> = ["global", "us", "eu", "jp", "au", "apac", "ca", "us-gov"]
 
@@ -127,7 +165,14 @@ public enum TranscriptionService: String, Sendable {
     case speech
     /// Amazon Transcribe（provider = aws）
     case amazon
+    /// 端末内の WhisperKit（provider = local）
+    case whisperKit
+    /// 端末内の Apple SpeechTranscriber（provider = local、model = apple）
+    case apple
     case none
+
+    /// 端末内で完結するか
+    public var isLocal: Bool { self == .whisperKit || self == .apple }
 
     /// 画面に出す名前
     public var displayName: String {
@@ -135,6 +180,8 @@ public enum TranscriptionService: String, Sendable {
         case .gemini: return "Gemini"
         case .speech: return "Speech-to-Text"
         case .amazon: return "Amazon Transcribe"
+        case .whisperKit: return "WhisperKit"
+        case .apple: return "Apple SpeechTranscriber"
         case .none: return "none"
         }
     }
@@ -180,6 +227,8 @@ public struct Profile: Sendable, Equatable {
     public var awsTranscribe = TranscribeSettings()
     /// 録音中のスクリーンショット
     public var screenshot = ScreenshotSettings()
+    /// 端末内での文字起こし（provider = local）
+    public var local = LocalTranscribeSettings()
 
     public init(name: String) { self.name = name }
 
@@ -194,6 +243,7 @@ public struct Profile: Sendable, Equatable {
         switch provider {
         case "google": return (model ?? GeminiSettings().model).hasPrefix("gemini") ? .gemini : .speech
         case "aws": return .amazon
+        case "local": return model?.lowercased() == LocalTranscribeSettings.LocalEngine.apple.rawValue ? .apple : .whisperKit
         default: return .none
         }
     }
@@ -288,8 +338,15 @@ public struct CappyConfig: Sendable {
                 switch service {
                 case .gemini: p.gemini.model = v
                 case .speech: p.google.model = v
+                case .whisperKit, .apple:
+                    guard let e = LocalTranscribeSettings.LocalEngine(rawValue: v.lowercased()) else {
+                        throw CappyError.usage(tr("Invalid \(tctx).model: \(v) (whisperkit / apple with provider = \"local\")", ja: "\(tctx).model が不正です: \(v)（provider = \"local\" では whisperkit / apple）"))
+                    }
+                    p.local.engine = e
                 default: throw googleOnly("model")
                 }
+            } else if service.isLocal {
+                p.local.engine = .whisperKit
             }
             if let v = try str("location", tt, tctx) {
                 switch service {
@@ -312,6 +369,15 @@ public struct CappyConfig: Sendable {
                 p.gemini.diarization = v
                 p.google.diarization = v
                 p.awsTranscribe.diarization = v
+                p.local.diarization = v
+            }
+            if let v = try str("whisper_model", tt, tctx), !v.isEmpty { p.local.whisperModel = v }
+            if let v = try str("model_dir", tt, tctx), !v.isEmpty { p.local.modelDir = v }
+            if let v = try int("num_speakers", tt, tctx) {
+                guard (1...30).contains(v) else {
+                    throw CappyError.usage(tr("\(tctx).num_speakers must be between 1 and 30", ja: "\(tctx).num_speakers は 1〜30 にしてください"))
+                }
+                p.local.numSpeakers = v
             }
             if let v = try bool("word_timestamps", tt, tctx) {
                 p.gemini.wordTimestamps = v
@@ -332,11 +398,13 @@ public struct CappyConfig: Sendable {
                 }
                 guard list.count <= 1000 else { throw CappyError.usage(tr("\(tctx).custom_vocabulary can have up to 1000 entries", ja: "\(tctx).custom_vocabulary は 1000 語までです")) }
                 p.gemini.customVocabulary = list
+                p.local.customVocabulary = list
             }
             p.awsTranscribe.vocabularyName = try str("vocabulary_name", tt, tctx)
             p.awsTranscribe.languageModelName = try str("language_model_name", tt, tctx)
             warnUnknownKeys(tt, ["provider", "model", "location", "chunk_minutes", "live_model", "diarization", "word_timestamps",
-                                 "min_speakers", "max_speakers", "custom_vocabulary", "vocabulary_name", "language_model_name"], tctx)
+                                 "min_speakers", "max_speakers", "custom_vocabulary", "vocabulary_name", "language_model_name",
+                                 "whisper_model", "model_dir", "num_speakers"], tctx)
         }
 
         do {
@@ -352,13 +420,22 @@ public struct CappyConfig: Sendable {
             if let v = try bool("auto", m, sctx) { p.summary.auto = v }
             p.summary.instructionsFile = try str("instructions_file", m, sctx)
             p.summary.prompt = try str("prompt", m, sctx)
+            if let v = try str("base_url", m, sctx) {
+                guard let u = URL(string: v), let scheme = u.scheme?.lowercased(), ["http", "https"].contains(scheme), u.host != nil else {
+                    throw CappyError.usage(tr("Invalid \(sctx).base_url: \(v) (e.g. http://localhost:11434/v1)", ja: "\(sctx).base_url が不正です: \(v)（例: http://localhost:11434/v1）"))
+                }
+                p.summary.baseURL = v
+            }
             if let v = p.summary.prompt, !v.isEmpty, !SummaryTemplate.isPath(v), !SummaryTemplate.isValidName(v) {
                 throw CappyError.usage(tr("Invalid \(sctx).prompt: \(v) (a template name in prompts/ such as \"minutes\", or a path to a .md file)", ja: "\(sctx).prompt が不正です: \(v)（prompts/ のテンプレート名（\"minutes\" など）、または .md ファイルのパス）"))
             }
             if let v = p.summary.provider, !SummarySettings.knownProviders.contains(v) {
-                throw CappyError.usage(tr("Invalid \(sctx).provider: \(v) (google / aws / none)", ja: "\(sctx).provider が不正です: \(v)（google / aws / none）"))
+                throw CappyError.usage(tr("Invalid \(sctx).provider: \(v) (google / aws / local / none)", ja: "\(sctx).provider が不正です: \(v)（google / aws / local / none）"))
             }
-            if p.summaryProvider == "aws" {
+            if p.summaryProvider == "local" {
+                // 手元のサーバーのモデル名（qwen3:30b など）は自由。既定のモデルはないので、書かなければ要約のときに案内する
+                if m["model"] == nil { p.summary.model = "" }
+            } else if p.summaryProvider == "aws" {
                 if m["model"] == nil { p.summary.model = SummarySettings.defaultBedrockModel }
                 for (key, value) in [("model", p.summary.model), ("fallback_model", p.summary.fallbackModel ?? "")]
                 where SummaryModelFamily.of(value) == .gemini {
@@ -378,14 +455,14 @@ public struct CappyConfig: Sendable {
                 throw CappyError.usage(tr("Invalid \(sctx).effort: \(p.summary.effort) (low / medium / high / xhigh / max)", ja: "\(sctx).effort が不正です: \(p.summary.effort)（low / medium / high / xhigh / max）"))
             }
             for (key, value) in [("model", p.summary.model), ("fallback_model", p.summary.fallbackModel ?? "")]
-            where !value.isEmpty && SummaryModelFamily.of(value) == nil {
+            where p.summaryProvider != "local" && !value.isEmpty && SummaryModelFamily.of(value) == nil {
                 throw CappyError.usage(tr("Invalid \(sctx).\(key): \(value) (a model ID starting with claude- or gemini-; on Bedrock, a Bedrock model ID such as moonshotai.kimi-k3.1 is also allowed)", ja: "\(sctx).\(key) が不正です: \(value)（claude- または gemini- で始まるモデル ID。Bedrock なら moonshotai.kimi-k3.1 のような Bedrock のモデル ID も可）"))
             }
             if p.summary.maxTokens < 1024 {
                 throw CappyError.usage(tr("\(sctx).max_tokens must be 1024 or more", ja: "\(sctx).max_tokens は 1024 以上にしてください"))
             }
             warnUnknownKeys(m, ["provider", "project_id", "region", "model", "fallback_model", "effort",
-                                "max_tokens", "auto", "instructions_file", "prompt"], sctx)
+                                "max_tokens", "auto", "instructions_file", "prompt", "base_url"], sctx)
         }
         if let sp = t["speakers"]?.table {
             let spctx = ctx + ".speakers"
@@ -395,7 +472,7 @@ public struct CappyConfig: Sendable {
                 p.speakers.me = name.isEmpty ? nil : name
             }
             if let v = try str("model", sp, spctx), !v.isEmpty {
-                guard SummaryModelFamily.of(v) != nil else {
+                guard p.summaryProvider == "local" || SummaryModelFamily.of(v) != nil else {
                     throw CappyError.usage(tr("Invalid \(spctx).model: \(v) (a model ID starting with claude- or gemini-, or on Bedrock an ID such as moonshotai.kimi-k3.1)", ja: "\(spctx).model が不正です: \(v)（claude- または gemini- で始まるモデル ID、Bedrock なら moonshotai.kimi-k3.1 のような ID）"))
                 }
                 p.speakers.model = v
@@ -474,7 +551,7 @@ public struct CappyConfig: Sendable {
 
 extension Profile {
     /// 文字起こしのプロバイダ（表示順）
-    public static let providers = ["google", "aws", "none"]
+    public static let providers = ["google", "aws", "local", "none"]
     public static let knownProviders = Set(providers)
     public static var providerList: String { providers.joined(separator: " / ") }
 }

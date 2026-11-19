@@ -418,6 +418,7 @@ public struct SessionBrowser: Sendable {
             switch p.transcriptionService {
             case .amazon: service = "Amazon Transcribe"
             case .gemini: service = "Gemini" + (p.transcribeModel.map { ", \($0)" } ?? "")
+            case .whisperKit, .apple: service = p.transcriptionService.displayName + tr(", on this Mac", ja: "、この Mac で")
             default: service = "Speech-to-Text" + (p.transcribeModel.map { ", \($0)" } ?? "")
             }
             return "\(p.name)  (\(service), \(p.language))"
