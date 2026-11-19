@@ -148,6 +148,8 @@ import Testing
         try SpeakerNamer.clear(store)
         names = try SpeakerNamer.apply(store, me: nil)
         #expect(names.isEmpty)
+        // 設定の自分の名前（speakers.me）も付けない
+        #expect(try SpeakerNamer.apply(store, me: "寺岡").isEmpty)
         #expect(try SpeakerNamer.load(store).doc.speakerNames == nil)
         // 取り消した後は、要約の前の自動実行で推定し直さない
         let again = try await SpeakerNamer(store: store, client: client, options: options()).infer()

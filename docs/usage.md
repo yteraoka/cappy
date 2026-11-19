@@ -183,7 +183,7 @@ Named the speakers:
 | --- | --- |
 | `--set "<label>=<name>"` | Give a name (repeatable). The label can be "Remote 1", "相手 1", or the current name ("Tanaka=Taro Tanaka"). An empty name (`"Remote 1="`) leaves the label without a name. Given names take priority over inferred ones, and no model is called |
 | `--unset "<label>"` | Drop the name given with `--set` and go back to the inferred one |
-| `--clear` | Remove all names, inferred and given (and do not infer again automatically before summarizing) |
+| `--clear` | Remove all names, inferred and given (including your own name from `speakers.me`; and do not infer again automatically before summarizing) |
 | `--list` | Show the current names and their evidence without changing anything |
 | `--force` | Infer again even if already inferred from the same transcript |
 | `--model <id>` | Default: `speakers.model` of the profile, or `summary.model` |

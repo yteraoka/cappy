@@ -106,12 +106,15 @@ enum SummarizeRunner {
         try validateModel(model, profile: profile)
         let template = try SummaryTemplate.load(request.prompt ?? profile.summary.prompt)
         let client = try SummaryClientFactory.make(profile: profile)
-        // 要約の前に話者の名前を推定して transcript に反映する（失敗しても要約は続ける）
-        if profile.speakers.auto {
+        // 要約の前に話者の名前を推定して transcript に反映する（失敗しても要約は続ける）。
+        // 文字起こしがない・空のときは、要約の側でそのエラーを出す
+        if profile.speakers.auto, let source = try? SpeakerNamer.load(store), !source.doc.segments.isEmpty {
             do {
                 try await SpeakersRunner.infer(store: store, profile: profile, client: client, request: .init(quiet: true))
             } catch {
                 Console.clearStatus()
+                // 中断（cappy tui の Ctrl-C など）は要約に進まない
+                if Task.isCancelled || error is CancellationError { throw error }
                 let message = (error as? CappyError)?.message ?? "\(error)"
                 Console.print(tr("Could not name the speakers (continuing with the summary): \(message)", ja: "話者の名前を推定できませんでした（要約は続けます）: \(message)"))
             }
@@ -211,7 +214,9 @@ enum SpeakersRunner {
         let L = UILanguage.forDocument(source.doc.language)
         let naming = SpeakerNaming(segments: source.doc.segments, language: L)
         let speakers = naming.speakers(in: source.doc.segments)
-        let state = store.metadata.speakers
+        // 文字起こしをやり直す前の推定・指定は表示しない（apply と同じく、発言が同じときだけ使う）
+        let digest = SpeakerNamer.segmentsDigest(source.doc.segments)
+        let state = store.metadata.speakers.flatMap { $0.segmentsDigest == digest ? $0 : nil }
         let names = source.doc.speakerNames ?? [:]
         let width = speakers.map { $0.label.count }.max() ?? 0
         for sp in speakers {

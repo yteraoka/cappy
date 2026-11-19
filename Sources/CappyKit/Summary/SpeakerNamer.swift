@@ -154,13 +154,15 @@ public struct SpeakerNamer: Sendable {
         }
     }
 
-    /// 推定と指定をすべて取り消す（推定済みの印は残すので、要約の前に自動で推定し直さない）
+    /// 推定と指定をすべて取り消す（推定済みの印は残すので、要約の前に自動で推定し直さない）。
+    /// 設定の自分の名前（speakers.me）も付けないように、自分は「名前なし」に指定する
     public static func clear(_ store: SessionStore) throws {
         let source = try load(store)
         let digest = segmentsDigest(source.doc.segments)
         try store.update { m in
             var s = SpeakerNamesState(state: .done)
             s.segmentsDigest = digest
+            s.manual[TrackID.mic.rawValue] = ""
             s.updatedAt = TimeFormat.iso8601(Date())
             m.speakers = s
         }
