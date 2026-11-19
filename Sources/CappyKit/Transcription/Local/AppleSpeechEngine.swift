@@ -31,6 +31,18 @@ public struct AppleSpeechRecognizer: LocalRecognizer {
                                hint: tr("Use transcribe.model = \"whisperkit\" instead", ja: "代わりに transcribe.model = \"whisperkit\" を使ってください"))
     }
 
+    /// 言語の音声モデルを用意する（cappy doctor --download-models）
+    public static func prepare(language: String) async throws {
+        #if canImport(Speech) && compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            try await AppleSpeechAnalysis.installAssets(language: language)
+            Console.clearStatus()
+            return
+        }
+        #endif
+        throw CappyError.usage(tr("Apple SpeechTranscriber needs macOS 26 or later", ja: "Apple の SpeechTranscriber は macOS 26 以降で使えます"))
+    }
+
     /// 言語の対応状況（doctor 用）。対応していなければ nil、対応していれば導入済みか
     public static func localeStatus(_ language: String) async -> (supported: Bool, installed: Bool)? {
         #if canImport(Speech) && compiler(>=6.2)
@@ -64,14 +76,26 @@ enum AppleSpeechAnalysis {
         return (true, installed)
     }
 
-    static func recognize(_ audio: URL, language: String) async throws -> [RecognizedPiece] {
-        let locale = try await locale(for: language)
-        let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [],
-                                            attributeOptions: [.audioTimeRange])
+    static func makeTranscriber(_ locale: Locale) -> SpeechTranscriber {
+        SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange])
+    }
+
+    static func installAssets(for transcriber: SpeechTranscriber, language: String) async throws {
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             Console.status(tr("Downloading the speech model for \(language) (the first time only)…", ja: "\(language) の音声モデルをダウンロードしています（初回のみ）…"))
             try await request.downloadAndInstall()
         }
+    }
+
+    static func installAssets(language: String) async throws {
+        let locale = try await locale(for: language)
+        try await installAssets(for: makeTranscriber(locale), language: language)
+    }
+
+    static func recognize(_ audio: URL, language: String) async throws -> [RecognizedPiece] {
+        let locale = try await locale(for: language)
+        let transcriber = makeTranscriber(locale)
+        try await installAssets(for: transcriber, language: language)
         Console.status(tr("Recognizing with Apple SpeechTranscriber…", ja: "Apple の SpeechTranscriber で認識しています…"))
         let file = try AVAudioFile(forReading: audio)
         let analyzer = SpeechAnalyzer(modules: [transcriber])

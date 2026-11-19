@@ -20,6 +20,7 @@ model = "qwen3:30b"
 
 ```bash
 cappy doctor --profile on-device
+cappy doctor --profile on-device --download-models   # モデルを今ダウンロードしておく（省略時は最初の文字起こしのとき）
 cappy record --profile on-device --app us.zoom.xos --name weekly --transcribe --summarize
 ```
 
@@ -35,6 +36,7 @@ cappy record --profile on-device --app us.zoom.xos --name weekly --transcribe --
 - 自分（マイク）と相手（会議アプリ）は別トラックで録音しているので、話者分離がなくても「自分」と「相手」は区別できます。
 - `diarization = true`（既定）なら、相手側のトラックを [SpeakerKit](https://github.com/argmaxinc/argmax-oss-swift)（pyannote の Core ML 版）で話者分離し、「相手 1」「相手 2」に分けます。`apple` を選んでも使えます。認識の区間に、時刻の重なりが最も長い話者を割り当てます。
 - `custom_vocabulary` は WhisperKit ではプロンプトとして渡します（先頭の 50 語まで）。Apple では使いません。
+- モデルは最初の文字起こしのときにダウンロードします。`cappy doctor --download-models` で先に済ませておけます（WhisperKit は Core ML のモデルの準備まで一度読み込んで済ませるので、数分かかることがあります）。
 - `cappy transcribe --provider local --model apple <dir>` のように、その場で切り替えることもできます。
 - 認識の速さは Mac とモデルによります。Apple シリコンで、Neural Engine を使います。
 - `record --live`（録音しながらの文字起こし）は、`provider = "local"` ではまだ使えません。

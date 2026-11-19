@@ -15,12 +15,24 @@ public struct WhisperKitRecognizer: LocalRecognizer {
         self.modelDirectory = modelDirectory
     }
 
-    public func recognize(_ audio: URL, language: String, vocabulary: [String]) async throws -> [RecognizedPiece] {
+    /// モデルをダウンロードして読み込む（なければダウンロードする）
+    func loadPipeline() async throws -> WhisperKit {
         try FileSecurity.createPrivateDirectory(modelDirectory)
         Console.status(tr("Loading the WhisperKit model (downloaded the first time)…", ja: "WhisperKit のモデルを読み込んでいます（初回はダウンロードします）…"))
         let config = WhisperKitConfig(model: whisperModel, downloadBase: modelDirectory,
                                       verbose: false, prewarm: false, load: true, download: true)
-        let pipe = try await WhisperKit(config)
+        return try await WhisperKit(config)
+    }
+
+    /// 文字起こしの前にモデルを用意する（cappy doctor --download-models）。使うモデルのディレクトリ名を返す
+    public func prepare() async throws -> String {
+        let pipe = try await loadPipeline()
+        Console.clearStatus()
+        return pipe.modelFolder?.lastPathComponent ?? whisperModel ?? "whisper"
+    }
+
+    public func recognize(_ audio: URL, language: String, vocabulary: [String]) async throws -> [RecognizedPiece] {
+        let pipe = try await loadPipeline()
         var options = DecodingOptions(
             task: .transcribe,
             language: Self.whisperLanguage(language),
@@ -62,11 +74,23 @@ public struct SpeakerKitDiarizerEngine: LocalDiarizer {
 
     public init(modelDirectory: URL) { self.modelDirectory = modelDirectory }
 
-    public func diarize(_ audio: URL, numSpeakers: Int?) async throws -> [SpeakerTurn] {
+    /// モデルをダウンロードして読み込む（なければダウンロードする）
+    func loadKit() async throws -> SpeakerKit {
         try FileSecurity.createPrivateDirectory(modelDirectory)
+        let config = PyannoteConfig(downloadBase: modelDirectory.path, download: true, load: true, verbose: false)
+        return try await SpeakerKit(config)
+    }
+
+    /// 話者分離の前にモデルを用意する（cappy doctor --download-models）
+    public func prepare() async throws {
+        Console.status(tr("Loading the SpeakerKit model (downloaded the first time)…", ja: "SpeakerKit のモデルを読み込んでいます（初回はダウンロードします）…"))
+        _ = try await loadKit()
+        Console.clearStatus()
+    }
+
+    public func diarize(_ audio: URL, numSpeakers: Int?) async throws -> [SpeakerTurn] {
         let samples = try AudioProcessor.loadAudioAsFloatArray(fromPath: audio.path)
-        let config = PyannoteConfig(downloadBase: modelDirectory.path, download: true, verbose: false)
-        let kit = try await SpeakerKit(config)
+        let kit = try await loadKit()
         let result = try await kit.diarize(audioArray: samples, options: PyannoteDiarizationOptions(numberOfSpeakers: numSpeakers))
         return result.segments.compactMap { s in
             guard let id = s.speaker.speakerId else { return nil }

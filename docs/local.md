@@ -20,6 +20,7 @@ model = "qwen3:30b"
 
 ```bash
 cappy doctor --profile on-device
+cappy doctor --profile on-device --download-models   # download the models now (otherwise on the first transcription)
 cappy record --profile on-device --app us.zoom.xos --name weekly --transcribe --summarize
 ```
 
@@ -35,6 +36,7 @@ cappy record --profile on-device --app us.zoom.xos --name weekly --transcribe --
 - You (microphone) and the remote side (meeting app) are recorded as separate tracks, so "Me" and "Remote" are told apart even without diarization.
 - With `diarization = true` (default), the remote track is diarized with [SpeakerKit](https://github.com/argmaxinc/argmax-oss-swift) (pyannote on Core ML) into "Remote 1", "Remote 2", ... This also works with `apple`. Each recognized segment gets the speaker it overlaps the longest.
 - `custom_vocabulary` is passed to WhisperKit as a prompt (the first 50 entries). It is not used with Apple.
+- The models are downloaded on the first transcription. `cappy doctor --download-models` does it in advance (WhisperKit is also loaded once to prepare the Core ML models, which can take a few minutes).
 - You can switch on the spot, e.g. `cappy transcribe --provider local --model apple <dir>`.
 - The speed depends on the Mac and the model. It runs on Apple silicon and uses the Neural Engine.
 - `record --live` (transcription while recording) is not available yet with `provider = "local"`.

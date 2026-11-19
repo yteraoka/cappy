@@ -9,6 +9,7 @@ cappy tui                          # choose the settings and the app on a full s
 cappy apps                         # list audio processes (PID, bundle ID, whether playing)
 cappy devices                      # list input devices (UID, name, sample rate)
 cappy doctor                       # check permissions, authentication, settings and buckets
+cappy doctor --download-models     # download the models for provider = local in advance (see local.md)
 
 # Record Zoom (stop with Ctrl-C)
 cappy record --app us.zoom.xos --name weekly-sync
