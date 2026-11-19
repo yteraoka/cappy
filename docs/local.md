@@ -4,6 +4,44 @@ English | [日本語](./local.ja.md)
 
 With `provider = "local"`, transcription, speaker diarization, speaker naming and the summary all run on this Mac, and the recordings are not sent anywhere (except for downloading the models).
 
+## Setup
+
+Transcription and speaker diarization run in cappy itself, but the summary and speaker naming need a local LLM server. These steps use [Ollama](https://ollama.com) (for LM Studio and others, see "[Summary and speaker naming](#summary-and-speaker-naming)").
+
+1. Install Ollama.
+
+   ```bash
+   brew install ollama          # or download the app from https://ollama.com
+   ```
+
+2. Start Ollama with a wider context. Summarizing an hour-long meeting needs 32K tokens or more (with the default, long transcripts are silently cut off).
+
+   ```bash
+   # When running it in a terminal (keep it running)
+   OLLAMA_CONTEXT_LENGTH=32768 ollama serve
+
+   # When using the Ollama app (set this, then restart the app)
+   launchctl setenv OLLAMA_CONTEXT_LENGTH 32768
+   ```
+
+3. Pull the model for the summary. A 30B-class model is over 10 GB and needs about 32 GB of memory or more. On a 16 GB Mac, choose a 7-8B model.
+
+   ```bash
+   ollama pull qwen3:30b
+   ollama list                  # check the name of the model
+   ```
+
+4. Add the profile to `~/.config/cappy/config.toml` (or run `cappy init --profile on-device` and choose "This Mac"). Write the name shown by `ollama list` in `summary.model` as is.
+
+5. Check, and download the transcription and diarization models in advance (otherwise they are downloaded on the first transcription).
+
+   ```bash
+   cappy doctor --profile on-device                     # also checks the server and the model
+   cappy doctor --profile on-device --download-models
+   ```
+
+## Settings and usage
+
 ```toml
 [profiles.on-device.transcribe]
 provider = "local"
@@ -19,8 +57,6 @@ model = "qwen3:30b"
 ```
 
 ```bash
-cappy doctor --profile on-device
-cappy doctor --profile on-device --download-models   # download the models now (otherwise on the first transcription)
 cappy record --profile on-device --app us.zoom.xos --name weekly --transcribe --summarize
 ```
 

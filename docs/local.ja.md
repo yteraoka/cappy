@@ -4,6 +4,44 @@
 
 `provider = "local"` にすると、文字起こし・話者分離・話者の名前の推定・要約をすべてこの Mac で行い、録音を外部に送りません（モデルのダウンロードを除く）。
 
+## セットアップ
+
+文字起こしと話者分離は cappy だけで動きますが、要約と話者の名前の推定には手元の LLM サーバーが必要です。ここでは [Ollama](https://ollama.com) を使う手順を示します（LM Studio などを使う場合は「[要約・話者の名前の推定](#要約話者の名前の推定)」を参照）。
+
+1. Ollama をインストールします。
+
+   ```bash
+   brew install ollama          # または https://ollama.com からアプリをダウンロード
+   ```
+
+2. 文脈長を広げて Ollama を起動します。1 時間の会議を要約するには 32K トークン以上が必要です（既定のままだと長い文字起こしが黙って切り捨てられます）。
+
+   ```bash
+   # ターミナルで起動する場合（起動したままにしておく）
+   OLLAMA_CONTEXT_LENGTH=32768 ollama serve
+
+   # Ollama のアプリを使う場合（設定してからアプリを起動し直す）
+   launchctl setenv OLLAMA_CONTEXT_LENGTH 32768
+   ```
+
+3. 要約に使うモデルを取得します。30B 級のモデルは十数 GB あり、32 GB 以上のメモリが目安です。16 GB の Mac では 7〜8B 級のモデルを選んでください。
+
+   ```bash
+   ollama pull qwen3:30b
+   ollama list                  # 取得したモデルの名前を確かめる
+   ```
+
+4. `~/.config/cappy/config.toml` にプロファイルを追加します（`cappy init --profile on-device` で「この Mac」を選んでも作れます）。`summary.model` には `ollama list` に出た名前をそのまま書きます。
+
+5. 確認し、文字起こしと話者分離のモデルを先にダウンロードしておきます（省略すると最初の文字起こしのときにダウンロードします）。
+
+   ```bash
+   cappy doctor --profile on-device                     # サーバーとモデルがあるかも確かめる
+   cappy doctor --profile on-device --download-models
+   ```
+
+## 設定と使い方
+
 ```toml
 [profiles.on-device.transcribe]
 provider = "local"
@@ -19,8 +57,6 @@ model = "qwen3:30b"
 ```
 
 ```bash
-cappy doctor --profile on-device
-cappy doctor --profile on-device --download-models   # モデルを今ダウンロードしておく（省略時は最初の文字起こしのとき）
 cappy record --profile on-device --app us.zoom.xos --name weekly --transcribe --summarize
 ```
 
