@@ -65,6 +65,14 @@ enum TranscribeRunner {
         let transcriber = Transcriber(store: store, provider: provider, options: opts)
         let urls = try await transcriber.run()
         Console.clearStatus()
+        // 自分の名前（speakers.me）はモデルを使わずに反映できる
+        if let me = profile.speakers.me {
+            do {
+                try SpeakerNamer.apply(store, me: me)
+            } catch {
+                CappyLog.shared.warning(tr("Could not apply speakers.me: \(error)", ja: "speakers.me を反映できませんでした: \(error)"))
+            }
+        }
         Console.print(tr("Transcription finished:", ja: "文字起こしが完了しました:"))
         for u in urls { Console.print("  \(u.path)") }
     }
@@ -95,17 +103,22 @@ enum SummarizeRunner {
         }
         let s = profile.summary
         let model = request.model ?? s.model
-        guard let family = SummaryModelFamily.of(model) else {
-            throw CappyError.usage(tr("Invalid --model: \(model) (a model ID starting with claude- or gemini-, or on Bedrock an ID such as moonshotai.kimi-k3.1)", ja: "--model が不正です: \(model)（claude- または gemini- で始まるモデル ID、Bedrock なら moonshotai.kimi-k3.1 のような ID）"))
-        }
-        if profile.summaryProvider == "aws" && family == .gemini {
-            throw CappyError.usage(tr("Invalid --model: \(model) (Gemini models are not available on Bedrock)", ja: "--model が不正です: \(model)（Bedrock では Claude のモデルだけを使えます）"))
-        }
-        if profile.summaryProvider == "google" && (model.contains("anthropic.") || family == .bedrockChat) {
-            throw CappyError.usage(tr("Invalid --model: \(model) (Bedrock model IDs can be used only with summary.provider = \"aws\")", ja: "--model が不正です: \(model)（Bedrock のモデル ID は summary.provider = \"aws\" のときだけ使えます）"))
-        }
+        try validateModel(model, profile: profile)
         let template = try SummaryTemplate.load(request.prompt ?? profile.summary.prompt)
         let client = try SummaryClientFactory.make(profile: profile)
+        // 要約の前に話者の名前を推定して transcript に反映する（失敗しても要約は続ける）。
+        // 文字起こしがない・空のときは、要約の側でそのエラーを出す
+        if profile.speakers.auto, let source = try? SpeakerNamer.load(store), !source.doc.segments.isEmpty {
+            do {
+                try await SpeakersRunner.infer(store: store, profile: profile, client: client, request: .init(quiet: true))
+            } catch {
+                Console.clearStatus()
+                // 中断（cappy tui の Ctrl-C など）は要約に進まない
+                if Task.isCancelled || error is CancellationError { throw error }
+                let message = (error as? CappyError)?.message ?? "\(error)"
+                Console.print(tr("Could not name the speakers (continuing with the summary): \(message)", ja: "話者の名前を推定できませんでした（要約は続けます）: \(message)"))
+            }
+        }
         let options = Summarizer.Options(
             model: model,
             fallbackModel: s.effectiveFallback(for: model),
@@ -127,6 +140,110 @@ enum SummarizeRunner {
         case .upToDate(let url):
             Console.print(tr("A summary of the same transcript already exists (use --force to regenerate):", ja: "同じ文字起こしから作った要約があります（作り直すには --force）:"))
             Console.print("  \(url.path)")
+        }
+    }
+}
+
+extension SummarizeRunner {
+    /// 要約・話者の名前の推定に使うモデルが、要約のクラウドで使えるかを確かめる
+    static func validateModel(_ model: String, profile: Profile) throws {
+        guard let family = SummaryModelFamily.of(model) else {
+            throw CappyError.usage(tr("Invalid --model: \(model) (a model ID starting with claude- or gemini-, or on Bedrock an ID such as moonshotai.kimi-k3.1)", ja: "--model が不正です: \(model)（claude- または gemini- で始まるモデル ID、Bedrock なら moonshotai.kimi-k3.1 のような ID）"))
+        }
+        if profile.summaryProvider == "aws" && family == .gemini {
+            throw CappyError.usage(tr("Invalid --model: \(model) (Gemini models are not available on Bedrock)", ja: "--model が不正です: \(model)（Bedrock では Claude のモデルだけを使えます）"))
+        }
+        if profile.summaryProvider == "google" && (model.contains("anthropic.") || family == .bedrockChat) {
+            throw CappyError.usage(tr("Invalid --model: \(model) (Bedrock model IDs can be used only with summary.provider = \"aws\")", ja: "--model が不正です: \(model)（Bedrock のモデル ID は summary.provider = \"aws\" のときだけ使えます）"))
+        }
+    }
+}
+
+/// 話者の名前の推定（cappy speakers と、要約の前の自動実行）
+enum SpeakersRunner {
+    struct Request {
+        var force = false
+        var model: String?
+        var effort: String?
+        /// 要約の前の自動実行（推定済みなら何も表示しない）
+        var quiet = false
+    }
+
+    /// 推定して transcript に反映し、結果を表示する
+    static func infer(store: SessionStore, profile: Profile, client: SummaryModelClient? = nil, request: Request) async throws {
+        if profile.summaryProvider == "none" {
+            throw CappyError.usage(tr("The summary provider of profile \(profile.name) is none, so there is no model to name the speakers with", ja: "プロファイル \(profile.name) の要約プロバイダが none のため、話者の名前を推定するモデルがありません"),
+                                   hint: tr("Set provider in [profiles.\(profile.name).summary], or give the names with `cappy speakers --set`", ja: "[profiles.\(profile.name).summary] の provider を設定するか、`cappy speakers --set` で名前を指定してください"))
+        }
+        if let e = request.effort, !SummarySettings.knownEfforts.contains(e) {
+            throw CappyError.usage(tr("Invalid --effort: \(e) (low / medium / high / xhigh / max)", ja: "--effort が不正です: \(e)（low / medium / high / xhigh / max）"))
+        }
+        let model = request.model ?? profile.speakers.model ?? profile.summary.model
+        try SummarizeRunner.validateModel(model, profile: profile)
+        let options = SpeakerNamer.Options(
+            model: model,
+            fallbackModel: profile.summary.effectiveFallback(for: model),
+            effort: request.effort ?? profile.speakers.effort,
+            maxTokens: profile.summary.maxTokens,
+            me: profile.speakers.me,
+            force: request.force)
+        let modelClient = try client ?? SummaryClientFactory.make(profile: profile)
+        Console.status(tr("Naming the speakers (\(model))…", ja: "話者の名前を推定しています（\(model)）…"))
+        let outcome = try await SpeakerNamer(store: store, client: modelClient, options: options).infer()
+        Console.clearStatus()
+        switch outcome {
+        case .nothingToName:
+            if !request.quiet {
+                Console.print(tr("No speakers to name (the transcription has no speaker labels)", ja: "名前を推定できる話者がいません（文字起こしに話者の区別がありません）"))
+            }
+            return
+        case .upToDate:
+            try SpeakerNamer.apply(store, me: profile.speakers.me)
+            if request.quiet { return }
+            Console.print(tr("Speakers were already named from the same transcript (use --force to infer again):", ja: "同じ文字起こしから推定済みです（推定し直すには --force）:"))
+        case .inferred:
+            try SpeakerNamer.apply(store, me: profile.speakers.me)
+            Console.print(tr("Named the speakers:", ja: "話者の名前を推定しました:"))
+        }
+        try printNames(store: store, profile: profile)
+    }
+
+    /// 話者ごとの名前と、その出どころを表示する
+    static func printNames(store: SessionStore, profile: Profile) throws {
+        let source = try SpeakerNamer.load(store)
+        let L = UILanguage.forDocument(source.doc.language)
+        let naming = SpeakerNaming(segments: source.doc.segments, language: L)
+        let speakers = naming.speakers(in: source.doc.segments)
+        // 文字起こしをやり直す前の推定・指定は表示しない（apply と同じく、発言が同じときだけ使う）
+        let digest = SpeakerNamer.segmentsDigest(source.doc.segments)
+        let state = store.metadata.speakers.flatMap { $0.segmentsDigest == digest ? $0 : nil }
+        let names = source.doc.speakerNames ?? [:]
+        let width = speakers.map { $0.label.count }.max() ?? 0
+        for sp in speakers {
+            let pad = String(repeating: " ", count: max(0, width - sp.label.count))
+            let guess = state?.guesses.first { $0.key == sp.key }
+            var line = "  \(sp.label)\(pad)  → "
+            if let name = names[sp.key] {
+                line += name
+                if state?.manual[sp.key] != nil {
+                    line += tr("  (set by you)", ja: "  （指定）")
+                } else if sp.key == TrackID.mic.rawValue, profile.speakers.me != nil {
+                    line += tr("  (speakers.me)", ja: "  （speakers.me）")
+                } else if let g = guess {
+                    line += "  (\(g.confidence ?? "-")\(g.evidence.map { ": " + $0 } ?? ""))"
+                }
+            } else {
+                line += tr("(unknown)", ja: "（不明）")
+                if state?.manual[sp.key] != nil {
+                    line += tr("  (cleared by you)", ja: "  （名前なしに指定）")
+                } else if let g = guess, let n = g.name {
+                    line += tr("  (not used, low confidence: \(n)\(g.evidence.map { "; " + $0 } ?? ""))",
+                               ja: "  （確度が低いため不採用: \(n)\(g.evidence.map { "。" + $0 } ?? "")）")
+                } else if let e = guess?.evidence {
+                    line += "  (\(e))"
+                }
+            }
+            Console.print(line)
         }
     }
 }

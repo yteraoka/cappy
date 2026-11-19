@@ -28,6 +28,10 @@ cappy record --app us.zoom.xos --name weekly-sync --live
 # Summarize a transcribed session
 cappy summarize ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
+# Work out the speakers' names from what was said and write them into the transcript (also runs automatically before summarizing)
+cappy speakers ~/Recordings/cappy/2026-11-11T1000_weekly-sync
+cappy speakers ~/Recordings/cappy/2026-11-11T1000_weekly-sync --set "Remote 2=Suzuki"
+
 # Mute / unmute the mic of a running recording (from another terminal or a hotkey)
 cappy mic off
 cappy mic on
@@ -162,6 +166,36 @@ The structure of the output (headings and how to write them) can be replaced wit
 - The extra instructions in `summary.instructions_file` can be used together with a template (they are added at the end of the prompt).
 - Check the whole prompt that is sent with `cappy summarize --print-system-prompt [--prompt <name>] [<dir>]`.
 - When the template or the extra instructions change, the summary is regenerated without `--force` (compared with `summary.prompt_digest` in `session.json`). The template used is recorded at the top of `summary.md` and in `summary.prompt` in `session.json`.
+
+## speakers
+
+Sends `transcript.json` to a model on the summary cloud and works out who each speaker label (Me, Remote 1, ...) is, from self-introductions, answers right after being addressed by name, mentions in the third person, and so on. The names are written into `transcript.md` / `.srt` / `.json` as "Tanaka (Remote 1)", and are used by the summary.
+
+```text
+$ cappy speakers ~/Recordings/cappy/2026-11-11T1000_weekly-sync
+Named the speakers:
+  Me        → Teraoka  (speakers.me)
+  Remote 1  → Tanaka  (high: Answers right after being asked "Tanaka, what do you think?" at 00:03:12)
+  Remote 2  → (unknown)  (Never introduces themselves and is not addressed by name)
+```
+
+| Option | Description |
+| --- | --- |
+| `--set "<label>=<name>"` | Give a name (repeatable). The label can be "Remote 1", "相手 1", or the current name ("Tanaka=Taro Tanaka"). An empty name (`"Remote 1="`) leaves the label without a name. Given names take priority over inferred ones, and no model is called |
+| `--unset "<label>"` | Drop the name given with `--set` and go back to the inferred one |
+| `--clear` | Remove all names, inferred and given (including your own name from `speakers.me`; and do not infer again automatically before summarizing) |
+| `--list` | Show the current names and their evidence without changing anything |
+| `--force` | Infer again even if already inferred from the same transcript |
+| `--model <id>` | Default: `speakers.model` of the profile, or `summary.model` |
+| `--effort low\|medium\|high\|xhigh\|max` | Thinking effort. Default: `speakers.effort` of the profile (`low`) |
+
+- By default the names are also inferred before summarizing (`cappy summarize`, `--summarize`, and summaries in `cappy tui`). Turn this off with `speakers.auto = false`. If the inference fails, the summary still goes ahead. If the names were already inferred from the same transcript, no model is called.
+- Low-confidence guesses are not used (`--list` also shows the guesses that were not used). When a label seems to include several people (such as "Remote" without diarization) or the evidence is weak, no name is given.
+- Your own name can be set with `speakers.me` in the profile. It takes priority over the inference and is also a clue for it. It is applied right after transcription too, without calling a model.
+- Speaker diarization can swap speakers partway or split one person into two labels. Names are given per label, so these errors cannot be fixed this way.
+- Transcribing again can change the speaker labels, so earlier guesses and names given with `--set` are not used, and the names are inferred again.
+- Changing the names changes `transcript.json`, so the next `cappy summarize` regenerates the summary without `--force`.
+- The guesses (name, confidence, evidence) and the names given with `--set` are recorded in `speakers` in `session.json`. A transcript of the two tracks mixed together, without diarization, has no speakers to name.
 
 ## Exit codes
 

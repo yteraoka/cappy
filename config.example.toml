@@ -7,6 +7,7 @@
 #   [profiles.<name>.google] / .aws    cloud accounts shared by transcription and summary
 #   [profiles.<name>.transcribe]       transcription: provider (which cloud) and model (what to use)
 #   [profiles.<name>.summary]          meeting summary: provider (which cloud) and model (what to use)
+#   [profiles.<name>.speakers]         naming the speakers from what was said (uses a model on the summary cloud)
 #   [profiles.<name>.screenshot]       which window the screenshots while recording (s key / cappy shot) capture
 
 [profiles.default]
@@ -49,6 +50,13 @@ effort = "high"              # low / medium / high / xhigh / max (deeper is more
 auto = false                 # if true, summarize automatically after transcribe (suppress with --no-summarize)
 # instructions_file = "~/.config/cappy/summary-instructions.md"  # extra instructions on how to write the summary
 # prompt = "minutes"         # template for the structure (~/.config/cappy/prompts/minutes.md, or a path to a .md file; default: the built-in default)
+
+# Work out the speakers' names (Me, Remote 1, ...) from what was said, and write them into the transcript as "Tanaka (Remote 1)" (cappy speakers)
+# [profiles.default.speakers]
+# auto = true                # infer automatically before summarizing (uses a model on the summary cloud; if false, only when you run cappy speakers)
+# me = "Teraoka"             # your own (microphone) name; also a clue for the inference
+# model = "gemini-4-argon"   # model to infer with (default: summary.model)
+# effort = "low"             # low / medium / high / xhigh / max
 
 # Screenshots while recording (s key / cappy shot)
 # [profiles.default.screenshot]

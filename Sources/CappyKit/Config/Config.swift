@@ -86,6 +86,20 @@ public struct SummarySettings: Sendable, Equatable {
     public static let knownEfforts: Set<String> = ["low", "medium", "high", "xhigh", "max"]
 }
 
+/// 話者の名前の推定（[profiles.<name>.speakers]）。モデルの呼び出しは要約と同じクラウドを使う
+public struct SpeakerSettings: Sendable, Equatable {
+    /// true なら要約の前に、発言内容から話者の名前を推定して transcript に反映する
+    public var auto: Bool = true
+    /// 録音する本人（マイク＝「自分」）の名前。推定の手がかりにも使う
+    public var me: String?
+    /// 推定に使うモデル（nil なら summary.model）
+    public var model: String?
+    /// low / medium / high / xhigh / max
+    public var effort: String = "low"
+
+    public init() {}
+}
+
 /// AWS の共通設定（[profiles.<name>.aws]）。認証情報そのものは書かず、~/.aws/config のプロファイルを使う
 public struct AWSSettings: Sendable, Equatable {
     /// ~/.aws/config のプロファイル名。nil なら AWS_PROFILE → AWS_DEFAULT_PROFILE → default
@@ -159,6 +173,7 @@ public struct Profile: Sendable, Equatable {
     public var google = GoogleSettings()
     public var gemini = GeminiSettings()
     public var summary = SummarySettings()
+    public var speakers = SpeakerSettings()
     /// [profiles.<name>.aws] があるときだけ設定される
     public var aws: AWSSettings?
     /// Amazon Transcribe（provider = aws）
@@ -372,6 +387,27 @@ public struct CappyConfig: Sendable {
             warnUnknownKeys(m, ["provider", "project_id", "region", "model", "fallback_model", "effort",
                                 "max_tokens", "auto", "instructions_file", "prompt"], sctx)
         }
+        if let sp = t["speakers"]?.table {
+            let spctx = ctx + ".speakers"
+            if let v = try bool("auto", sp, spctx) { p.speakers.auto = v }
+            if let v = try str("me", sp, spctx) {
+                let name = v.trimmingCharacters(in: .whitespacesAndNewlines)
+                p.speakers.me = name.isEmpty ? nil : name
+            }
+            if let v = try str("model", sp, spctx), !v.isEmpty {
+                guard SummaryModelFamily.of(v) != nil else {
+                    throw CappyError.usage(tr("Invalid \(spctx).model: \(v) (a model ID starting with claude- or gemini-, or on Bedrock an ID such as moonshotai.kimi-k3.1)", ja: "\(spctx).model が不正です: \(v)（claude- または gemini- で始まるモデル ID、Bedrock なら moonshotai.kimi-k3.1 のような ID）"))
+                }
+                p.speakers.model = v
+            }
+            if let v = try str("effort", sp, spctx) {
+                guard SummarySettings.knownEfforts.contains(v) else {
+                    throw CappyError.usage(tr("Invalid \(spctx).effort: \(v) (low / medium / high / xhigh / max)", ja: "\(spctx).effort が不正です: \(v)（low / medium / high / xhigh / max）"))
+                }
+                p.speakers.effort = v
+            }
+            warnUnknownKeys(sp, ["auto", "me", "model", "effort"], spctx)
+        }
         if let a = t["aws"]?.table {
             let actx = ctx + ".aws"
             p.aws = AWSSettings(profile: try str("profile", a, actx), region: try str("region", a, actx),
@@ -394,7 +430,7 @@ public struct CappyConfig: Sendable {
             }
             warnUnknownKeys(st, ["window_titles"], shctx)
         }
-        warnUnknownKeys(t, ["language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "aws", "transcribe", "summary", "screenshot"], ctx)
+        warnUnknownKeys(t, ["language", "output_dir", "disk_warn_mb", "disk_stop_mb", "google", "aws", "transcribe", "summary", "speakers", "screenshot"], ctx)
         return p
     }
 

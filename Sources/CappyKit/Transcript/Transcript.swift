@@ -14,6 +14,8 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
     public var generatedAt: String
     public var toolVersion: String
     public var segments: [Segment]
+    /// 話者のキー（SpeakerNaming.key）→ 名前。cappy speakers で付ける
+    public var speakerNames: [String: String]?
 
     public init(sessionID: String, name: String?, startedAt: String?, provider: String, model: String?,
                 language: String, mix: Bool, diarization: [String: Bool], segments: [Segment],
@@ -37,6 +39,7 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
         case startedAt = "started_at"
         case generatedAt = "generated_at"
         case toolVersion = "tool_version"
+        case speakerNames = "speaker_names"
     }
 }
 
@@ -74,12 +77,14 @@ public enum TranscriptMerger {
 }
 
 /// 表示用の話者名（mic は「自分」、remote は「相手」／話者分離があれば「相手 1」「相手 2」）。
-/// 英語では Me / Remote / Remote 1
+/// 英語では Me / Remote / Remote 1。名前が分かっていれば「田中（相手 1）」/「Tanaka (Remote 1)」
 public struct SpeakerNaming: Sendable {
     private var numbers: [TrackID: [String: Int]] = [:]
     public let language: UILanguage
+    /// 話者のキー → 名前（空の名前は除く）
+    public let names: [String: String]
 
-    public init(segments: [Segment], language: UILanguage) {
+    public init(segments: [Segment], language: UILanguage, names: [String: String]? = nil) {
         self.language = language
         for s in segments {
             guard let sp = s.speaker else { continue }
@@ -87,14 +92,40 @@ public struct SpeakerNaming: Sendable {
             if map[sp] == nil { map[sp] = map.count + 1 }
             numbers[s.track] = map
         }
+        self.names = (names ?? [:]).filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
-    public func label(for s: Segment) -> String {
+    /// 話者を識別するキー。mic / remote / mix（話者分離なし、または話者が 1 人）か、remote:<ラベル> / mix:<ラベル>
+    public func key(for s: Segment) -> String {
+        guard s.track != .mic, let sp = s.speaker, let map = numbers[s.track], map.count > 1 else {
+            return s.track.rawValue
+        }
+        return "\(s.track.rawValue):\(sp)"
+    }
+
+    /// 名前を付けない表示名（自分・相手・相手 1 など）
+    public func baseLabel(for s: Segment) -> String {
         let base = s.track.label(language)
         guard s.track != .mic, let sp = s.speaker, let map = numbers[s.track], map.count > 1, let n = map[sp] else {
             return base
         }
         return "\(base) \(n)"
+    }
+
+    public func label(for s: Segment) -> String {
+        let base = baseLabel(for: s)
+        guard let name = names[key(for: s)] else { return base }
+        return tr(language, "\(name) (\(base))", ja: "\(name)（\(base)）")
+    }
+
+    /// 登場順の話者（キーと、名前を付けない表示名）
+    public func speakers(in segments: [Segment]) -> [(key: String, label: String)] {
+        var out: [(key: String, label: String)] = []
+        for s in segments {
+            let k = key(for: s)
+            if !out.contains(where: { $0.key == k }) { out.append((key: k, label: baseLabel(for: s))) }
+        }
+        return out
     }
 }
 
@@ -108,7 +139,7 @@ public enum TranscriptRenderer {
     /// transcript.md。見出しや話者名は会議の言語（doc.language）で書く
     public static func markdown(_ doc: TranscriptDocument, timeZone: TimeZone = .current) -> String {
         let L = UILanguage.forDocument(doc.language)
-        let naming = SpeakerNaming(segments: doc.segments, language: L)
+        let naming = SpeakerNaming(segments: doc.segments, language: L, names: doc.speakerNames)
         var lines: [String] = []
         lines.append("# \(doc.name?.isEmpty == false ? doc.name! : doc.sessionID)")
         lines.append("")
@@ -134,7 +165,7 @@ public enum TranscriptRenderer {
     }
 
     public static func srt(_ doc: TranscriptDocument) -> String {
-        let naming = SpeakerNaming(segments: doc.segments, language: UILanguage.forDocument(doc.language))
+        let naming = SpeakerNaming(segments: doc.segments, language: UILanguage.forDocument(doc.language), names: doc.speakerNames)
         var out = ""
         for (i, s) in doc.segments.enumerated() {
             let end = max(s.endMs, s.startMs + 500)
