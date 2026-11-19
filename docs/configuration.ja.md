@@ -29,17 +29,17 @@ cappy init --profile aws    # 別のプロファイルを追加する
 | `[profiles.<name>]` | `language`（会議の言語）、`output_dir`、`disk_warn_mb`、`disk_stop_mb` |
 | `[profiles.<name>.google]` | 文字起こしと要約で共通の Google Cloud のアカウント: `project_id`、`bucket`、`delete_remote_after` |
 | `[profiles.<name>.aws]` | 文字起こしと要約で共通の AWS のアカウント: `profile`、`region`、`bucket`、`delete_remote_after` |
-| `[profiles.<name>.transcribe]` | 文字起こし: `provider`（`google` / `aws` / `none`）、`model`、`location`、`diarization` など |
-| `[profiles.<name>.summary]` | 会議の要約: `provider`（`google` / `aws` / `none`）、`model`、`region`、`auto`、`prompt`（要約のテンプレート。[使い方](./usage.ja.md#要約のテンプレート)）など |
+| `[profiles.<name>.transcribe]` | 文字起こし: `provider`（`google` / `aws` / `local` / `none`）、`model`、`location`、`diarization` など（`local` は[この Mac の中で完結させる](./local.ja.md)） |
+| `[profiles.<name>.summary]` | 会議の要約: `provider`（`google` / `aws` / `local` / `none`）、`model`、`region`、`auto`、`prompt`（要約のテンプレート。[使い方](./usage.ja.md#要約のテンプレート)）など |
 | `[profiles.<name>.speakers]` | 発言内容からの話者の名前の推定: `auto`（要約の前に自動で推定。既定 true）、`me`（自分の名前）、`model`、`effort`（[使い方](./usage.ja.md#speakers)） |
 | `[profiles.<name>.screenshot]` | 録音中のスクリーンショット: `window_titles`（会議のウインドウのタイトルのパターン。[使い方](./usage.ja.md#スクリーンショット)） |
 
 `provider` でクラウド（`[google]` か `[aws]` のアカウント）を、`model` で何を使うかを選びます。
 
-| | `provider = "google"` | `provider = "aws"` |
-| --- | --- | --- |
-| 文字起こし | `model = "gemini-*"`: Vertex AI の Gemini（既定 `gemini-3.5-transcribe`）<br>それ以外（`chirp_3` など）: Speech-to-Text v2 | Amazon Transcribe |
-| 要約 | Vertex AI の Claude / Gemini（既定 `gemini-4-argon`） | Amazon Bedrock の Claude など（既定 `claude-opus-5-5`） |
+| | `provider = "google"` | `provider = "aws"` | `provider = "local"`（[この Mac で](./local.ja.md)） |
+| --- | --- | --- | --- |
+| 文字起こし | `model = "gemini-*"`: Vertex AI の Gemini（既定 `gemini-3.5-transcribe`）<br>それ以外（`chirp_3` など）: Speech-to-Text v2 | Amazon Transcribe | `model = "whisperkit"`（既定）: WhisperKit<br>`model = "apple"`: Apple SpeechTranscriber（macOS 26 以降） |
+| 要約 | Vertex AI の Claude / Gemini（既定 `gemini-4-argon`） | Amazon Bedrock の Claude など（既定 `claude-opus-5-5`） | 手元の LLM サーバー（Ollama・LM Studio など。`model` は必須） |
 
 ```toml
 [profiles.default]

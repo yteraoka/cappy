@@ -182,7 +182,11 @@ public final class Transcriber: @unchecked Sendable {
                                             diarization: options.diarization && track.id != .mic,
                                             wordTimestamps: options.wordTimestamps,
                                             minSpeakers: options.minSpeakers, maxSpeakers: options.maxSpeakers)
-            Console.print(tr("Sending \(track.id.displayName) (\(track.id.rawValue))…", ja: "\(track.id.displayName)（\(track.id.rawValue)）を送信しています…"))
+            if provider is LocalTranscriptionProvider {
+                Console.print(tr("Recognizing \(track.id.displayName) (\(track.id.rawValue)) on this Mac…", ja: "\(track.id.displayName)（\(track.id.rawValue)）をこの Mac で認識しています…"))
+            } else {
+                Console.print(tr("Sending \(track.id.displayName) (\(track.id.rawValue))…", ja: "\(track.id.displayName)（\(track.id.rawValue)）を送信しています…"))
+            }
             let handle: JobHandle
             do {
                 handle = try await provider.submit(audio, options: opts)
@@ -384,6 +388,13 @@ public enum ProviderFactory {
             }
             return try AmazonTranscribeProvider(settings: profile.awsTranscribe, region: region, bucket: aws.bucket,
                                                 credentials: credentials, transport: transport)
+        case .whisperKit, .apple:
+            let settings = profile.local
+            let recognizer: LocalRecognizer = service == .apple
+                ? AppleSpeechRecognizer()
+                : WhisperKitRecognizer(whisperModel: settings.whisperModel, modelDirectory: settings.modelDirectoryURL)
+            let diarizer: LocalDiarizer? = settings.diarization ? SpeakerKitDiarizerEngine(modelDirectory: settings.modelDirectoryURL) : nil
+            return LocalTranscriptionProvider(recognizer: recognizer, diarizer: diarizer, settings: settings)
         case .none:
             throw CappyError.usage(tr("Provider is none, so no transcription (recording only)", ja: "プロバイダが none のため、文字起こしは行いません（録音のみ）"))
         }

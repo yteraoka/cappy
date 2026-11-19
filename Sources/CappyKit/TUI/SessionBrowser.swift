@@ -418,6 +418,7 @@ public struct SessionBrowser: Sendable {
             switch p.transcriptionService {
             case .amazon: service = "Amazon Transcribe"
             case .gemini: service = "Gemini" + (p.transcribeModel.map { ", \($0)" } ?? "")
+            case .whisperKit, .apple: service = p.transcriptionService.displayName + tr(", on this Mac", ja: "、この Mac で")
             default: service = "Speech-to-Text" + (p.transcribeModel.map { ", \($0)" } ?? "")
             }
             return "\(p.name)  (\(service), \(p.language))"
@@ -525,8 +526,14 @@ public struct SessionBrowser: Sendable {
         switch f.step {
         case .profile:
             return summaryProfiles.map { p in
-                let via = p.summaryProvider == "aws" ? "Bedrock" : "Vertex AI"
-                return "\(p.name)  (\(via), \(p.summary.model))"
+                let via: String
+                switch p.summaryProvider {
+                case "aws": via = "Bedrock"
+                case "local": via = tr("local LLM", ja: "手元の LLM")
+                default: via = "Vertex AI"
+                }
+                let model = p.summary.model.isEmpty ? tr("model not set", ja: "モデル未設定") : p.summary.model
+                return "\(p.name)  (\(via), \(model))"
             }
         case .model:
             guard let p = formProfile else { return [] }

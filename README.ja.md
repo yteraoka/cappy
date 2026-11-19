@@ -4,8 +4,8 @@
 
 会議アプリの音声（相手）とマイク音声（自分）を、仮想オーディオデバイスなしで別トラックとして録音し、文字起こしして、会議の要約まで作る macOS 用 CLI です。
 
-- 文字起こし: Vertex AI の Gemini（`gemini-3.5-transcribe`、既定）、Google Speech-to-Text v2（chirp_3）、Amazon Transcribe
-- 要約: Vertex AI の Claude / Gemini、Amazon Bedrock のモデル（Claude、Kimi K3.1、GLM-5.3 など）
+- 文字起こし: Vertex AI の Gemini（`gemini-3.5-transcribe`、既定）、Google Speech-to-Text v2（chirp_3）、Amazon Transcribe、またはこの Mac の WhisperKit / Apple SpeechTranscriber（話者分離は SpeakerKit）
+- 要約: Vertex AI の Claude / Gemini、Amazon Bedrock のモデル（Claude、Kimi K3.1、GLM-5.3 など）、または手元の LLM サーバー（Ollama・LM Studio など）
 - 録音しながらのリアルタイム文字起こし: Vertex AI の Live API（`gemini-3.5-transcribe-live`）、Amazon Transcribe Streaming
 
 仕組み:
@@ -56,6 +56,7 @@ cappy tui
 | [インストール](./docs/installation.ja.md) | Homebrew、ソースからのビルド、シェルの補完、権限 |
 | [設定](./docs/configuration.ja.md) | `cappy init`、設定ファイルとプロファイル、表示言語 |
 | [Google Cloud の準備](./docs/google-cloud.ja.md) | Vertex AI / Speech-to-Text での文字起こし、Claude / Gemini での要約 |
+| [この Mac の中で完結させる](./docs/local.ja.md) | WhisperKit / Apple SpeechTranscriber での文字起こし、SpeakerKit での話者分離、手元の LLM（Ollama・LM Studio など）での要約 |
 | [AWS の準備](./docs/aws.ja.md) | Amazon Transcribe、Amazon Bedrock での要約、AWS の認証 |
 | [使い方](./docs/usage.ja.md) | コマンド一覧、`record` / `transcribe` / `summarize` / `speakers` のオプション、マイクのミュート、スクリーンショット、リアルタイム文字起こし、終了コード |
 | [cappy tui](./docs/tui.ja.md) | 全画面 UI、過去の録音、終了と中断 |

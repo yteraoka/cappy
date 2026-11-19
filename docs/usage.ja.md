@@ -9,6 +9,7 @@ cappy tui                          # 全画面で設定とアプリを選んで�
 cappy apps                         # 音声プロセスの一覧（PID・bundle ID・出力中か）
 cappy devices                      # 入力デバイスの一覧（UID・名前・サンプルレート）
 cappy doctor                       # 権限・認証・設定・バケットの診断
+cappy doctor --download-models     # provider = local のモデルを先にダウンロードする（local.ja.md を参照）
 
 # Zoom を録音（Ctrl-C で停止）
 cappy record --app us.zoom.xos --name weekly-sync

@@ -10,6 +10,9 @@ struct Doctor: AsyncParsableCommand {
     @Flag(name: .customLong("request-permissions"), help: ArgumentHelp(tr("Show permission prompts for permissions that have not been decided yet", ja: "未確認の権限について許可ダイアログを出す")))
     var requestPermissions = false
 
+    @Flag(name: .customLong("download-models"), help: ArgumentHelp(tr("With transcribe.provider = local, download (and load once) the speech recognition and speaker diarization models now instead of on the first transcription", ja: "transcribe.provider = local のとき、音声認識と話者分離のモデルを最初の文字起こしを待たずに今ダウンロードする（一度読み込んで確かめる）")))
+    var downloadModels = false
+
     @OptionGroup var common: CommonOptions
 
     enum Level { case ok, warn, fail }
@@ -116,7 +119,11 @@ struct Doctor: AsyncParsableCommand {
         case .gemini: await checkGemini(profile, add)
         case .speech: await checkGoogle(profile, add)
         case .amazon: await checkTranscribe(profile, add)
+        case .whisperKit, .apple: await checkLocalTranscription(profile, add)
         case .none: add(.ok, tr("Transcription", ja: "文字起こし"), tr("provider = none (recording only)", ja: "provider = none（録音のみ）"))
+        }
+        if downloadModels && !profile.transcriptionService.isLocal {
+            add(.warn, tr("Local models", ja: "端末内のモデル"), tr("--download-models has nothing to download because transcribe.provider of profile \(profile.name) is not local", ja: "プロファイル \(profile.name) の transcribe.provider が local ではないため、--download-models でダウンロードするモデルはありません"))
         }
         await checkSummary(profile, add)
         finish(checks)
@@ -163,8 +170,110 @@ struct Doctor: AsyncParsableCommand {
         }
     }
 
+    /// provider = local の文字起こし（WhisperKit / Apple SpeechTranscriber と SpeakerKit）
+    func checkLocalTranscription(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let l = profile.local
+        let title = tr("Transcription (on this Mac)", ja: "文字起こし（この Mac で）")
+        let dir = l.modelDirectoryURL
+        let diar = l.diarization ? tr(", speaker diarization: SpeakerKit", ja: "、話者分離: SpeakerKit") : ""
+        switch profile.transcriptionService {
+        case .apple:
+            guard AppleSpeechRecognizer.isSupported else {
+                add(.fail, title, tr("Apple SpeechTranscriber needs macOS 26 or later (use transcribe.model = \"whisperkit\")", ja: "Apple の SpeechTranscriber は macOS 26 以降で使えます（transcribe.model = \"whisperkit\" を使ってください）"), .usage)
+                return
+            }
+            if let st = await AppleSpeechRecognizer.localeStatus(profile.language) {
+                add(.ok, title, tr("Apple SpeechTranscriber, \(profile.language)", ja: "Apple の SpeechTranscriber、\(profile.language)")
+                    + (st.installed ? "" : tr(" (the speech model is downloaded the first time)", ja: "（音声モデルは初回にダウンロードします）")) + diar, .usage)
+            } else {
+                add(.fail, title, tr("Apple SpeechTranscriber does not support \(profile.language) on this Mac (use transcribe.model = \"whisperkit\")", ja: "この Mac の Apple の SpeechTranscriber は \(profile.language) に対応していません（transcribe.model = \"whisperkit\" を使ってください）"), .usage)
+                return
+            }
+        default:
+            add(.ok, title, "WhisperKit model=\(l.whisperModel ?? tr("recommended for this Mac", ja: "この Mac の推奨")) " + diar, .usage)
+        }
+        if downloadModels {
+            await downloadLocalModels(profile, add)
+            return
+        }
+        let size = (try? FileManager.default.subpathsOfDirectory(atPath: dir.path))?.count ?? 0
+        if size == 0 && (profile.transcriptionService == .whisperKit || l.diarization) {
+            add(.warn, tr("Local models", ja: "端末内のモデル"), tr("\(dir.path) is empty. The models (about 1-3 GB) are downloaded from Hugging Face the first time, or now with `cappy doctor --download-models`", ja: "\(dir.path) は空です。初回の文字起こしのとき、または `cappy doctor --download-models` で、モデル（約 1〜3 GB）を Hugging Face からダウンロードします"), .usage)
+        } else {
+            add(.ok, tr("Local models", ja: "端末内のモデル"), dir.path, .usage)
+        }
+    }
+
+    /// --download-models: 使うモデルをダウンロードして一度読み込む（Core ML のモデルの準備も済ませる）
+    func downloadLocalModels(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let l = profile.local
+        let dir = l.modelDirectoryURL
+        let started = Date()
+        switch profile.transcriptionService {
+        case .apple:
+            let title = tr("Speech model (Apple)", ja: "音声モデル（Apple）")
+            do {
+                try await AppleSpeechRecognizer.prepare(language: profile.language)
+                add(.ok, title, tr("Ready for \(profile.language)", ja: "\(profile.language) の準備ができました"), .transcription)
+            } catch {
+                Console.clearStatus()
+                add(.fail, title, Self.describe(error), .transcription)
+            }
+        default:
+            let title = tr("Speech recognition model (WhisperKit)", ja: "音声認識のモデル（WhisperKit）")
+            do {
+                let name = try await WhisperKitRecognizer(whisperModel: l.whisperModel, modelDirectory: dir).prepare()
+                add(.ok, title, tr("\(name) is ready", ja: "\(name) の準備ができました"), .transcription)
+            } catch {
+                Console.clearStatus()
+                add(.fail, title, Self.describe(error) + tr("\nCheck the network and whisper_model (a name in argmaxinc/whisperkit-coreml)", ja: "\nネットワークと whisper_model（argmaxinc/whisperkit-coreml の名前）を確認してください"), .transcription)
+            }
+        }
+        if l.diarization {
+            let title = tr("Speaker diarization model (SpeakerKit)", ja: "話者分離のモデル（SpeakerKit）")
+            do {
+                try await SpeakerKitDiarizerEngine(modelDirectory: dir).prepare()
+                add(.ok, title, tr("Ready", ja: "準備ができました"), .transcription)
+            } catch {
+                Console.clearStatus()
+                add(.fail, title, Self.describe(error), .transcription)
+            }
+        }
+        add(.ok, tr("Local models", ja: "端末内のモデル"), tr("\(dir.path) (\(Int(Date().timeIntervalSince(started))) s)", ja: "\(dir.path)（\(Int(Date().timeIntervalSince(started))) 秒）"), .usage)
+    }
+
+    static func describe(_ error: Error) -> String {
+        if let e = error as? CappyError { return e.message + (e.hint.map { "\n" + $0 } ?? "") }
+        return (error as? LocalizedError)?.errorDescription ?? "\(error)"
+    }
+
+    /// provider = local の要約（手元の LLM サーバー）
+    func checkLocalSummary(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
+        let s = profile.summary
+        let title = tr("Summary (local LLM)", ja: "要約（手元の LLM）")
+        guard !s.model.isEmpty else {
+            add(.fail, title, LocalChatClient.noModelError.message + "\n" + (LocalChatClient.noModelError.hint ?? ""), .usage)
+            return
+        }
+        add(.ok, tr("Summary settings", ja: "要約の設定"), "local base_url=\(s.baseURL) model=\(s.model)" + (s.auto ? " auto" : ""), .usage)
+        checkInstructions(profile, add)
+        do {
+            let client = try LocalChatClient.make(baseURL: s.baseURL)
+            try await client.checkAccess(model: s.model, effort: s.effort)
+            add(.ok, title, tr("\(s.model) is available on \(s.baseURL)", ja: "\(s.baseURL) で \(s.model) を使えます"), .transcription)
+        } catch let e as CappyError {
+            add(.fail, title, e.message + (e.hint.map { "\n" + $0 } ?? ""), .transcription)
+        } catch {
+            add(.warn, title, tr("Cannot check: \(error)", ja: "確認できません: \(error)"), .transcription)
+        }
+    }
+
     func checkSummary(_ profile: Profile, _ add: (Level, String, String, ExitStatus) -> Void) async {
         let s = profile.summary
+        if profile.summaryProvider == "local" {
+            await checkLocalSummary(profile, add)
+            return
+        }
         if profile.summaryProvider == "aws" {
             await checkBedrockSummary(profile, add)
             return

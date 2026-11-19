@@ -127,7 +127,7 @@ struct TUI: AsyncParsableCommand {
             let profile = try CappyConfig.load().profile(named: profileName)
             if profile.summaryProvider == "none" {
                 throw CappyError.usage(tr("The summary provider of profile \(profile.name) is none", ja: "プロファイル \(profile.name) の要約プロバイダが none です"),
-                                       hint: tr("Set provider in [profiles.\(profile.name).summary] to vertex or bedrock", ja: "[profiles.\(profile.name).summary] の provider を vertex か bedrock にしてください"))
+                                       hint: tr("Set provider in [profiles.\(profile.name).summary] to google, aws or local", ja: "[profiles.\(profile.name).summary] の provider を google・aws・local のいずれかにしてください"))
             }
             let name = entry.title.isEmpty ? entry.directory.lastPathComponent : entry.title
             // プロファイルの既定と同じモデルなら --model は付けない
@@ -170,13 +170,14 @@ struct TUI: AsyncParsableCommand {
             let profile = try CappyConfig.load().profile(named: profileName)
             if profile.transcriptionService == .none {
                 throw CappyError.usage(tr("The provider of profile \(profile.name) is none, so no transcription", ja: "プロファイル \(profile.name) の provider が none のため、文字起こしは行いません"),
-                                       hint: tr("Choose a profile whose provider is google or aws", ja: "provider が google か aws のプロファイルを選んでください"))
+                                       hint: tr("Choose a profile whose provider is google, aws or local", ja: "provider が google・aws・local のプロファイルを選んでください"))
             }
             let name = entry.title.isEmpty ? entry.directory.lastPathComponent : entry.title
             // 中断した文字起こしが別のサービス・言語のものなら、続きからではなく最初からにする（--force）
             var restart = force
             if !restart, let t = store.metadata.transcription, t.state != .done, t.jobs.contains(where: { $0.handle != nil }) {
-                let providerName = [TranscriptionService.gemini: "gemini", .speech: "google", .amazon: "transcribe"][profile.transcriptionService]
+                let providerName = [TranscriptionService.gemini: "gemini", .speech: "google", .amazon: "transcribe",
+                                    .whisperKit: "whisperkit", .apple: "apple"][profile.transcriptionService]
                 if t.provider != providerName || t.language != profile.language || t.mix { restart = true }
             }
             var args = ["--profile", profile.name, "--no-summarize"]

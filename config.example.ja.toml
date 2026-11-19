@@ -129,3 +129,20 @@ output_dir = "~/Recordings/local-only"
 
 [profiles.local-only.transcribe]
 provider = "none"            # summary.provider を書かなければ要約も none
+
+# この Mac の中だけで文字起こし・要約まで行う（外部には何も送らない）
+[profiles.on-device]
+output_dir = "~/Recordings/on-device"
+
+[profiles.on-device.transcribe]
+provider = "local"           # この Mac で文字起こしする。summary.provider を書かなければ要約も local
+model = "whisperkit"         # whisperkit（Core ML の Whisper）/ apple（macOS 26 の SpeechTranscriber）
+# whisper_model = "large-v3-v20240930_turbo"  # WhisperKit のモデル（argmaxinc/whisperkit-coreml の名前。省略時はこの Mac の推奨）
+# model_dir = "~/Library/Application Support/cappy/models"  # WhisperKit・SpeakerKit のモデルを置く場所（初回に Hugging Face からダウンロード）
+# diarization = true         # remote トラックを SpeakerKit で話者分離する（Apple を選んでも使える）
+# num_speakers = 3           # 相手側の人数が分かっていれば指定（省略時は自動）
+
+[profiles.on-device.summary]
+# provider = "local"         # 手元の LLM サーバー（OpenAI 互換の API）
+base_url = "http://localhost:11434/v1"  # Ollama の既定。LM Studio は http://localhost:1234/v1
+model = "qwen3:30b"          # サーバーのモデル名（必須）。長い会議には 32K トークン以上の文脈長が必要（Ollama は num_ctx を広げたモデルを作る。docs/local.ja.md）

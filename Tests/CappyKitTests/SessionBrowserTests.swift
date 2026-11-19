@@ -191,6 +191,20 @@ import Testing
         return (b, try #require(b.selected))
     }
 
+    @Test func summarizeProfilesShowWhereTheyRun() throws {
+        let (b0, _) = try browserWithUnsummarized(profiles: [summaryProfile("default"), summaryProfile("bedrock", provider: "aws", model: "claude-opus-5-5"),
+                                                             summaryProfile("mac", provider: "local", model: "qwen3:30b"), summaryProfile("empty", provider: "local", model: "")])
+        var b = b0
+        _ = b.handle(.enter)
+        _ = b.handle(.down) // 要約を作成
+        _ = b.handle(.enter)
+        #expect(b.summarizeForm?.step == .profile)
+        let options = L10n.$override.withValue(.en) { b.formOptions() }
+        #expect(options.contains("bedrock  (Bedrock, claude-opus-5-5)"))
+        #expect(options.contains("mac  (local LLM, qwen3:30b)"))
+        #expect(options.contains("empty  (local LLM, model not set)"))
+    }
+
     @Test func summarizeAsksForTheProfileAndTheModel() throws {
         var bedrock = summaryProfile("bedrock", provider: "aws", model: "claude-opus-5-5")
         bedrock.summary.region = "jp"

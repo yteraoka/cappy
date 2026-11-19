@@ -129,3 +129,20 @@ output_dir = "~/Recordings/local-only"
 
 [profiles.local-only.transcribe]
 provider = "none"            # the summary is also none unless summary.provider is set
+
+# Transcribe and summarize on this Mac only (nothing is sent outside)
+[profiles.on-device]
+output_dir = "~/Recordings/on-device"
+
+[profiles.on-device.transcribe]
+provider = "local"           # transcribe on this Mac; the summary is also local unless summary.provider is set
+model = "whisperkit"         # whisperkit (Whisper on Core ML) / apple (SpeechTranscriber in macOS 26)
+# whisper_model = "large-v3-v20240930_turbo"  # WhisperKit model (a name in argmaxinc/whisperkit-coreml; default: recommended for this Mac)
+# model_dir = "~/Library/Application Support/cappy/models"  # where the WhisperKit / SpeakerKit models go (downloaded from Hugging Face the first time)
+# diarization = true         # speaker diarization of the remote track with SpeakerKit (also with apple)
+# num_speakers = 3           # the number of remote speakers, if known (default: automatic)
+
+[profiles.on-device.summary]
+# provider = "local"         # a local LLM server (OpenAI-compatible API)
+base_url = "http://localhost:11434/v1"  # Ollama's default. LM Studio: http://localhost:1234/v1
+model = "qwen3:30b"          # model name on the server (required). Long meetings need a context length of 32K tokens or more (for Ollama, create a model with a wider num_ctx; see docs/local.md)

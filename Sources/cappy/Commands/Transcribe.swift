@@ -10,11 +10,11 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: ArgumentHelp(tr("Session directory", ja: "セッションディレクトリ")), completion: .directory)
     var sessionDir: String
 
-    @Option(help: ArgumentHelp(tr("Cloud to transcribe with (google / aws / none; default: transcribe.provider of the profile)", ja: "文字起こしに使うクラウド（google / aws / none。既定はプロファイルの transcribe.provider）")),
+    @Option(help: ArgumentHelp(tr("Where to transcribe (google / aws / local (on this Mac) / none; default: transcribe.provider of the profile)", ja: "文字起こしに使うクラウド（google / aws / local（この Mac で）/ none。既定はプロファイルの transcribe.provider）")),
             completion: .list(CompletionCandidates.providers))
     var provider: String?
 
-    @Option(help: ArgumentHelp(tr("Model with provider google: gemini-* uses Gemini on Vertex AI, others (e.g. chirp_3) use Speech-to-Text (default: transcribe.model of the profile)", ja: "provider が google のときのモデル。gemini-* なら Vertex AI の Gemini、それ以外（chirp_3 など）なら Speech-to-Text（既定はプロファイルの transcribe.model）")),
+    @Option(help: ArgumentHelp(tr("Model: with provider google, gemini-* uses Gemini on Vertex AI and others (e.g. chirp_3) use Speech-to-Text; with provider local, whisperkit or apple (default: transcribe.model of the profile)", ja: "モデル。provider が google なら gemini-* で Vertex AI の Gemini、それ以外（chirp_3 など）で Speech-to-Text。provider が local なら whisperkit か apple（既定はプロファイルの transcribe.model）")),
             completion: .list(CompletionCandidates.transcribeModels))
     var model: String?
 
