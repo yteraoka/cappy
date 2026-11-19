@@ -145,4 +145,4 @@ model = "whisperkit"         # whisperkit (Whisper on Core ML) / apple (SpeechTr
 [profiles.on-device.summary]
 # provider = "local"         # a local LLM server (OpenAI-compatible API)
 base_url = "http://localhost:11434/v1"  # Ollama's default. LM Studio: http://localhost:1234/v1
-model = "qwen3:30b"          # model name on the server (required). Long meetings need a context length of 32K tokens or more
+model = "qwen3:30b"          # model name on the server (required). Long meetings need a context length of 32K tokens or more (for Ollama, create a model with a wider num_ctx; see docs/local.md)

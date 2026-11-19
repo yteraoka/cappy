@@ -14,26 +14,39 @@ Transcription and speaker diarization run in cappy itself, but the summary and s
    brew install ollama          # or download the app from https://ollama.com
    ```
 
-2. Start Ollama with a wider context. Summarizing an hour-long meeting needs 32K tokens or more (with the default, long transcripts are silently cut off).
+2. Start Ollama.
 
    ```bash
-   # When running it in a terminal (keep it running)
-   OLLAMA_CONTEXT_LENGTH=32768 ollama serve
-
-   # When using the Ollama app (set this, then restart the app)
-   launchctl setenv OLLAMA_CONTEXT_LENGTH 32768
+   brew services start ollama   # also starts it at login. If you installed the app, start the app instead
    ```
 
 3. Pull the model for the summary. A 30B-class model is over 10 GB and needs about 32 GB of memory or more. On a 16 GB Mac, choose a 7-8B model.
 
    ```bash
    ollama pull qwen3:30b
-   ollama list                  # check the name of the model
    ```
 
-4. Add the profile to `~/.config/cappy/config.toml` (or run `cappy init --profile on-device` and choose "This Mac"). Write the name shown by `ollama list` in `summary.model` as is.
+4. Create a model with a wider context. Summarizing an hour-long meeting needs 32K tokens or more, but Ollama's default context is short and silently cuts off the rest. If the model itself carries the context length, it works however Ollama is started (`brew services`, the app, `ollama serve`) and survives restarts.
 
-5. Check, and download the transcription and diarization models in advance (otherwise they are downloaded on the first transcription).
+   ```bash
+   cat > Modelfile <<'EOF'
+   FROM qwen3:30b
+   PARAMETER num_ctx 32768
+   EOF
+   ollama create qwen3-30b-32k -f Modelfile
+   ollama list                  # check that qwen3-30b-32k is there
+   ```
+
+   Other ways exist, but each has a drawback:
+
+   - `OLLAMA_CONTEXT_LENGTH=32768 ollama serve`: only works when started in a terminal. Ollama started by `brew services` or the app does not see environment variables set in a terminal.
+   - `launchctl setenv OLLAMA_CONTEXT_LENGTH 32768`, then `brew services restart ollama` (or restart the app): lost at logout or restart.
+   - Editing `~/Library/LaunchAgents/homebrew.mxcl.ollama.plist`: `brew services` creates this file, and `brew upgrade` and the like overwrite it.
+   - The settings of the Ollama app: versions with a context length setting can change it, but only when Ollama is started from the app.
+
+5. Add the profile to `~/.config/cappy/config.toml` (or run `cappy init --profile on-device` and choose "This Mac"). Write the model created in step 4 (`qwen3-30b-32k`) in `summary.model`.
+
+6. Check, and download the transcription and diarization models in advance (otherwise they are downloaded on the first transcription).
 
    ```bash
    cappy doctor --profile on-device                     # also checks the server and the model
@@ -53,7 +66,7 @@ model = "whisperkit"          # whisperkit / apple
 [profiles.on-device.summary]
 # provider follows transcribe.provider (local)
 base_url = "http://localhost:11434/v1"
-model = "qwen3:30b"
+model = "qwen3-30b-32k"
 ```
 
 ```bash
@@ -89,7 +102,7 @@ With `summary.provider = "local"`, cappy calls the OpenAI-compatible API (`<base
 | mlx-lm `mlx_lm.server` | `http://localhost:8080/v1` |
 
 - `summary.model` is the model name on the server and is required (there is no default). `cappy doctor` checks that the server is reachable and has the model.
-- **Mind the context length.** An hour-long meeting is roughly 15-20K tokens in English (about 20K in Japanese), so you need a context length of 32K tokens or more. Ollama's default context is short and silently cuts off the rest, so widen it, e.g. `OLLAMA_CONTEXT_LENGTH=32768 ollama serve`. In LM Studio, set the Context Length when loading the model.
+- **Mind the context length.** An hour-long meeting is roughly 15-20K tokens in English (about 20K in Japanese), so you need a context length of 32K tokens or more. Ollama's default context is short and silently cuts off the rest, so create a model with a wider `num_ctx` as in step 4 of the setup. In LM Studio, set the Context Length when loading the model.
 - As a rough guide to memory: a quantized 7-8B model on a 16 GB Mac, and a 20-30B model (including MoE) with 32 GB or more. The quality of the minutes depends a lot on the model size.
 - `summary.effort` (thinking effort) is not sent. `summary.max_tokens` is sent as the output limit.
 - `cappy speakers` (speaker naming) uses the same server. `speakers.model` can choose another model.

@@ -14,26 +14,39 @@
    brew install ollama          # または https://ollama.com からアプリをダウンロード
    ```
 
-2. 文脈長を広げて Ollama を起動します。1 時間の会議を要約するには 32K トークン以上が必要です（既定のままだと長い文字起こしが黙って切り捨てられます）。
+2. Ollama を起動します。
 
    ```bash
-   # ターミナルで起動する場合（起動したままにしておく）
-   OLLAMA_CONTEXT_LENGTH=32768 ollama serve
-
-   # Ollama のアプリを使う場合（設定してからアプリを起動し直す）
-   launchctl setenv OLLAMA_CONTEXT_LENGTH 32768
+   brew services start ollama   # ログイン時にも自動で起動する。アプリを入れた場合はアプリを起動する
    ```
 
 3. 要約に使うモデルを取得します。30B 級のモデルは十数 GB あり、32 GB 以上のメモリが目安です。16 GB の Mac では 7〜8B 級のモデルを選んでください。
 
    ```bash
    ollama pull qwen3:30b
-   ollama list                  # 取得したモデルの名前を確かめる
    ```
 
-4. `~/.config/cappy/config.toml` にプロファイルを追加します（`cappy init --profile on-device` で「この Mac」を選んでも作れます）。`summary.model` には `ollama list` に出た名前をそのまま書きます。
+4. 文脈長を広げたモデルを作ります。1 時間の会議を要約するには 32K トークン以上が必要ですが、Ollama の既定の文脈長は短く、超えた分を黙って切り捨てます。文脈長をモデルに持たせておけば、Ollama をどう起動しても（`brew services`・アプリ・`ollama serve`）効き、再起動しても消えません。
 
-5. 確認し、文字起こしと話者分離のモデルを先にダウンロードしておきます（省略すると最初の文字起こしのときにダウンロードします）。
+   ```bash
+   cat > Modelfile <<'EOF'
+   FROM qwen3:30b
+   PARAMETER num_ctx 32768
+   EOF
+   ollama create qwen3-30b-32k -f Modelfile
+   ollama list                  # qwen3-30b-32k があることを確かめる
+   ```
+
+   ほかの方法もありますが、それぞれ弱点があります。
+
+   - `OLLAMA_CONTEXT_LENGTH=32768 ollama serve`: ターミナルで起動したときだけ効きます。`brew services` やアプリで起動した Ollama には、ターミナルで設定した環境変数は届きません。
+   - `launchctl setenv OLLAMA_CONTEXT_LENGTH 32768` の後に `brew services restart ollama`（アプリならアプリを起動し直す）: ログアウトや再起動で消えます。
+   - `~/Library/LaunchAgents/homebrew.mxcl.ollama.plist` を編集する: このファイルは `brew services` が作るもので、`brew upgrade` などで上書きされます。
+   - Ollama のアプリの設定画面: 文脈長の項目がある版なら変えられますが、アプリから起動したときだけです。
+
+5. `~/.config/cappy/config.toml` にプロファイルを追加します（`cappy init --profile on-device` で「この Mac」を選んでも作れます）。`summary.model` には手順 4 で作った名前（`qwen3-30b-32k`）を書きます。
+
+6. 確認し、文字起こしと話者分離のモデルを先にダウンロードしておきます（省略すると最初の文字起こしのときにダウンロードします）。
 
    ```bash
    cappy doctor --profile on-device                     # サーバーとモデルがあるかも確かめる
@@ -53,7 +66,7 @@ model = "whisperkit"          # whisperkit / apple
 [profiles.on-device.summary]
 # provider は transcribe.provider と同じ local になる
 base_url = "http://localhost:11434/v1"
-model = "qwen3:30b"
+model = "qwen3-30b-32k"
 ```
 
 ```bash
@@ -89,7 +102,7 @@ cappy record --profile on-device --app us.zoom.xos --name weekly --transcribe --
 | mlx-lm の `mlx_lm.server` | `http://localhost:8080/v1` |
 
 - `summary.model` はサーバーのモデル名で、必須です（既定はありません）。`cappy doctor` でサーバーにつながるか、モデルがあるかを確かめます。
-- **文脈長に注意してください。** 1 時間の日本語の会議はおよそ 2 万トークンになるので、32K トークン以上の文脈長が必要です。Ollama は既定の文脈長が短く、超えた分を黙って切り捨てるため、`OLLAMA_CONTEXT_LENGTH=32768 ollama serve` のように広げてください。LM Studio ではモデルを読み込むときの Context Length で指定します。
+- **文脈長に注意してください。** 1 時間の日本語の会議はおよそ 2 万トークンになるので、32K トークン以上の文脈長が必要です。Ollama は既定の文脈長が短く、超えた分を黙って切り捨てるため、セットアップの手順 4 のように `num_ctx` を広げたモデルを作ってください。LM Studio ではモデルを読み込むときの Context Length で指定します。
 - メモリの目安は、16 GB の Mac なら量子化した 7〜8B 級、32 GB 以上なら 20〜30B 級（MoE を含む）です。議事録の質はモデルの大きさに大きく左右されます。
 - `summary.effort`（思考の深さ）は送りません。`summary.max_tokens` は出力の上限として送ります。
 - `cappy speakers`（話者の名前の推定）も同じサーバーを使います。`speakers.model` で別のモデルにもできます。

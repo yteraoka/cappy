@@ -145,4 +145,4 @@ model = "whisperkit"         # whisperkit（Core ML の Whisper）/ apple（macO
 [profiles.on-device.summary]
 # provider = "local"         # 手元の LLM サーバー（OpenAI 互換の API）
 base_url = "http://localhost:11434/v1"  # Ollama の既定。LM Studio は http://localhost:1234/v1
-model = "qwen3:30b"          # サーバーのモデル名（必須）。長い会議には 32K トークン以上の文脈長が必要
+model = "qwen3:30b"          # サーバーのモデル名（必須）。長い会議には 32K トークン以上の文脈長が必要（Ollama は num_ctx を広げたモデルを作る。docs/local.ja.md）
