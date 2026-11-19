@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.11.0](https://github.com/yteraoka/cappy/compare/v0.10.0...v0.11.0) - 2026-11-19
+
+- 発言内容から話者の名前を推定して transcript に書き込む cappy speakers を追加する by @yteraoka in https://github.com/yteraoka/cappy/pull/51
+
 ## [v0.10.0](https://github.com/yteraoka/cappy/compare/v0.9.3...v0.10.0) - 2026-11-18
 
 - Update actions/create-github-app-token action to v3.4.0 by @renovate[bot] in https://github.com/yteraoka/cappy/pull/49
