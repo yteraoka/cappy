@@ -314,6 +314,61 @@ public struct SummaryState: Codable, Sendable, Equatable {
     }
 }
 
+/// 推定した話者の名前（cappy speakers）
+public struct SpeakerGuess: Codable, Sendable, Equatable {
+    /// 話者のキー（SpeakerNaming.key。mic / remote / remote:<ラベル> など）
+    public var key: String
+    /// 推定したときの表示名（相手 1 など）
+    public var label: String
+    /// 分からなければ nil
+    public var name: String?
+    /// high / medium / low
+    public var confidence: String?
+    /// 根拠（名前が分からないときは理由）
+    public var evidence: String?
+
+    public init(key: String, label: String, name: String?, confidence: String? = nil, evidence: String? = nil) {
+        self.key = key
+        self.label = label
+        self.name = name
+        self.confidence = confidence
+        self.evidence = evidence
+    }
+}
+
+/// 話者の名前の状態
+public struct SpeakerNamesState: Codable, Sendable, Equatable {
+    public var state: JobState
+    public var provider: String?
+    public var model: String?
+    /// 推定の元にした文字起こし（transcript.json / live-transcript.json）
+    public var source: String?
+    /// 推定の元にした発言（segments）の SHA-256。文字起こしをやり直したら推定し直す
+    public var segmentsDigest: String?
+    /// モデルによる推定
+    public var guesses: [SpeakerGuess]
+    /// 利用者が指定した名前（キー → 名前。空文字は「名前を付けない」）。推定より優先する
+    public var manual: [String: String]
+    public var inputTokens: Int?
+    public var outputTokens: Int?
+    public var error: String?
+    public var updatedAt: String?
+
+    public init(state: JobState = .pending) {
+        self.state = state
+        self.guesses = []
+        self.manual = [:]
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case state, provider, model, source, guesses, manual, error
+        case segmentsDigest = "segments_digest"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case updatedAt = "updated_at"
+    }
+}
+
 public struct SessionMetadata: Codable, Sendable, Equatable {
     public var id: String
     public var name: String?
@@ -330,6 +385,8 @@ public struct SessionMetadata: Codable, Sendable, Equatable {
     public var recording: RecordingState
     public var transcription: TranscriptionState?
     public var summary: SummaryState?
+    /// 話者の名前（cappy speakers）
+    public var speakers: SpeakerNamesState?
     /// リアルタイム文字起こし（record --live）
     public var live: LiveTranscriptionState?
     public var profile: String?
@@ -347,7 +404,7 @@ public struct SessionMetadata: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, targets, tracks, gaps, markers, screenshots, recording, transcription, summary, live, profile
+        case id, name, targets, tracks, gaps, markers, screenshots, recording, transcription, summary, speakers, live, profile
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case micMutes = "mic_mutes"

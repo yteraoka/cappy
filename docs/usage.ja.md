@@ -28,6 +28,10 @@ cappy record --app us.zoom.xos --name weekly-sync --live
 # 文字起こし済みのセッションから要約を作る
 cappy summarize ~/Recordings/cappy/2026-11-11T1000_weekly-sync
 
+# 発言内容から話者の名前を推定して transcript に書き込む（要約の前にも自動で実行される）
+cappy speakers ~/Recordings/cappy/2026-11-11T1000_weekly-sync
+cappy speakers ~/Recordings/cappy/2026-11-11T1000_weekly-sync --set "相手 2=鈴木"
+
 # 録音中のマイクをミュート / 解除する（別のターミナルやホットキーから）
 cappy mic off
 cappy mic on
@@ -162,6 +166,36 @@ cappy completion zsh > ~/.zfunc/_cappy
 - `summary.instructions_file` の追加の指示は、テンプレートと一緒に使えます（依頼文の最後に付きます）。
 - 送る依頼文の全体は `cappy summarize --print-system-prompt [--prompt <name>] [<dir>]` で確かめられます。
 - テンプレートや追加の指示を変えると、`--force` なしでも作り直します（`session.json` の `summary.prompt_digest` で比べます）。使ったテンプレートは `summary.md` の冒頭と `session.json` の `summary.prompt` に記録します。
+
+## speakers
+
+`transcript.json` を要約と同じクラウドのモデルに送り、各話者ラベル（自分・相手 1 など）が誰かを、自己紹介・名前で呼ばれた直後の応答・第三者としての言及などから推定します。名前は `transcript.md` / `.srt` / `.json` に「田中（相手 1）」の形で書き込み、要約でも使います。
+
+```text
+$ cappy speakers ~/Recordings/cappy/2026-11-11T1000_weekly-sync
+話者の名前を推定しました:
+  自分    → 寺岡  （speakers.me）
+  相手 1  → 田中  （high: 00:03:12 に「田中さん、どうですか」と呼ばれた直後に応答している）
+  相手 2  → （不明）  （名乗っておらず、呼びかけもない）
+```
+
+| オプション | 説明 |
+| --- | --- |
+| `--set "<ラベル>=<名前>"` | 名前を指定する（複数回指定可）。ラベルは「相手 1」「Remote 1」のほか、今の名前（「田中=田中太郎」）でもよい。名前を空にする（`"相手 1="`）と名前を付けない。指定は推定より優先し、モデルは呼ばない |
+| `--unset "<ラベル>"` | `--set` の指定を取り消して、推定した名前に戻す |
+| `--clear` | 推定・指定した名前をすべて取り除く（要約の前に自動で推定し直すこともしない） |
+| `--list` | 変更せずに、今の名前とその根拠を表示する |
+| `--force` | 同じ文字起こしから推定済みでも推定し直す |
+| `--model <id>` | 既定はプロファイルの `speakers.model`、なければ `summary.model` |
+| `--effort low\|medium\|high\|xhigh\|max` | 思考の深さ。既定はプロファイルの `speakers.effort`（`low`） |
+
+- 既定では、要約（`cappy summarize`、`--summarize`、`cappy tui` の要約）の前にも自動で推定します。`speakers.auto = false` で無効にできます。推定に失敗しても要約は続けます。同じ文字起こしから推定済みなら、モデルは呼びません。
+- 確度が low の推定は使いません（`--list` で、使わなかった候補も確かめられます）。1 つのラベルに複数人が含まれていそうなとき（話者分離なしの「相手」など）や根拠が弱いときは、名前を付けません。
+- 自分の名前はプロファイルの `speakers.me` で指定できます。推定より優先し、推定の手がかりにもなります。文字起こしの直後にも、モデルを呼ばずに反映します。
+- 話者分離は、途中で話者が入れ替わったり 1 人が 2 つのラベルに分かれたりすることがあります。名前はラベル単位で付けるため、こうした誤りは直せません。
+- 文字起こしをやり直すと話者のラベルが変わりうるため、それまでの推定と `--set` の指定は使わず、推定し直します。
+- 名前を変えると `transcript.json` が変わるので、次の `cappy summarize` は `--force` なしでも要約を作り直します。
+- 推定の結果（名前・確度・根拠）と `--set` の指定は `session.json` の `speakers` に記録します。2 トラックをミックスし話者分離もない文字起こしでは、名前を推定しません。
 
 ## 終了コード
 

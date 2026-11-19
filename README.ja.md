@@ -56,7 +56,7 @@ cappy tui
 | [設定](./docs/configuration.ja.md) | `cappy init`、設定ファイルとプロファイル、表示言語 |
 | [Google Cloud の準備](./docs/google-cloud.ja.md) | Vertex AI / Speech-to-Text での文字起こし、Claude / Gemini での要約 |
 | [AWS の準備](./docs/aws.ja.md) | Amazon Transcribe、Amazon Bedrock での要約、AWS の認証 |
-| [使い方](./docs/usage.ja.md) | コマンド一覧、`record` / `transcribe` / `summarize` のオプション、マイクのミュート、スクリーンショット、リアルタイム文字起こし、終了コード |
+| [使い方](./docs/usage.ja.md) | コマンド一覧、`record` / `transcribe` / `summarize` / `speakers` のオプション、マイクのミュート、スクリーンショット、リアルタイム文字起こし、終了コード |
 | [cappy tui](./docs/tui.ja.md) | 全画面 UI、過去の録音、終了と中断 |
 | [出力](./docs/output.ja.md) | セッションディレクトリのファイル |
 | [開発](./docs/development.ja.md) | テスト、実装メモ、構成メモ |

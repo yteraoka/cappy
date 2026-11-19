@@ -31,6 +31,7 @@ A profile is made of these tables:
 | `[profiles.<name>.aws]` | AWS account shared by transcription and summary: `profile`, `region`, `bucket`, `delete_remote_after` |
 | `[profiles.<name>.transcribe]` | Transcription: `provider` (`google` / `aws` / `none`), `model`, `location`, `diarization`, ... |
 | `[profiles.<name>.summary]` | Meeting summary: `provider` (`google` / `aws` / `none`), `model`, `region`, `auto`, `prompt` (summary template; see [usage](./usage.md#summary-templates)), ... |
+| `[profiles.<name>.speakers]` | Naming the speakers from what was said: `auto` (infer before summarizing; default true), `me` (your own name), `model`, `effort` (see [usage](./usage.md#speakers)) |
 | `[profiles.<name>.screenshot]` | Screenshots while recording: `window_titles` (title patterns of the meeting window; see [usage](./usage.md#screenshots)) |
 
 `provider` chooses the cloud (the account in `[google]` or `[aws]`), and `model` chooses what to use:

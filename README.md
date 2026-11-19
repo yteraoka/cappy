@@ -56,7 +56,7 @@ If cappy stops halfway, `cappy transcribe <dir>` resumes and `cappy recover <dir
 | [Configuration](./docs/configuration.md) | `cappy init`, the config file and profiles, UI language |
 | [Google Cloud setup](./docs/google-cloud.md) | Vertex AI / Speech-to-Text transcription and Claude / Gemini summaries |
 | [AWS setup](./docs/aws.md) | Amazon Transcribe, Amazon Bedrock summaries, AWS authentication |
-| [Usage](./docs/usage.md) | Commands, `record` / `transcribe` / `summarize` options, mic mute, screenshots, live transcription, exit codes |
+| [Usage](./docs/usage.md) | Commands, `record` / `transcribe` / `summarize` / `speakers` options, mic mute, screenshots, live transcription, exit codes |
 | [cappy tui](./docs/tui.md) | Full-screen UI, past recordings, stopping and interrupting |
 | [Output](./docs/output.md) | Files in the session directory |
 | [Development](./docs/development.md) | Testing, implementation and architecture notes |

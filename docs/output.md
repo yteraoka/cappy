@@ -4,13 +4,13 @@ English | [日本語](./output.ja.md)
 
 ```text
 ~/Recordings/cappy/2026-11-11T1000_weekly-sync/   (0700)
-├── session.json       # metadata and processing state (tracks, gaps, markers, mic_mutes, screenshots, transcription ...)
+├── session.json       # metadata and processing state (tracks, gaps, markers, mic_mutes, screenshots, transcription, speakers ...)
 ├── remote.caf         # remote side (tap), original recording (native format, Float32)
 ├── mic.caf            # you (microphone), original recording
 ├── remote.flac        # file to send (16 kHz, mono, 16 bit; WAV if FLAC is not available)
 ├── mic.flac
-├── transcript.json    # normalized transcription (segments: track, speaker, start_ms, end_ms, text, confidence)
-├── transcript.md      # for reading (mic = "Me", remote = "Remote" / "Remote 1", "Remote 2" with diarization; 自分 / 相手 for Japanese meetings)
+├── transcript.json    # normalized transcription (segments: track, speaker, start_ms, end_ms, text, confidence; speaker_names: the speakers' names)
+├── transcript.md      # for reading (mic = "Me", remote = "Remote" / "Remote 1", "Remote 2" with diarization; "Tanaka (Remote 1)" when the name is known; 自分 / 相手 for Japanese meetings)
 ├── transcript.srt     # for captions and video editing
 ├── live-transcript.{md,json,srt}  # live transcription (record --live)
 ├── summary.md         # meeting summary (cappy summarize / --summarize)
