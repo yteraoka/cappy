@@ -126,3 +126,145 @@ enum AppleSpeechAnalysis {
     }
 }
 #endif
+
+/// Apple の SpeechTranscriber による端末内のリアルタイム文字起こし（macOS 26 以降）。
+/// 音声をそのまま流し込み、認識途中の文字（volatile）と確定した発言を受け取る
+public struct AppleLiveBackend: LiveBackend {
+    public init() {}
+
+    public func open(startMs: Int64, options: LiveTranscriber.Options,
+                     onEvent: @escaping @Sendable (LiveTranscriber.Event) -> Void) async throws -> LiveSession {
+        #if canImport(Speech) && compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            do {
+                return try await AppleLiveSession.open(startMs: startMs, track: options.track, language: options.language, onEvent: onEvent)
+            } catch let e as CappyError {
+                throw LiveConnectionError(message: e.message, permanent: true)
+            }
+        }
+        #endif
+        throw LiveConnectionError(message: tr("Apple SpeechTranscriber needs macOS 26 or later", ja: "Apple の SpeechTranscriber は macOS 26 以降で使えます"),
+                                  permanent: true)
+    }
+}
+
+#if canImport(Speech) && compiler(>=6.2)
+@available(macOS 26.0, *)
+final class AppleLiveSession: LiveSession, @unchecked Sendable {
+    let startMs: Int64
+    let track: TrackID
+    let onEvent: @Sendable (LiveTranscriber.Event) -> Void
+    let analyzer: SpeechAnalyzer
+    let input: AsyncStream<AnalyzerInput>.Continuation
+    /// 解析に渡す形式（16 kHz・モノラル・16 bit から変換する）
+    let format: AVAudioFormat
+    private let sourceFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: LiveAudioSink.sampleRate,
+                                             channels: 1, interleaved: true)!
+    private var converter: AVAudioConverter?
+    private let lock = NSLock()
+    private var results: Task<Void, Never>?
+    private var dead = false
+    private var _deathReason: String?
+
+    private init(startMs: Int64, track: TrackID, analyzer: SpeechAnalyzer, input: AsyncStream<AnalyzerInput>.Continuation,
+                 format: AVAudioFormat, onEvent: @escaping @Sendable (LiveTranscriber.Event) -> Void) {
+        self.startMs = startMs
+        self.track = track
+        self.analyzer = analyzer
+        self.input = input
+        self.format = format
+        self.onEvent = onEvent
+        if !format.isEqual(sourceFormat) { converter = AVAudioConverter(from: sourceFormat, to: format) }
+    }
+
+    static func open(startMs: Int64, track: TrackID, language: String,
+                     onEvent: @escaping @Sendable (LiveTranscriber.Event) -> Void) async throws -> AppleLiveSession {
+        let locale = try await AppleSpeechAnalysis.locale(for: language)
+        let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults],
+                                            attributeOptions: [.audioTimeRange])
+        try await AppleSpeechAnalysis.installAssets(for: transcriber, language: language)
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+            ?? AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: LiveAudioSink.sampleRate, channels: 1, interleaved: true)!
+        let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+        let session = AppleLiveSession(startMs: startMs, track: track, analyzer: analyzer, input: continuation,
+                                       format: format, onEvent: onEvent)
+        let base = startMs
+        session.results = Task {
+            do {
+                for try await result in transcriber.results {
+                    let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if result.isFinal {
+                        onEvent(.interim(track, nil))
+                        guard !text.isEmpty else { continue }
+                        onEvent(.segment(Segment(track: track, speaker: nil,
+                                                 startMs: base + AppleSpeechAnalysis.milliseconds(result.range.start),
+                                                 endMs: base + AppleSpeechAnalysis.milliseconds(result.range.end),
+                                                 text: text, confidence: nil)))
+                    } else {
+                        onEvent(.interim(track, text.isEmpty ? nil : text))
+                    }
+                }
+            } catch {
+                session.markDead(String(describing: error))
+            }
+        }
+        try await analyzer.start(inputSequence: stream)
+        return session
+    }
+
+    var isDead: Bool { lock.withLock { dead } }
+    var deathReason: String? { lock.withLock { _deathReason } }
+    var deathIsPermanent: Bool { false }
+
+    func markDead(_ reason: String) {
+        lock.withLock {
+            if !dead { _deathReason = reason }
+            dead = true
+        }
+    }
+
+    func sendAudio(_ chunk: LiveTranscriber.Chunk) async throws {
+        let frames = AVAudioFrameCount(chunk.pcm.count / 2)
+        guard frames > 0, let src = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frames),
+              let dst = src.int16ChannelData?[0] else { return }
+        src.frameLength = frames
+        chunk.pcm.withUnsafeBytes { raw in
+            if let base = raw.baseAddress { memcpy(dst, base, Int(frames) * 2) }
+        }
+        let buffer: AVAudioPCMBuffer
+        if let converter = lock.withLock({ converter }) {
+            let capacity = AVAudioFrameCount(Double(frames) * format.sampleRate / sourceFormat.sampleRate) + 64
+            guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return }
+            let (status, error) = converter.convertSingleBuffer(src, to: out)
+            if status == .error {
+                if let error { throw error }
+                throw CappyError.transcription(tr("Could not convert the audio", ja: "音声を変換できませんでした"))
+            }
+            buffer = out
+        } else {
+            buffer = src
+        }
+        input.yield(AnalyzerInput(buffer: buffer))
+    }
+
+    /// 端末内では時間の制限がないので張り替えない
+    func shouldRotate(at positionMs: Int64, options: LiveTranscriber.Options) -> Bool { false }
+
+    func endAndDrain(timeout: Double) async {
+        input.finish()
+        let analyzer = self.analyzer
+        let results = lock.withLock { self.results }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try? await analyzer.finalizeAndFinishThroughEndOfInput()
+                await results?.value
+            }
+            group.addTask { try? await Task.sleep(nanoseconds: UInt64(timeout * 1e9)) }
+            await group.next()
+            group.cancelAll()
+        }
+        onEvent(.interim(track, nil))
+    }
+}
+#endif

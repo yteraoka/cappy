@@ -157,7 +157,19 @@ cappy record --profile on-device --app us.zoom.xos --name weekly --transcribe --
 - モデルは最初の文字起こしのときにダウンロードします。`cappy doctor --download-models` で先に済ませておけます（WhisperKit は Core ML のモデルの準備まで一度読み込んで済ませるので、数分かかることがあります）。
 - `cappy transcribe --provider local --model apple <dir>` のように、その場で切り替えることもできます。
 - 認識の速さは Mac とモデルによります。Apple シリコンで、Neural Engine を使います。
-- `record --live`（録音しながらの文字起こし）は、`provider = "local"` ではまだ使えません。
+
+### リアルタイム文字起こし（`record --live`）
+
+`provider = "local"` でも `record --live` で録音しながら文字起こしできます。結果は `live-transcript.*` に保存し、クラウドと同じように字幕として表示します。
+
+```bash
+cappy record --profile on-device --app us.zoom.xos --name weekly --live
+```
+
+- `model = "whisperkit"`: 音の大きさで話の切れ目（0.8 秒の無音）を見つけ、発言ごとに認識します。字幕は話し終わってから数秒で出ます。話し続けた場合は 25 秒ごとに区切ります。認識途中の文字は出ず、話している間は「…」を表示します。初回はモデルを読み込んでから字幕が出始めるので、`cappy doctor --download-models` で先に用意しておくと待たずに済みます。
+- `model = "apple"`: SpeechTranscriber に音声を流し込み、認識途中の文字も字幕に出します。
+- リアルタイムでは話者分離（SpeakerKit）をしないので、相手側は「相手」1 つになります。話者を分けたいときは、録音後に `cappy transcribe` してください（`--live --transcribe` なら録音の後に続けて行います）。
+- 自分と相手の 2 トラックを同時に認識するので、Mac の負荷が上がります。WhisperKit では 1 つのモデルを 2 トラックで順番に使います。認識が追いつかなかった分は、録音を止めた後に最大 2 分待って仕上げます。
 
 ## 要約・話者の名前の推定
 

@@ -99,3 +99,80 @@ public struct SpeakerKitDiarizerEngine: LocalDiarizer {
         }
     }
 }
+
+/// 順番待ちのロック（await をまたいで 1 つずつ実行する）
+final class AsyncSerialLock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var busy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            let resumeNow = lock.withLock { () -> Bool in
+                if busy {
+                    waiters.append(c)
+                    return false
+                }
+                busy = true
+                return true
+            }
+            if resumeNow { c.resume() }
+        }
+    }
+
+    func release() {
+        let next = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            if waiters.isEmpty {
+                busy = false
+                return nil
+            }
+            return waiters.removeFirst()
+        }
+        next?.resume()
+    }
+}
+
+/// リアルタイム文字起こし用の WhisperKit。モデルは 1 回だけ読み込み、2 本のトラックで順に使う
+public final class WhisperKitLiveRecognizer: LocalUtteranceRecognizer, @unchecked Sendable {
+    let base: WhisperKitRecognizer
+    let vocabulary: [String]
+    private let lock = NSLock()
+    private var pipe: WhisperKit?
+    private let serial = AsyncSerialLock()
+
+    public init(whisperModel: String?, modelDirectory: URL, vocabulary: [String] = []) {
+        self.base = WhisperKitRecognizer(whisperModel: whisperModel, modelDirectory: modelDirectory)
+        self.vocabulary = vocabulary
+    }
+
+    public func prepare() async throws {
+        if lock.withLock({ pipe }) != nil { return }
+        let loaded = try await base.loadPipeline()
+        Console.clearStatus()
+        lock.withLock { pipe = loaded }
+    }
+
+    public func recognize(samples: [Float], language: String) async throws -> [RecognizedPiece] {
+        try await prepare()
+        guard let pipe = lock.withLock({ self.pipe }) else { return [] }
+        await serial.acquire()
+        defer { serial.release() }
+        var options = DecodingOptions(
+            task: .transcribe,
+            language: WhisperKitRecognizer.whisperLanguage(language),
+            temperatureFallbackCount: 2,
+            usePrefillPrompt: true,
+            detectLanguage: false,
+            skipSpecialTokens: true,
+            withoutTimestamps: false)
+        if !vocabulary.isEmpty, let tokenizer = pipe.tokenizer {
+            let prompt = vocabulary.prefix(50).joined(separator: ", ")
+            options.promptTokens = tokenizer.encode(text: " " + prompt).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+        }
+        let results = try await pipe.transcribe(audioArray: samples, decodeOptions: options)
+        return results.flatMap { $0.segments }.map { s in
+            RecognizedPiece(startMs: Int64((Double(s.start) * 1000).rounded()), endMs: Int64((Double(s.end) * 1000).rounded()),
+                            text: WhisperKitRecognizer.clean(s.text), confidence: nil)
+        }
+    }
+}

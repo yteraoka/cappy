@@ -102,7 +102,7 @@ public final class LiveAudioSink: AudioSink, @unchecked Sendable {
 
 /// リアルタイム文字起こしの接続先
 public struct LiveConfig: Sendable {
-    /// session.json の live.provider（gemini / transcribe。設定の provider = "aws" のときは transcribe と記録する）
+    /// session.json の live.provider（gemini / transcribe / whisperkit / apple。設定の provider = "aws" のときは transcribe と記録する）
     public var provider: String
     /// 記録用のモデル名
     public var model: String
@@ -114,6 +114,8 @@ public struct LiveConfig: Sendable {
     public var hardLimitMs: Int64?
     /// 話者分離を試みるトラック
     public var diarizedTracks: Set<TrackID>
+    /// 録音の停止後に、残りの結果を待つ時間（秒。nil なら LiveTranscriber の既定）
+    public var drainSeconds: Double? = nil
 
     public static func gemini(settings: GeminiSettings, projectID: String, connector: LiveConnector) -> LiveConfig {
         LiveConfig(provider: "gemini", model: settings.liveModel, location: settings.location,
@@ -130,9 +132,34 @@ public struct LiveConfig: Sendable {
                    diarizedTracks: settings.diarization ? [.remote] : [])
     }
 
-    /// transcript の provider（gemini-live / transcribe-streaming）
+    /// この Mac での文字起こし（provider = local）。WhisperKit は話の切れ目ごとに、Apple は流し込みながら認識する。
+    /// 話者分離（SpeakerKit）はリアルタイムでは行わない
+    public static func local(settings: LocalTranscribeSettings) -> LiveConfig {
+        let backend: LiveBackend
+        let model: String
+        switch settings.engine {
+        case .apple:
+            backend = AppleLiveBackend()
+            model = "SpeechTranscriber"
+        case .whisperKit:
+            backend = ChunkedLocalBackend(name: "whisperkit", recognizer: WhisperKitLiveRecognizer(
+                whisperModel: settings.whisperModel, modelDirectory: settings.modelDirectoryURL, vocabulary: settings.customVocabulary))
+            model = settings.whisperModel ?? "whisperkit"
+        }
+        // 時間の制限がないので張り替えない。認識が追いつかなかった分は、停止後にゆっくり待つ
+        return LiveConfig(provider: settings.engine.rawValue, model: model, location: "local", backend: backend,
+                          modelResource: "", softLimitMs: Int64.max / 4, hardLimitMs: Int64.max / 4, diarizedTracks: [],
+                          drainSeconds: 120)
+    }
+
+    /// transcript の provider（gemini-live / transcribe-streaming / whisperkit-live / apple-live）
     public static func documentProvider(_ provider: String?) -> String {
-        provider == "transcribe" ? "transcribe-streaming" : "gemini-live"
+        switch provider {
+        case "transcribe": return "transcribe-streaming"
+        case "whisperkit": return "whisperkit-live"
+        case "apple": return "apple-live"
+        default: return "gemini-live"
+        }
     }
 
     /// transcript の model（Transcribe はモデルを選ばないので書かない）
@@ -179,6 +206,7 @@ public final class LiveTranscription: @unchecked Sendable {
         var options = LiveTranscriber.Options(model: config.modelResource, language: language, track: track)
         if let v = config.softLimitMs { options.softLimitMs = v }
         if let v = config.hardLimitMs { options.hardLimitMs = v }
+        if let v = config.drainSeconds { options.drainSeconds = v }
         let t = LiveTranscriber(options: options, backend: config.backend) { [weak self] event in self?.handle(event) }
         lock.withLock { transcribers[track] = t }
         if journal == nil { openJournal() }

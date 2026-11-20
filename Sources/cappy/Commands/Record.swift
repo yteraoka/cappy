@@ -88,7 +88,7 @@ struct Record: AsyncParsableCommand {
             completion: .custom { _, _, _ in CompletionCandidates.prompts() })
     var summaryPrompt: String?
 
-    @Flag(help: ArgumentHelp(tr("Transcribe in real time while recording (transcribe.live_model on Vertex AI, or Amazon Transcribe Streaming when transcribe.provider = aws; results go to live-transcript.*)", ja: "録音しながらリアルタイムで文字起こしする（Vertex AI の transcribe.live_model、transcribe.provider = aws なら Amazon Transcribe Streaming。結果は live-transcript.*）")))
+    @Flag(help: ArgumentHelp(tr("Transcribe in real time while recording (transcribe.live_model on Vertex AI, Amazon Transcribe Streaming when transcribe.provider = aws, or on this Mac when transcribe.provider = local; results go to live-transcript.*)", ja: "録音しながらリアルタイムで文字起こしする（Vertex AI の transcribe.live_model、transcribe.provider = aws なら Amazon Transcribe Streaming、local ならこの Mac で。結果は live-transcript.*）")))
     var live = false
 
     @Flag(help: ArgumentHelp(tr("Wait until the target starts playing audio", ja: "対象が音声を出し始めるまで待つ")))
@@ -363,8 +363,19 @@ struct Record: AsyncParsableCommand {
             throw CappyError.usage(tr("--live is not available because transcribe.provider is none in profile \(profile.name)", ja: "プロファイル \(profile.name) の transcribe.provider が none のため、--live は使えません"))
         }
         if profile.provider == "local" {
-            throw CappyError.usage(tr("--live is not available yet with transcribe.provider = local in profile \(profile.name)", ja: "プロファイル \(profile.name) の transcribe.provider が local のため、--live はまだ使えません"),
-                                   hint: tr("Record without --live; the transcription after recording runs on this Mac", ja: "--live を付けずに録音してください。録音後の文字起こしはこの Mac で行います"))
+            let l = profile.local
+            if l.engine == .apple && !AppleSpeechRecognizer.isSupported {
+                throw CappyError.usage(tr("Apple SpeechTranscriber needs macOS 26 or later", ja: "Apple の SpeechTranscriber は macOS 26 以降で使えます"),
+                                       hint: tr("Use transcribe.model = \"whisperkit\" instead", ja: "代わりに transcribe.model = \"whisperkit\" を使ってください"))
+            }
+            let how = l.engine == .apple
+                ? tr("Apple SpeechTranscriber", ja: "Apple の SpeechTranscriber")
+                : tr("WhisperKit, at each pause", ja: "WhisperKit、話の切れ目ごと")
+            Console.print(tr("Live transcription: recognizing on this Mac (\(how); nothing is sent outside)", ja: "リアルタイム文字起こし: この Mac で認識します（\(how)。外部には送信しません）"))
+            if l.engine == .whisperKit {
+                Console.print(tr("  The first time, the model is downloaded before the captions start (`cappy doctor --download-models` does it in advance)", ja: "  初回はモデルをダウンロードしてから字幕が出始めます（`cappy doctor --download-models` で先に済ませられます）"))
+            }
+            return LiveSetup(config: .local(settings: l))
         }
         if profile.provider == "aws" {
             let aws = profile.aws ?? AWSSettings()

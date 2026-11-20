@@ -124,15 +124,11 @@ public enum LaunchOperation: String, CaseIterable, Sendable {
 
     var summarizes: Bool { self == .summarize || self == .liveSummarize }
 
-    var isLive: Bool { self == .live || self == .liveSummarize }
-
-    /// プロファイルで使える操作（文字起こし・要約のプロバイダが none なら除く。
-    /// provider = local ではリアルタイム文字起こしがまだ使えないので除く）
+    /// プロファイルで使える操作（文字起こし・要約のプロバイダが none なら除く）
     public static func available(for profile: Profile) -> [LaunchOperation] {
         if profile.provider == "none" { return [.record] }
         let canSummarize = profile.summaryProvider != "none"
-        let canLive = !profile.transcriptionService.isLocal
-        return allCases.filter { (canSummarize || !$0.summarizes) && (canLive || !$0.isLive) }
+        return allCases.filter { canSummarize || !$0.summarizes }
     }
 
     /// プロファイルを選んだときの初期値（summary.auto なら要約まで）

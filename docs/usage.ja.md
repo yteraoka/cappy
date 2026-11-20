@@ -108,7 +108,7 @@ cappy completion zsh > ~/.zfunc/_cappy
 
 ### リアルタイム文字起こし（`--live`）
 
-- 自分（mic）と相手（remote）をそれぞれ 16 kHz・モノラルの PCM にして、100 ms ごとに送ります。送り先は、プロファイルの `provider` が `aws` なら Amazon Transcribe Streaming、それ以外は Vertex AI の Live API です。確定した発言は `[00:01:23] 相手: …` の形で表示し、認識途中の文字はステータス行に出します。
+- 自分（mic）と相手（remote）をそれぞれ 16 kHz・モノラルの PCM にして、100 ms ごとに送ります。送り先は、プロファイルの `provider` が `aws` なら Amazon Transcribe Streaming、`google` なら Vertex AI の Live API です。`local` なら外部には送らず、この Mac で認識します（[この Mac の中で完結させる](./local.ja.md#リアルタイム文字起こしrecord---live)）。確定した発言は `[00:01:23] 相手: …` の形で表示し、認識途中の文字はステータス行に出します。
 - Live API は 1 セッションで約 10 分の音声までのため、9 分を過ぎたら話の切れ目で（遅くとも 9 分 45 秒で）次のセッションに張り替えます。Amazon Transcribe Streaming は 1 セッション 4 時間までのため、3 時間 50 分を過ぎたら同じように張り替えます。時刻は録音全体の時刻にそろえます。
 - 接続が切れたら再接続します（その間の音声はリアルタイム文字起こしに含まれず、`session.json` の `live.dropped_ms` に記録します）。権限や設定の誤りで接続できない場合は、リアルタイム文字起こしだけを止めて録音は続けます。
 - Live API では話者分離はできません（相手側は「相手」とだけ表示します）。Amazon Transcribe Streaming では remote トラックで話者分離を行い（`transcribe.diarization`）、`相手（0）` のように表示します（`live-transcript.md` では「相手 1」「相手 2」）。精度の高い結果が必要なら、録音後に `cappy transcribe` を実行してください（`--live --transcribe` で両方行えます）。

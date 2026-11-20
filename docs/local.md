@@ -157,7 +157,19 @@ cappy record --profile on-device --app us.zoom.xos --name weekly --transcribe --
 - The models are downloaded on the first transcription. `cappy doctor --download-models` does it in advance (WhisperKit is also loaded once to prepare the Core ML models, which can take a few minutes).
 - You can switch on the spot, e.g. `cappy transcribe --provider local --model apple <dir>`.
 - The speed depends on the Mac and the model. It runs on Apple silicon and uses the Neural Engine.
-- `record --live` (transcription while recording) is not available yet with `provider = "local"`.
+
+### Live transcription (`record --live`)
+
+With `provider = "local"`, `record --live` also transcribes while recording. The results are saved to `live-transcript.*` and shown as captions, as with the cloud services.
+
+```bash
+cappy record --profile on-device --app us.zoom.xos --name weekly --live
+```
+
+- `model = "whisperkit"`: finds pauses (0.8 s of silence) from the loudness and recognizes each utterance. Captions appear a few seconds after you stop speaking. Continuous speech is cut every 25 seconds. No in-progress text is shown; "…" is shown while someone is speaking. The first time, captions start after the model is loaded, so `cappy doctor --download-models` in advance avoids the wait.
+- `model = "apple"`: streams the audio into SpeechTranscriber and also shows in-progress text in the captions.
+- Speaker diarization (SpeakerKit) is not done in real time, so the remote side is a single "Remote". To tell speakers apart, run `cappy transcribe` after recording (`--live --transcribe` does it right after the recording).
+- Both tracks (you and the remote side) are recognized at the same time, which loads the Mac more. WhisperKit uses one model for both tracks in turn. Whatever recognition has not caught up is finished after you stop recording, waiting up to 2 minutes.
 
 ## Summary and speaker naming
 
