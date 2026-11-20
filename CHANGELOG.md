@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.12.1](https://github.com/yteraoka/cappy/compare/v0.12.0...v0.12.1) - 2026-11-20
+
+- Ollama で qwen3.5:9b と gemma4:12b を使う手順を例として書く by @yteraoka in https://github.com/yteraoka/cappy/pull/55
+
 ## [v0.12.0](https://github.com/yteraoka/cappy/compare/v0.11.0...v0.12.0) - 2026-11-19
 
 - 文字起こしと要約をこの Mac の中で完結させる provider = "local" を追加する by @yteraoka in https://github.com/yteraoka/cappy/pull/53
