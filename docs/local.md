@@ -25,8 +25,8 @@ Transcription and speaker diarization run in cappy itself, but the summary and s
    | Model | Size (4-bit) | Guide |
    | --- | --- | --- |
    | Qwen3 30B (`qwen3:30b`) | over 10 GB | Macs with 32 GB of memory or more |
-   | Qwen3.5 9B | about 6 GB | Macs with 16 GB. A small model from the Qwen family, which is rated well for Japanese |
-   | Gemma 4 12B | about 7 GB | Macs with 16 GB. An alternative to compare with Qwen3.5 9B |
+   | Qwen3.5 9B (`qwen3.5:9b`) | about 7 GB | Macs with 16 GB. A small model from the Qwen family, which is rated well for Japanese (see "[Example: using Qwen3.5 9B](#example-using-qwen35-9b-a-mac-with-16-gb-of-memory)" below) |
+   | Gemma 4 12B (`gemma4:12b`) | about 8 GB | Macs with 16 GB. An alternative to compare with Qwen3.5 9B (see "[Example: using Gemma 4 12B](#example-using-gemma-4-12b-a-mac-with-16-gb-of-memory)" below) |
 
    - Smaller models are faster and lighter, but the minutes tend to be worse. Run `cappy summarize --force` with each model on the same transcript and compare.
    - Check the Ollama tag names (e.g. `qwen3.5:9b`) in the [ollama.com library](https://ollama.com/library).
@@ -62,6 +62,65 @@ Transcription and speaker diarization run in cappy itself, but the summary and s
    cappy doctor --profile on-device                     # also checks the server and the model
    cappy doctor --profile on-device --download-models
    ```
+
+### Example: using Qwen3.5 9B (a Mac with 16 GB of memory)
+
+Steps 3-5 with `qwen3.5:9b` (about 7 GB at 4-bit) instead of `qwen3:30b`:
+
+```bash
+ollama pull qwen3.5:9b
+
+cat > Modelfile <<'EOF'
+FROM qwen3.5:9b
+PARAMETER num_ctx 32768
+EOF
+ollama create qwen3.5-9b-32k -f Modelfile
+ollama list                  # check that qwen3.5-9b-32k is there
+```
+
+```toml
+[profiles.on-device.summary]
+base_url = "http://localhost:11434/v1"
+model = "qwen3.5-9b-32k"
+```
+
+```bash
+cappy doctor --profile on-device                        # check that qwen3.5-9b-32k is available
+cappy summarize --profile on-device --force ~/Recordings/cappy/<session>
+```
+
+- To compare with `qwen3:30b` or others, keep `summary.md` under another name before summarizing, or regenerate it from past recordings in `cappy tui` (the previous summary is kept under a dated name).
+- Speaker naming (`cappy speakers`) uses the same model. To use another model for it, set `model` in `[profiles.on-device.speakers]`.
+- With the context widened to 32K, the model uses about 8-10 GB of memory in total. Closing other apps helps it run smoothly.
+
+### Example: using Gemma 4 12B (a Mac with 16 GB of memory)
+
+With `gemma4:12b` (about 8 GB at 4-bit). The steps are the same as for Qwen3.5 9B; only the model name changes.
+
+```bash
+ollama pull gemma4:12b
+
+cat > Modelfile <<'EOF'
+FROM gemma4:12b
+PARAMETER num_ctx 32768
+EOF
+ollama create gemma4-12b-32k -f Modelfile
+ollama list                  # check that gemma4-12b-32k is there
+```
+
+```toml
+[profiles.on-device.summary]
+base_url = "http://localhost:11434/v1"
+model = "gemma4-12b-32k"
+```
+
+```bash
+cappy doctor --profile on-device                        # check that gemma4-12b-32k is available
+cappy summarize --profile on-device --force ~/Recordings/cappy/<session>
+```
+
+- It is about 1 GB larger than Qwen3.5 9B, and with the context widened to 32K it uses about 10 GB of memory in total. On a 16 GB Mac, closing other apps helps it run smoothly.
+- If you create both this and Qwen3.5 9B, you can switch between them just by changing `summary.model` and compare.
 
 ## Settings and usage
 

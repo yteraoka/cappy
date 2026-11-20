@@ -25,8 +25,8 @@
    | モデル | 大きさ（4bit 量子化） | 目安 |
    | --- | --- | --- |
    | Qwen3 30B（`qwen3:30b`） | 十数 GB | メモリ 32 GB 以上の Mac |
-   | Qwen3.5 9B | 約 6 GB | メモリ 16 GB の Mac。日本語に強いと評価されている Qwen 系の小型版 |
-   | Gemma 4 12B | 約 7 GB | メモリ 16 GB の Mac。Qwen3.5 9B と比べる候補 |
+   | Qwen3.5 9B（`qwen3.5:9b`） | 約 7 GB | メモリ 16 GB の Mac。日本語に強いと評価されている Qwen 系の小型版（下の「[例: Qwen3.5 9B を使う](#例-qwen35-9b-を使うメモリ-16-gb-の-mac)」） |
+   | Gemma 4 12B（`gemma4:12b`） | 約 8 GB | メモリ 16 GB の Mac。Qwen3.5 9B と比べる候補（下の「[例: Gemma 4 12B を使う](#例-gemma-4-12b-を使うメモリ-16-gb-の-mac)」） |
 
    - 小さいモデルほど速くて軽い代わりに、議事録の質は落ちやすくなります。同じ録音の文字起こしで `cappy summarize --force` をモデルごとに実行して見比べてください。
    - Ollama でのタグ名（例: `qwen3.5:9b`）は、[ollama.com のライブラリ](https://ollama.com/library)で確かめてください。
@@ -62,6 +62,65 @@
    cappy doctor --profile on-device                     # サーバーとモデルがあるかも確かめる
    cappy doctor --profile on-device --download-models
    ```
+
+### 例: Qwen3.5 9B を使う（メモリ 16 GB の Mac）
+
+`qwen3:30b` の代わりに `qwen3.5:9b`（4bit 量子化で約 7 GB）を使う場合の、手順 3〜5 をまとめたものです。
+
+```bash
+ollama pull qwen3.5:9b
+
+cat > Modelfile <<'EOF'
+FROM qwen3.5:9b
+PARAMETER num_ctx 32768
+EOF
+ollama create qwen3.5-9b-32k -f Modelfile
+ollama list                  # qwen3.5-9b-32k があることを確かめる
+```
+
+```toml
+[profiles.on-device.summary]
+base_url = "http://localhost:11434/v1"
+model = "qwen3.5-9b-32k"
+```
+
+```bash
+cappy doctor --profile on-device                        # qwen3.5-9b-32k を使えるか確かめる
+cappy summarize --profile on-device --force ~/Recordings/cappy/<セッション>
+```
+
+- `qwen3:30b` などと見比べたいときは、要約の前に `summary.md` を別の名前で残しておくか、`cappy tui` の過去の録音から作り直してください（以前の要約は日時付きの名前で残ります）。
+- 話者の名前の推定（`cappy speakers`）も同じモデルを使います。別のモデルにしたいときは `[profiles.on-device.speakers]` の `model` で指定します。
+- 文脈長を 32K に広げると、モデル本体と合わせて 8〜10 GB ほどのメモリを使います。ほかのアプリを閉じておくと安定します。
+
+### 例: Gemma 4 12B を使う（メモリ 16 GB の Mac）
+
+`gemma4:12b`（4bit 量子化で約 8 GB）を使う場合です。手順は Qwen3.5 9B と同じで、モデル名だけが変わります。
+
+```bash
+ollama pull gemma4:12b
+
+cat > Modelfile <<'EOF'
+FROM gemma4:12b
+PARAMETER num_ctx 32768
+EOF
+ollama create gemma4-12b-32k -f Modelfile
+ollama list                  # gemma4-12b-32k があることを確かめる
+```
+
+```toml
+[profiles.on-device.summary]
+base_url = "http://localhost:11434/v1"
+model = "gemma4-12b-32k"
+```
+
+```bash
+cappy doctor --profile on-device                        # gemma4-12b-32k を使えるか確かめる
+cappy summarize --profile on-device --force ~/Recordings/cappy/<セッション>
+```
+
+- Qwen3.5 9B より 1 GB ほど大きく、文脈長を 32K に広げると合わせて 10 GB ほどのメモリを使います。16 GB の Mac では、ほかのアプリを閉じておくと安定します。
+- Qwen3.5 9B と両方作っておけば、`summary.model` を書き換えるだけで切り替えて見比べられます。
 
 ## 設定と使い方
 
