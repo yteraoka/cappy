@@ -25,7 +25,7 @@ jobs:
         run: swift test
 
       # Developer ID Application の証明書と公証用の App Store Connect API キーを一時的なキーチェーンに入れる。
-      # シークレットを参照できない PR（fork からの PR など）では何もせず、次のステップで ad-hoc 署名にする（公証もしない）
+      # シークレットを参照できない PR（fork からの PR など）では何もせず、次のステップで ad-hoc 署名にする
       - name: Import signing certificate
         env:
           P12: ${{ secrets.MACOS_CERT_P12_BASE64 }}
@@ -55,13 +55,16 @@ jobs:
           xcrun notarytool store-credentials cappy-notary \
             --key "${RUNNER_TEMP}/notary.p8" --key-id "${NOTARY_KEY_ID}" --issuer "${NOTARY_ISSUER_ID}" --keychain "${kc}"
           rm -f "${RUNNER_TEMP}/notary.p8"
+          # 公証は時間がかかるためタグのときだけ行う（PR では store-credentials で API キーの確認だけをする）。
           # 次のステップの scripts/release.sh に、公証に使うプロファイルとキーチェーンを渡す
-          {
-            echo "CAPPY_NOTARY_PROFILE=cappy-notary"
-            echo "CAPPY_NOTARY_KEYCHAIN=${kc}"
-          } >> "${GITHUB_ENV}"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            {
+              echo "CAPPY_NOTARY_PROFILE=cappy-notary"
+              echo "CAPPY_NOTARY_KEYCHAIN=${kc}"
+            } >> "${GITHUB_ENV}"
+          fi
 
-      # Developer ID で署名・公証した cappy と gcappy.app の zip を作る（gcappy.app には公証のチケットを staple する）。
+      # Developer ID で署名した cappy と gcappy.app の zip を作る。タグのときは公証し、gcappy.app には公証のチケットを staple する。
       # シークレットを参照できない PR では ad-hoc 署名でビルドだけ確かめる
       - name: Build release zip
         id: build

@@ -21,7 +21,7 @@ brew install yteraoka/cask/gcappy    # menu bar app
    1. Runs the tests
    2. Builds the Developer ID signed and notarized `cappy-X.Y.Z-macos-arm64.zip` and `gcappy-X.Y.Z-macos-arm64.zip` (gcappy.app assembled by `scripts/build-app.sh`) with `scripts/release.sh` and attaches them to the Release
    3. Rewrites the url and sha256 of `packaging/cappy.rb` / `packaging/gcappy.rb` with `scripts/formula.sh` and updates `Formula/cappy.rb` / `Formula/gcappy.rb` in the tap
-4. For PRs, the same workflow only runs the tests and the release build. PRs that can read the secrets are notarized as well, and PRs that cannot (such as PRs from forks) build with ad-hoc signing (without notarization).
+4. For PRs, the same workflow only runs the tests and the release build. Notarization runs only for tags, so PRs are only signed with Developer ID. PRs that cannot read the secrets (such as PRs from forks) build with ad-hoc signing.
 
 Required settings (Settings > Secrets and variables > Actions of the cappy repository):
 

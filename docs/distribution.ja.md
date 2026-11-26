@@ -21,7 +21,7 @@ brew install yteraoka/cask/gcappy    # メニューバー版
    1. テストを実行する
    2. `scripts/release.sh` で Developer ID で署名・公証した `cappy-X.Y.Z-macos-arm64.zip` と `gcappy-X.Y.Z-macos-arm64.zip`（`scripts/build-app.sh` で組み立てた gcappy.app）を作り、Release に添付する
    3. `scripts/formula.sh` で `packaging/cappy.rb` / `packaging/gcappy.rb` の url と sha256 を書き換え、tap の `Formula/cappy.rb` / `Formula/gcappy.rb` を更新する
-4. PR では、同じワークフローでテストとリリース用のビルドだけを行います。シークレットを参照できる PR では公証まで行い、参照できない PR（fork からの PR など）では ad-hoc 署名でビルドします（公証はしません）。
+4. PR では、同じワークフローでテストとリリース用のビルドだけを行います。公証はタグのときだけ行い、PR では Developer ID での署名までにします。シークレットを参照できない PR（fork からの PR など）では ad-hoc 署名でビルドします。
 
 必要な設定（cappy リポジトリの Settings > Secrets and variables > Actions）:
 
