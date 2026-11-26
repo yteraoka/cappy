@@ -62,4 +62,4 @@ cappy tui
 | [gcappy](./docs/gcappy.ja.md) | メニューバー版（録音の開始・停止・ミュート・スクリーンショット、権限） |
 | [出力](./docs/output.ja.md) | セッションディレクトリのファイル |
 | [開発](./docs/development.ja.md) | テスト、実装メモ、構成メモ |
-| [配布](./docs/distribution.ja.md) | Homebrew tap、リリースの流れ、手元でのリリースビルド |
+| [配布](./docs/distribution.ja.md) | Homebrew tap、リリースの流れ、手元でのリリースビルド、Developer ID の証明書と公証用の API キー |

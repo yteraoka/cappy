@@ -62,4 +62,4 @@ If cappy stops halfway, `cappy transcribe <dir>` resumes and `cappy recover <dir
 | [gcappy](./docs/gcappy.md) | Menu bar app (start / stop recording, mute, screenshots, permissions) |
 | [Output](./docs/output.md) | Files in the session directory |
 | [Development](./docs/development.md) | Testing, implementation and architecture notes |
-| [Distribution](./docs/distribution.md) | Homebrew tap, release flow, local release build |
+| [Distribution](./docs/distribution.md) | Homebrew tap, release flow, local release build, Developer ID certificate and notarization API key |
