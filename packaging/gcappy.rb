@@ -35,8 +35,7 @@ class Gcappy < Formula
 
       Use "Launch at Login" in the gcappy menu to start it automatically.
       The first recording asks gcappy for the "System Audio Recording" and
-      "Microphone" permissions. As the app is ad-hoc signed, macOS may ask again
-      after `brew upgrade gcappy`.
+      "Microphone" permissions.
       Create the config file with `cappy init` (or "Run cappy init in Terminal..."
       in the menu) if you have not yet.
     EOS

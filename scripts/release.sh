@@ -2,9 +2,11 @@
 # 配布用の zip を dist/ に作る（CLI の cappy と、メニューバー版の gcappy.app）。
 #
 # 環境変数:
-#   CAPPY_SIGN_IDENTITY   署名に使う ID。"-" なら ad-hoc 署名で、公証は行わない（Homebrew での配布向け）。
-#                         例: "Developer ID Application: Your Name (TEAMID)"（この場合は公証まで行う）
-#   CAPPY_NOTARY_PROFILE  Developer ID で署名する場合に必要。`xcrun notarytool store-credentials` で保存したプロファイル名
+#   CAPPY_SIGN_IDENTITY   署名に使う ID。"-" なら ad-hoc 署名
+#                         例: "Developer ID Application: Your Name (TEAMID)"
+#   CAPPY_NOTARY_PROFILE  公証に使う、`xcrun notarytool store-credentials` で保存したプロファイル名。
+#                         Developer ID で署名し、これを設定した場合だけ公証する
+#   CAPPY_NOTARY_KEYCHAIN 上のプロファイルを既定以外のキーチェーンに保存した場合、そのキーチェーンのパス
 #   CAPPY_ARCHS           既定 "arm64"（"arm64 x86_64" でユニバーサル）
 #
 # GitHub Actions の中では、zip のパスと SHA-256 を $GITHUB_OUTPUT（zip / sha256、gcappy は app_zip / app_sha256）に書く。
@@ -15,9 +17,30 @@ IDENTITY="${CAPPY_SIGN_IDENTITY:?CAPPY_SIGN_IDENTITY を設定してください
 ARCHS="${CAPPY_ARCHS:-arm64}"
 ADHOC=false
 [[ "$IDENTITY" == "-" ]] && ADHOC=true
-if ! $ADHOC; then
-  NOTARY_PROFILE="${CAPPY_NOTARY_PROFILE:?Developer ID で署名する場合は CAPPY_NOTARY_PROFILE を設定してください}"
+NOTARY_PROFILE="${CAPPY_NOTARY_PROFILE:-}"
+NOTARIZE=false
+if [[ -n "$NOTARY_PROFILE" ]]; then
+  if $ADHOC; then
+    echo "ad-hoc 署名では公証できません（CAPPY_NOTARY_PROFILE を外すか、Developer ID で署名してください）" >&2
+    exit 1
+  fi
+  NOTARIZE=true
+  NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+  [[ -n "${CAPPY_NOTARY_KEYCHAIN:-}" ]] && NOTARY_ARGS+=(--keychain "$CAPPY_NOTARY_KEYCHAIN")
 fi
+
+# 公証に出して結果を待つ。Accepted 以外ならログを出して失敗にする
+notarize() {
+  local result status
+  result="$(xcrun notarytool submit "$1" "${NOTARY_ARGS[@]}" --wait --output-format json)"
+  status="$(jq -r .status <<<"$result")"
+  if [[ "$status" != "Accepted" ]]; then
+    echo "公証に失敗しました（$1: $status）" >&2
+    xcrun notarytool log "$(jq -r .id <<<"$result")" "${NOTARY_ARGS[@]}" >&2 || true
+    exit 1
+  fi
+  echo "公証済み: $1"
+}
 
 cd "$(dirname "$0")/.."
 SOURCE_VERSION="$(sed -n 's/.*current = "\(.*\)"/\1/p' Sources/CappyKit/Core/Version.swift)"
@@ -50,10 +73,9 @@ test "$(dist/cappy --version)" = "$VERSION"
 ZIP="dist/cappy-${VERSION}-macos-$(echo "$ARCHS" | tr ' ' '-').zip"
 ditto -c -k --keepParent dist/cappy "$ZIP"
 
-if ! $ADHOC; then
-  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+if $NOTARIZE; then
   # 単体バイナリには staple できないため、Gatekeeper はオンラインで公証を確認する
-  spctl --assess --type install --verbose dist/cappy || true
+  notarize "$ZIP"
 fi
 
 SHA256="$(shasum -a 256 "$ZIP" | cut -d ' ' -f 1)"
@@ -73,9 +95,10 @@ make_app_zip() {
   rm -rf "$stage"
 }
 make_app_zip
-if ! $ADHOC; then
-  xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+if $NOTARIZE; then
+  notarize "$APP_ZIP"
   xcrun stapler staple dist/gcappy.app
+  spctl --assess --type execute --verbose dist/gcappy.app
   make_app_zip
 fi
 APP_SHA256="$(shasum -a 256 "$APP_ZIP" | cut -d ' ' -f 1)"

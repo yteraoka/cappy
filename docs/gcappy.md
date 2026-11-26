@@ -66,7 +66,6 @@ When recording from gcappy, the "System Audio Recording" and "Microphone" permis
 - The first recording shows the permission dialogs. If they are not allowed, cappy exits with code 2 and gcappy shows a dialog with a button that opens the settings.
 - Where to set them: System Settings > Privacy & Security > Screen & System Audio Recording ("System Audio Recording Only"), and "Microphone"
 - Screenshots also need the "Screen & System Audio Recording" permission.
-- gcappy.app from Homebrew is ad-hoc signed, so macOS may ask for the permissions again after `brew upgrade gcappy`.
 
 ## Notes
 
