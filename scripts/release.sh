@@ -5,7 +5,8 @@
 #   CAPPY_SIGN_IDENTITY   署名に使う ID。"-" なら ad-hoc 署名
 #                         例: "Developer ID Application: Your Name (TEAMID)"
 #   CAPPY_NOTARY_PROFILE  公証に使う、`xcrun notarytool store-credentials` で保存したプロファイル名。
-#                         Developer ID で署名し、これを設定した場合だけ公証する（Homebrew の formula での配布なら不要）
+#                         Developer ID で署名し、これを設定した場合だけ公証する
+#   CAPPY_NOTARY_KEYCHAIN 上のプロファイルを既定以外のキーチェーンに保存した場合、そのキーチェーンのパス
 #   CAPPY_ARCHS           既定 "arm64"（"arm64 x86_64" でユニバーサル）
 #
 # GitHub Actions の中では、zip のパスと SHA-256 を $GITHUB_OUTPUT（zip / sha256、gcappy は app_zip / app_sha256）に書く。
@@ -24,7 +25,22 @@ if [[ -n "$NOTARY_PROFILE" ]]; then
     exit 1
   fi
   NOTARIZE=true
+  NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+  [[ -n "${CAPPY_NOTARY_KEYCHAIN:-}" ]] && NOTARY_ARGS+=(--keychain "$CAPPY_NOTARY_KEYCHAIN")
 fi
+
+# 公証に出して結果を待つ。Accepted 以外ならログを出して失敗にする
+notarize() {
+  local result status
+  result="$(xcrun notarytool submit "$1" "${NOTARY_ARGS[@]}" --wait --output-format json)"
+  status="$(jq -r .status <<<"$result")"
+  if [[ "$status" != "Accepted" ]]; then
+    echo "公証に失敗しました（$1: $status）" >&2
+    xcrun notarytool log "$(jq -r .id <<<"$result")" "${NOTARY_ARGS[@]}" >&2 || true
+    exit 1
+  fi
+  echo "公証済み: $1"
+}
 
 cd "$(dirname "$0")/.."
 SOURCE_VERSION="$(sed -n 's/.*current = "\(.*\)"/\1/p' Sources/CappyKit/Core/Version.swift)"
@@ -58,9 +74,8 @@ ZIP="dist/cappy-${VERSION}-macos-$(echo "$ARCHS" | tr ' ' '-').zip"
 ditto -c -k --keepParent dist/cappy "$ZIP"
 
 if $NOTARIZE; then
-  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
   # 単体バイナリには staple できないため、Gatekeeper はオンラインで公証を確認する
-  spctl --assess --type install --verbose dist/cappy || true
+  notarize "$ZIP"
 fi
 
 SHA256="$(shasum -a 256 "$ZIP" | cut -d ' ' -f 1)"
@@ -81,8 +96,9 @@ make_app_zip() {
 }
 make_app_zip
 if $NOTARIZE; then
-  xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  notarize "$APP_ZIP"
   xcrun stapler staple dist/gcappy.app
+  spctl --assess --type execute --verbose dist/gcappy.app
   make_app_zip
 fi
 APP_SHA256="$(shasum -a 256 "$APP_ZIP" | cut -d ' ' -f 1)"

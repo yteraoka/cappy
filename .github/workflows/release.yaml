@@ -24,17 +24,15 @@ jobs:
       - name: Test
         run: swift test
 
-      # Developer ID Application の証明書を一時的なキーチェーンに入れる。
-      # シークレットを参照できない PR（fork からの PR など）では何もせず、次のステップで ad-hoc 署名にする
+      # Developer ID Application の証明書と公証用の App Store Connect API キーを一時的なキーチェーンに入れる。
+      # シークレットを参照できない PR（fork からの PR など）では何もせず、次のステップで ad-hoc 署名にする（公証もしない）
       - name: Import signing certificate
         env:
           P12: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }} # p12 にパスワードを付けていなければ未設定（空文字）でよい
-          # 公証する場合はこれらのシークレットを設定し、下のコメントアウトを外して
-          # Build release zip に CAPPY_NOTARY_PROFILE: cappy-notary を渡す
-          #NOTARY_KEY: ${{ secrets.NOTARY_KEY_BASE64 }}
-          #NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
-          #NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
           if [[ -z "${P12}" ]]; then
             echo "::notice::MACOS_CERT_P12_BASE64 を参照できないため、証明書の取り込みを省略します"
@@ -53,11 +51,17 @@ jobs:
           keychains=()
           while IFS= read -r k; do keychains+=("${k}"); done < <(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')
           security list-keychains -d user -s "${kc}" "${keychains[@]}"
-          #echo "${NOTARY_KEY}" | base64 -d > "${RUNNER_TEMP}/notary.p8"
-          #xcrun notarytool store-credentials cappy-notary \
-          #  --key "${RUNNER_TEMP}/notary.p8" --key-id "${NOTARY_KEY_ID}" --issuer "${NOTARY_ISSUER_ID}" --keychain "${kc}"
+          echo "${NOTARY_KEY}" | base64 -d > "${RUNNER_TEMP}/notary.p8"
+          xcrun notarytool store-credentials cappy-notary \
+            --key "${RUNNER_TEMP}/notary.p8" --key-id "${NOTARY_KEY_ID}" --issuer "${NOTARY_ISSUER_ID}" --keychain "${kc}"
+          rm -f "${RUNNER_TEMP}/notary.p8"
+          # 次のステップの scripts/release.sh に、公証に使うプロファイルとキーチェーンを渡す
+          {
+            echo "CAPPY_NOTARY_PROFILE=cappy-notary"
+            echo "CAPPY_NOTARY_KEYCHAIN=${kc}"
+          } >> "${GITHUB_ENV}"
 
-      # Developer ID で署名した cappy と gcappy.app の zip を作る（Homebrew の formula で配布し quarantine 属性が付かないため、公証はしない）。
+      # Developer ID で署名・公証した cappy と gcappy.app の zip を作る（gcappy.app には公証のチケットを staple する）。
       # シークレットを参照できない PR では ad-hoc 署名でビルドだけ確かめる
       - name: Build release zip
         id: build
@@ -69,8 +73,8 @@ jobs:
             echo "::error::タグ ${GITHUB_REF_NAME} と Version.swift の ${version} が一致しません"
             exit 1
           fi
-          if [[ "${GITHUB_REF}" == refs/tags/* && "${CAPPY_SIGN_IDENTITY}" == "-" ]]; then
-            echo "::error::リリースには MACOS_SIGN_IDENTITY（Developer ID Application の署名 ID）が必要です"
+          if [[ "${GITHUB_REF}" == refs/tags/* && ( "${CAPPY_SIGN_IDENTITY}" == "-" || -z "${CAPPY_NOTARY_PROFILE:-}" ) ]]; then
+            echo "::error::リリースには Developer ID での署名と公証が必要です（シークレットを確認してください）"
             exit 1
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"

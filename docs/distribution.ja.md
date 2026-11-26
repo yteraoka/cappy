@@ -10,8 +10,8 @@ brew install yteraoka/cask/gcappy    # メニューバー版
 ```
 
 - ビルド済みのバイナリ（Apple Silicon、macOS 15 以降）を GitHub Releases から入れます。bash / zsh の補完スクリプトも配置されます。
-- バイナリは Developer ID で署名しています（Hardened Runtime、マイク入力の entitlement 付き）。公証はしていませんが、formula で入れたファイルには quarantine 属性が付かないため、そのまま実行できます。録音とマイクの許可は実行元のターミナルアプリに付きます。
-- gcappy は `gcappy.app`（cappy を `Contents/MacOS/cappy` に同梱）を `$(brew --prefix gcappy)` に入れ、`open` で起動する `gcappy` コマンドを配置します。cask ではなく formula にしているのは、公証していないアプリに quarantine 属性を付けないためです。録音とマイクの許可は gcappy に付きます。
+- バイナリは Developer ID で署名し、公証しています（Hardened Runtime、マイク入力の entitlement 付き）。録音とマイクの許可は実行元のターミナルアプリに付きます。
+- gcappy は `gcappy.app`（cappy を `Contents/MacOS/cappy` に同梱）を `$(brew --prefix gcappy)` に入れ、`open` で起動する `gcappy` コマンドを配置します。録音とマイクの許可は gcappy に付きます。
 
 ## リリースの流れ
 
@@ -19,9 +19,9 @@ brew install yteraoka/cask/gcappy    # メニューバー版
 2. リリース用の PR をマージすると、tagpr が `vX.Y.Z` のタグと GitHub Release を作ります。
 3. タグの push で `.github/workflows/release.yaml`（macOS の runner）が動きます。
    1. テストを実行する
-   2. `scripts/release.sh` で Developer ID で署名した `cappy-X.Y.Z-macos-arm64.zip` と `gcappy-X.Y.Z-macos-arm64.zip`（`scripts/build-app.sh` で組み立てた gcappy.app）を作り、Release に添付する
+   2. `scripts/release.sh` で Developer ID で署名・公証した `cappy-X.Y.Z-macos-arm64.zip` と `gcappy-X.Y.Z-macos-arm64.zip`（`scripts/build-app.sh` で組み立てた gcappy.app）を作り、Release に添付する
    3. `scripts/formula.sh` で `packaging/cappy.rb` / `packaging/gcappy.rb` の url と sha256 を書き換え、tap の `Formula/cappy.rb` / `Formula/gcappy.rb` を更新する
-4. PR では、同じワークフローでテストとリリース用のビルドだけを行います。シークレットを参照できない PR（fork からの PR など）では ad-hoc 署名でビルドします。
+4. PR では、同じワークフローでテストとリリース用のビルドだけを行います。シークレットを参照できる PR では公証まで行い、参照できない PR（fork からの PR など）では ad-hoc 署名でビルドします（公証はしません）。
 
 必要な設定（cappy リポジトリの Settings > Secrets and variables > Actions）:
 
@@ -34,6 +34,9 @@ brew install yteraoka/cask/gcappy    # メニューバー版
 | シークレット | `MACOS_CERT_P12_BASE64` | Developer ID Application の証明書と秘密鍵を書き出した .p12 を base64 にしたもの |
 | シークレット | `MACOS_CERT_PASSWORD` | .p12 のパスワード（付けていなければ不要） |
 | シークレット | `MACOS_SIGN_IDENTITY` | 署名 ID（例: `Developer ID Application: Your Name (TEAMID)`） |
+| シークレット | `NOTARY_KEY_BASE64` | 公証に使う App Store Connect API キー（.p8）を base64 にしたもの |
+| シークレット | `NOTARY_KEY_ID` | 同じ API キーの Key ID |
+| シークレット | `NOTARY_ISSUER_ID` | 同じ API キーの Issuer ID |
 
 どちらの App も cappy にインストールし、`HOMEBREW_APP_ID` の App は `homebrew-cask` にもインストールしておきます。
 
@@ -47,7 +50,7 @@ make app                               # dist/gcappy.app だけを作る
 
 # Developer ID で署名する場合
 export CAPPY_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
-# 公証もする場合（Homebrew 以外で配る場合）
+# 公証もする場合
 export CAPPY_NOTARY_PROFILE=cappy-notary   # xcrun notarytool store-credentials で作成
 make release
 ```
