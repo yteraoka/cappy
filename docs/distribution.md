@@ -54,3 +54,57 @@ export CAPPY_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
 export CAPPY_NOTARY_PROFILE=cappy-notary   # created with xcrun notarytool store-credentials
 make release
 ```
+
+## Preparing a Developer ID certificate and a notarization API key
+
+When signed with Developer ID, the designated requirement (DR) of the signature is based on the bundle ID and the team ID. macOS privacy permissions (system audio recording, microphone, ...) are therefore kept across version upgrades. With ad-hoc signing, the DR is the hash of the binary, so the permissions have to be granted again after every build.
+
+### Developer ID Application certificate
+
+Only the Account Holder of the Apple Developer Program can create Developer ID certificates. A certificate is valid for 5 years and the number per team is limited, so keep the certificate together with its private key.
+
+From Xcode:
+
+1. Add your Apple ID in Xcode > Settings… > Accounts.
+2. Select the team, open Manage Certificates…, and choose Developer ID Application from the + at the bottom left. The private key and the certificate are added to the login keychain.
+
+From the web (developer.apple.com):
+
+1. In Keychain Access (`open -a "Keychain Access"`), choose Keychain Access > Certificate Assistant > Request a Certificate From a Certificate Authority…. Enter your email address and a common name, leave the CA email address empty, and choose "Saved to disk" to save the CSR. The private key is created in the login keychain of this Mac.
+2. In [Certificates](https://developer.apple.com/account/resources/certificates/list), click +, choose Developer ID Application, and choose the G2 Sub-CA profile type. Upload the CSR, and double-click the downloaded `.cer` on the Mac that created the CSR.
+
+Check:
+
+```bash
+security find-identity -v -p codesigning
+```
+
+You are done when `"Developer ID Application: Your Name (TEAMID)"` is listed. Set this string as `CAPPY_SIGN_IDENTITY`. If it is not listed, or the certificate shows as not trusted, import the Developer ID - G2 intermediate certificate from [Apple PKI](https://www.apple.com/certificateauthority/).
+
+After signing, `codesign -d -r- dist/gcappy.app` shows the DR. If it contains `certificate leaf[subject.OU] = "TEAMID"`, the permissions are kept after upgrades.
+
+To use it on another Mac or in CI, check in "My Certificates" of Keychain Access that the private key is under the certificate, then right-click > Export… and export it as `.p12` (Personal Information Exchange) with a password.
+
+Errors when creating it:
+
+| Error | What to do |
+| --- | --- |
+| `Unable to process request - PLA Update available` | The Program License Agreement has been updated. Sign in to [developer.apple.com/account](https://developer.apple.com/account) and accept the agreement from the banner. If App Store Connect > Business has agreements to accept, accept them too. |
+| `This operation can only be performed by the Account Holder.` | Your role in the selected team is not Account Holder. Check the role in Membership details. Xcode may show an Account Holder as Admin and fail; in that case remove and re-add the account in Xcode, or create the certificate on the web. |
+
+### Notarization API key
+
+Notarization uses an App Store Connect API key.
+
+1. In [App Store Connect > Users and Access > Integrations](https://appstoreconnect.apple.com/access/integrations/api), click + under Team Keys and create a key with Developer access.
+2. Download `AuthKey_<Key ID>.p8`. It can be downloaded only once. Also note the Key ID and the Issuer ID shown on the page.
+3. Store it in the keychain as a notarytool profile:
+
+   ```bash
+   xcrun notarytool store-credentials cappy-notary \
+     --key AuthKey_XXXXXXXXXX.p8 --key-id XXXXXXXXXX --issuer xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+   ```
+
+4. Running `make release` with `CAPPY_NOTARY_PROFILE=cappy-notary` signs and then notarizes (see "Local build").
+
+The `.p12` and `.p8` files are secrets. Keep them out of the repository, for example in a password manager. If one leaks, revoke the certificate on developer.apple.com and revoke the API key in App Store Connect.
