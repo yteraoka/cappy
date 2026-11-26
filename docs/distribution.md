@@ -10,8 +10,8 @@ brew install yteraoka/cask/gcappy    # menu bar app
 ```
 
 - Installs a prebuilt binary (Apple Silicon, macOS 15 or later) from GitHub Releases, together with the bash / zsh completion scripts.
-- The binary is ad-hoc signed (Hardened Runtime, with the microphone input entitlement). Files installed by a formula get no quarantine attribute, so it runs without notarization. The recording and microphone permissions are granted to the terminal app you run cappy from.
-- gcappy installs `gcappy.app` (with cappy bundled as `Contents/MacOS/cappy`) into `$(brew --prefix gcappy)`, and a `gcappy` command that starts it with `open`. It is a formula rather than a cask so that the ad-hoc signed app gets no quarantine attribute. The recording and microphone permissions are granted to gcappy.
+- The binary is signed with Developer ID (Hardened Runtime, with the microphone input entitlement). It is not notarized, but files installed by a formula get no quarantine attribute, so it runs as is. The recording and microphone permissions are granted to the terminal app you run cappy from.
+- gcappy installs `gcappy.app` (with cappy bundled as `Contents/MacOS/cappy`) into `$(brew --prefix gcappy)`, and a `gcappy` command that starts it with `open`. It is a formula rather than a cask so that the app, which is not notarized, gets no quarantine attribute. The recording and microphone permissions are granted to gcappy.
 
 ## Release flow
 
@@ -19,9 +19,9 @@ brew install yteraoka/cask/gcappy    # menu bar app
 2. When the release PR is merged, tagpr creates the `vX.Y.Z` tag and a GitHub Release.
 3. Pushing the tag runs `.github/workflows/release.yaml` (macOS runner):
    1. Runs the tests
-   2. Builds the ad-hoc signed `cappy-X.Y.Z-macos-arm64.zip` and `gcappy-X.Y.Z-macos-arm64.zip` (gcappy.app assembled by `scripts/build-app.sh`) with `scripts/release.sh` and attaches them to the Release
+   2. Builds the Developer ID signed `cappy-X.Y.Z-macos-arm64.zip` and `gcappy-X.Y.Z-macos-arm64.zip` (gcappy.app assembled by `scripts/build-app.sh`) with `scripts/release.sh` and attaches them to the Release
    3. Rewrites the url and sha256 of `packaging/cappy.rb` / `packaging/gcappy.rb` with `scripts/formula.sh` and updates `Formula/cappy.rb` / `Formula/gcappy.rb` in the tap
-4. For PRs, the same workflow only runs the tests and the release build.
+4. For PRs, the same workflow only runs the tests and the release build. PRs that cannot read the secrets (such as PRs from forks) build with ad-hoc signing.
 
 Required settings (Settings > Secrets and variables > Actions of the cappy repository):
 
@@ -31,6 +31,9 @@ Required settings (Settings > Secrets and variables > Actions of the cappy repos
 | Secret | `TAGPR_APP_PRIVATE_KEY` | Private key of the same App |
 | Variable | `HOMEBREW_APP_ID` | Client ID of the GitHub App used to create the Release and update the tap (Contents: Read and write) |
 | Secret | `HOMEBREW_APP_PRIVATE_KEY` | Private key of the same App |
+| Secret | `MACOS_CERT_P12_BASE64` | Base64 of the .p12 exported with the Developer ID Application certificate and its private key |
+| Secret | `MACOS_CERT_PASSWORD` | Password of the .p12 (not needed if it has none) |
+| Secret | `MACOS_SIGN_IDENTITY` | Signing identity (e.g. `Developer ID Application: Your Name (TEAMID)`) |
 
 Install both Apps on cappy, and the `HOMEBREW_APP_ID` App also on `homebrew-cask`.
 
@@ -42,8 +45,9 @@ scripts/formula.sh <version> <sha256>  # prints the formula for the tap
 scripts/formula.sh <version> <sha256> gcappy
 make app                               # builds only dist/gcappy.app
 
-# To sign with Developer ID and notarize (for distribution outside Homebrew)
+# To sign with Developer ID
 export CAPPY_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+# To notarize as well (for distribution outside Homebrew)
 export CAPPY_NOTARY_PROFILE=cappy-notary   # created with xcrun notarytool store-credentials
 make release
 ```

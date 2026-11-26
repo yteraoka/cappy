@@ -38,7 +38,7 @@ install-app: app
 	rm -rf $(HOME)/Applications/gcappy.app
 	ditto dist/gcappy.app $(HOME)/Applications/gcappy.app
 
-# Developer ID で署名・公証した配布物を dist/ に作る（scripts/release.sh を参照）
+# 配布用の zip を dist/ に作る（署名と公証は scripts/release.sh を参照）
 release:
 	scripts/release.sh $(VERSION)
 

@@ -2,9 +2,10 @@
 # 配布用の zip を dist/ に作る（CLI の cappy と、メニューバー版の gcappy.app）。
 #
 # 環境変数:
-#   CAPPY_SIGN_IDENTITY   署名に使う ID。"-" なら ad-hoc 署名で、公証は行わない（Homebrew での配布向け）。
-#                         例: "Developer ID Application: Your Name (TEAMID)"（この場合は公証まで行う）
-#   CAPPY_NOTARY_PROFILE  Developer ID で署名する場合に必要。`xcrun notarytool store-credentials` で保存したプロファイル名
+#   CAPPY_SIGN_IDENTITY   署名に使う ID。"-" なら ad-hoc 署名
+#                         例: "Developer ID Application: Your Name (TEAMID)"
+#   CAPPY_NOTARY_PROFILE  公証に使う、`xcrun notarytool store-credentials` で保存したプロファイル名。
+#                         Developer ID で署名し、これを設定した場合だけ公証する（Homebrew の formula での配布なら不要）
 #   CAPPY_ARCHS           既定 "arm64"（"arm64 x86_64" でユニバーサル）
 #
 # GitHub Actions の中では、zip のパスと SHA-256 を $GITHUB_OUTPUT（zip / sha256、gcappy は app_zip / app_sha256）に書く。
@@ -15,8 +16,14 @@ IDENTITY="${CAPPY_SIGN_IDENTITY:?CAPPY_SIGN_IDENTITY を設定してください
 ARCHS="${CAPPY_ARCHS:-arm64}"
 ADHOC=false
 [[ "$IDENTITY" == "-" ]] && ADHOC=true
-if ! $ADHOC; then
-  NOTARY_PROFILE="${CAPPY_NOTARY_PROFILE:?Developer ID で署名する場合は CAPPY_NOTARY_PROFILE を設定してください}"
+NOTARY_PROFILE="${CAPPY_NOTARY_PROFILE:-}"
+NOTARIZE=false
+if [[ -n "$NOTARY_PROFILE" ]]; then
+  if $ADHOC; then
+    echo "ad-hoc 署名では公証できません（CAPPY_NOTARY_PROFILE を外すか、Developer ID で署名してください）" >&2
+    exit 1
+  fi
+  NOTARIZE=true
 fi
 
 cd "$(dirname "$0")/.."
@@ -50,7 +57,7 @@ test "$(dist/cappy --version)" = "$VERSION"
 ZIP="dist/cappy-${VERSION}-macos-$(echo "$ARCHS" | tr ' ' '-').zip"
 ditto -c -k --keepParent dist/cappy "$ZIP"
 
-if ! $ADHOC; then
+if $NOTARIZE; then
   xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
   # 単体バイナリには staple できないため、Gatekeeper はオンラインで公証を確認する
   spctl --assess --type install --verbose dist/cappy || true
@@ -73,7 +80,7 @@ make_app_zip() {
   rm -rf "$stage"
 }
 make_app_zip
-if ! $ADHOC; then
+if $NOTARIZE; then
   xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple dist/gcappy.app
   make_app_zip
